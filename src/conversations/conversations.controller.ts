@@ -27,7 +27,7 @@ export class ConversationsController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.conversationsService.findOne(+id);
+    return this.conversationsService.findOne(id);
   }
 
   @Patch(':id')
@@ -35,11 +35,11 @@ export class ConversationsController {
     @Param('id') id: string,
     @Body() updateConversationDto: UpdateConversationDto,
   ) {
-    return this.conversationsService.update(+id, updateConversationDto);
+    return this.conversationsService.update(id, updateConversationDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.conversationsService.remove(+id);
+    return this.conversationsService.remove(id);
   }
 }

@@ -12,15 +12,15 @@ export class StaffService {
     return `This action returns all staff`;
   }
 
-  findOne(id: number) {
+  findOne(id: string) {
     return `This action returns a #${id} staff`;
   }
 
-  update(id: number, updateStaffDto: UpdateStaffDto) {
+  update(id: string, updateStaffDto: UpdateStaffDto) {
     return `This action updates a #${id} staff`;
   }
 
-  remove(id: number) {
+  remove(id: string) {
     return `This action removes a #${id} staff`;
   }
 }

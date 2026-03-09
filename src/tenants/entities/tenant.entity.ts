@@ -1,1 +1,53 @@
-export class Tenant {}
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  UpdateDateColumn,
+  Index,
+} from 'typeorm';
+
+export enum BusinessType {
+  HAIR_SALON = 'hair_salon',
+  BARBER_SHOP = 'barber_shop',
+}
+
+@Index(['whatsappPhoneNumber'], { unique: true })
+@Entity('tenants')
+export class Tenant {
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
+
+  @Column()
+  name: string;
+
+  @Column({
+    type: 'enum',
+    enum: BusinessType,
+  })
+  businessType: BusinessType;
+
+  @Column()
+  whatsappPhoneNumber: string;
+
+  @Column()
+  whatsappPhoneId: string;
+
+  @Column()
+  timezone: string;
+
+  @Column()
+  googleRefreshToken: string;
+
+  @Column({ nullable: true })
+  googleAccessToken?: string;
+
+  @Column({ nullable: true })
+  googleCalendarId?: string;
+
+  @CreateDateColumn()
+  createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+}

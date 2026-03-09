@@ -12,15 +12,15 @@ export class ClientsService {
     return `This action returns all clients`;
   }
 
-  findOne(id: number) {
+  findOne(id: string) {
     return `This action returns a #${id} client`;
   }
 
-  update(id: number, updateClientDto: UpdateClientDto) {
+  update(id: string, updateClientDto: UpdateClientDto) {
     return `This action updates a #${id} client`;
   }
 
-  remove(id: number) {
+  remove(id: string) {
     return `This action removes a #${id} client`;
   }
 }
