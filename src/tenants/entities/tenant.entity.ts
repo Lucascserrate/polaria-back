@@ -7,11 +7,6 @@ import {
   Index,
 } from 'typeorm';
 
-export enum BusinessType {
-  HAIR_SALON = 'hair_salon',
-  BARBER_SHOP = 'barber_shop',
-}
-
 @Index(['whatsappPhoneNumber'], { unique: true })
 @Entity('tenants')
 export class Tenant {
@@ -21,11 +16,8 @@ export class Tenant {
   @Column()
   name: string;
 
-  @Column({
-    type: 'enum',
-    enum: BusinessType,
-  })
-  businessType: BusinessType;
+  @Column({ nullable: true })
+  businessType: string;
 
   @Column()
   whatsappPhoneNumber: string;

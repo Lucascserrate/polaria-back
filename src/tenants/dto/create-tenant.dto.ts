@@ -1,8 +1,6 @@
-import { BusinessType } from '../entities/tenant.entity';
-
 export class CreateTenantDto {
   name: string;
-  businessType: BusinessType;
+  businessType: string;
   whatsappPhoneNumber: string;
   whatsappPhoneId: string;
   timezone: string;
