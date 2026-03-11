@@ -2,9 +2,6 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-
 import { TenantsModule } from './tenants/tenants.module';
 import { StaffModule } from './staff/staff.module';
 import { ServicesModule } from './services/services.module';
@@ -12,6 +9,7 @@ import { AppointmentsModule } from './appointments/appointments.module';
 import { ClientsModule } from './clients/clients.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { BusinessHoursModule } from './business_hours/business_hours.module';
+import { AIModule } from './ai/ai.module';
 
 @Module({
   imports: [
@@ -40,8 +38,9 @@ import { BusinessHoursModule } from './business_hours/business_hours.module';
     ClientsModule,
     ConversationsModule,
     BusinessHoursModule,
+    AIModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  controllers: [],
+  providers: [],
 })
 export class AppModule {}
