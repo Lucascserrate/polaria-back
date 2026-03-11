@@ -1,26 +1,38 @@
 import { Injectable } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+
+import { Staff } from './entities/staff.entity';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 
 @Injectable()
 export class StaffService {
+  constructor(
+    @InjectRepository(Staff)
+    private staffRepository: Repository<Staff>,
+  ) {}
+
   create(createStaffDto: CreateStaffDto) {
-    return 'This action adds a new staff';
+    const staff = this.staffRepository.create(createStaffDto);
+    return this.staffRepository.save(staff);
   }
 
   findAll() {
-    return `This action returns all staff`;
+    return this.staffRepository.find();
   }
 
   findOne(id: string) {
-    return `This action returns a #${id} staff`;
+    return this.staffRepository.findOneBy({ id });
   }
 
-  update(id: string, updateStaffDto: UpdateStaffDto) {
-    return `This action updates a #${id} staff`;
+  async update(id: string, updateStaffDto: UpdateStaffDto) {
+    await this.staffRepository.update(id, updateStaffDto);
+    return this.findOne(id);
   }
 
-  remove(id: string) {
-    return `This action removes a #${id} staff`;
+  async remove(id: string) {
+    await this.staffRepository.delete(id);
+    return { deleted: true };
   }
 }
