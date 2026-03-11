@@ -1,4 +1,5 @@
 import { Controller, Post, Body } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
 import { AIService } from './ai.service';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -9,6 +10,7 @@ export class AiTestDto {
   message: string;
 }
 
+@ApiTags('ai')
 @Controller('ai')
 export class AIController {
   constructor(private readonly aiService: AIService) {}
