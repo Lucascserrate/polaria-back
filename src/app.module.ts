@@ -10,25 +10,20 @@ import { ClientsModule } from './clients/clients.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { BusinessHoursModule } from './business_hours/business_hours.module';
 import { AIModule } from './ai/ai.module';
+import { dbConfig } from './config/data-source';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
+      load: [dbConfig],
     }),
 
     TypeOrmModule.forRootAsync({
+      imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'mysql',
-        host: config.get<string>('DB_HOST'),
-        port: config.get<number>('DB_PORT'),
-        username: config.get<string>('DB_USER'),
-        password: config.get<string>('DB_PASSWORD'),
-        database: config.get<string>('DB_NAME'),
-        autoLoadEntities: true,
-        synchronize: true,
-      }),
+      useFactory: (configService: ConfigService) =>
+        configService.getOrThrow('database'),
     }),
 
     TenantsModule,
