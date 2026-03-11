@@ -2,10 +2,15 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
   Index,
 } from 'typeorm';
+import { Tenant } from '../../tenants/entities/tenant.entity';
+import { Staff } from '../../staff/entities/staff.entity';
+import { Client } from '../../clients/entities/client.entity';
+import { Service } from '../../services/entities/service.entity';
 
 export enum AppointmentStatus {
   PENDING = 'pending',
@@ -22,16 +27,24 @@ export class Appointment {
   id: string;
 
   @Column()
-  tenantId: number;
+  tenantId: string;
+  @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
+  tenant: Tenant;
 
   @Column()
-  staffId: number;
+  staffId: string;
+  @ManyToOne(() => Staff, (staff) => staff.id, { onDelete: 'CASCADE' })
+  staff: Staff;
 
   @Column()
-  clientId: number;
+  clientId: string;
+  @ManyToOne(() => Client, (client) => client.id, { onDelete: 'CASCADE' })
+  client: Client;
 
   @Column()
-  serviceId: number;
+  serviceId: string;
+  @ManyToOne(() => Service, (service) => service.id, { onDelete: 'CASCADE' })
+  service: Service;
 
   @Column({ type: 'datetime' })
   startTime: Date;
