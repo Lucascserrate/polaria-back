@@ -27,7 +27,7 @@ export class BusinessHoursController {
 
   @Get(':id')
   findOne(@Param('id') id: string) {
-    return this.businessHoursService.findOne(+id);
+    return this.businessHoursService.findOne(id);
   }
 
   @Patch(':id')
@@ -35,11 +35,11 @@ export class BusinessHoursController {
     @Param('id') id: string,
     @Body() updateBusinessHourDto: UpdateBusinessHourDto,
   ) {
-    return this.businessHoursService.update(+id, updateBusinessHourDto);
+    return this.businessHoursService.update(id, updateBusinessHourDto);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string) {
-    return this.businessHoursService.remove(+id);
+    return this.businessHoursService.remove(id);
   }
 }
