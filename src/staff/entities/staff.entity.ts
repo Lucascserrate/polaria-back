@@ -9,12 +9,12 @@ import {
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
+@Index(['tenantId', 'email'], { unique: true })
 @Entity('staff')
 export class Staff {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
   @Column()
   tenantId: string;
 

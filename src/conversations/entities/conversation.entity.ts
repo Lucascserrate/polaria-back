@@ -20,19 +20,18 @@ export enum ConversationState {
   BOOKING_COMPLETE = 'BOOKING_COMPLETE',
 }
 
+@Index(['tenantId', 'clientId'])
 @Entity('conversations')
 export class Conversation {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
   @Column()
   tenantId: string;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
   tenant: Tenant;
 
-  @Index()
   @Column()
   clientId: string;
 

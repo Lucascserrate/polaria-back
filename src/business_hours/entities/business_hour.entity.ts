@@ -9,12 +9,12 @@ import {
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
+@Index(['tenantId', 'dayOfWeek'])
 @Entity('business_hours')
 export class BusinessHour {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index(['tenantId', 'dayOfWeek'])
   @Column()
   tenantId: string;
 

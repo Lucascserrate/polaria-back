@@ -9,19 +9,18 @@ import {
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
+@Index(['tenantId', 'phone'], { unique: true })
 @Entity('clients')
 export class Client {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
   @Column()
   tenantId: string;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
   tenant: Tenant;
 
-  @Index()
   @Column()
   phone: string;
 
