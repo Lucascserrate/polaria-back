@@ -10,6 +10,7 @@ import { ClientsModule } from './clients/clients.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { BusinessHoursModule } from './business_hours/business_hours.module';
 import { AIModule } from './ai/ai.module';
+import { MessagesModule } from './messages/messages.module';
 import { dbConfig } from './config/data-source';
 
 @Module({
@@ -32,6 +33,7 @@ import { dbConfig } from './config/data-source';
     AppointmentsModule,
     ClientsModule,
     ConversationsModule,
+    MessagesModule,
     BusinessHoursModule,
     AIModule,
   ],
