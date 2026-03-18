@@ -5,11 +5,9 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
-  Index,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
-@Index(['tenantId', 'email'], { unique: true })
 @Entity('staff')
 export class Staff {
   @PrimaryGeneratedColumn('uuid')

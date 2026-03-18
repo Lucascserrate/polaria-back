@@ -5,7 +5,6 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
-  Index,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
@@ -14,7 +13,6 @@ export class Service {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
-  @Index()
   @Column()
   tenantId: string;
 
