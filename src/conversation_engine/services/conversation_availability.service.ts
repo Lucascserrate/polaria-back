@@ -52,46 +52,73 @@ export class ConversationAvailabilityService {
     limit: number;
     stepMinutes?: number;
     timezone?: string;
+    maxDaysAhead?: number;
   }) {
     const step = input.stepMinutes ?? 30;
-    const dayHours = await this.getBusinessHoursForDate(
-      input.tenantId,
-      input.start,
-      input.timezone,
-    );
-    if (!dayHours.length) {
-      return [];
-    }
+    const maxDaysAhead = input.maxDaysAhead ?? 7;
+    const now = new Date();
+    const requestedKey = getZonedDateKey(input.start, input.timezone);
 
-    const slots: Date[] = [];
-    for (const hours of dayHours) {
-      const intervalStart = combineDateAndTime(input.start, hours.startTime);
-      const intervalEnd = combineDateAndTime(input.start, hours.endTime);
-      let cursor = new Date(intervalStart);
-      while (
-        cursor.getTime() + input.durationMinutes * 60 * 1000 <=
-        intervalEnd.getTime()
-      ) {
-        slots.push(new Date(cursor));
-        cursor = addMinutes(cursor, step);
-      }
-    }
-
-    const available: Date[] = [];
-    for (const slot of slots) {
-      const end = addMinutes(slot, input.durationMinutes);
-      const ok = await this.isSlotAvailable(
+    for (let offset = 0; offset <= maxDaysAhead; offset += 1) {
+      const day = addDays(input.start, offset);
+      const dayHours = await this.getBusinessHoursForDate(
         input.tenantId,
-        slot,
-        end,
+        day,
         input.timezone,
       );
-      if (ok) {
-        available.push(slot);
+      if (!dayHours.length) {
+        continue;
+      }
+
+      const slots: Date[] = [];
+      for (const hours of dayHours) {
+        const intervalStart = combineDateAndTime(
+          day,
+          hours.startTime,
+          input.timezone,
+        );
+        const intervalEnd = combineDateAndTime(
+          day,
+          hours.endTime,
+          input.timezone,
+        );
+        let cursor = new Date(intervalStart);
+        while (
+          cursor.getTime() + input.durationMinutes * 60 * 1000 <=
+          intervalEnd.getTime()
+        ) {
+          slots.push(new Date(cursor));
+          cursor = addMinutes(cursor, step);
+        }
+      }
+
+      const available: Date[] = [];
+      for (const slot of slots) {
+        if (isPastSlot(slot, now, input.timezone)) {
+          continue;
+        }
+        const end = addMinutes(slot, input.durationMinutes);
+        const ok = await this.isSlotAvailable(
+          input.tenantId,
+          slot,
+          end,
+          input.timezone,
+        );
+        if (ok) {
+          available.push(slot);
+        }
+      }
+      if (available.length) {
+        const filtered = available.filter(
+          (slot) =>
+            slot.getTime() !== input.start.getTime() ||
+            getZonedDateKey(slot, input.timezone) !== requestedKey,
+        );
+        return pickClosestTimes(filtered, input.start, input.limit);
       }
     }
 
-    return pickClosestTimes(available, input.start, input.limit);
+    return [];
   }
 
   private async isWithinBusinessHours(
@@ -146,16 +173,25 @@ function getTimeMinutes(date: Date, timezone?: string) {
   return parts.hour * 60 + parts.minute;
 }
 
-function combineDateAndTime(date: Date, time: string) {
+function combineDateAndTime(date: Date, time: string, timezone?: string) {
   const [hour, minute, second] = time.split(':').map((v) => Number(v));
-  const combined = new Date(date);
-  combined.setHours(hour || 0, minute || 0, second || 0, 0);
-  return combined;
+  const dateKey = getZonedDateKey(date, timezone);
+  const offset = timezone ? getTimeZoneOffset(date, timezone) : null;
+  const iso = `${dateKey}T${String(hour || 0).padStart(2, '0')}:${String(
+    minute || 0,
+  ).padStart(2, '0')}:${String(second || 0).padStart(2, '0')}${offset ?? ''}`;
+  return new Date(iso);
 }
 
 function addMinutes(date: Date, minutes: number) {
   const result = new Date(date);
   result.setMinutes(result.getMinutes() + minutes);
+  return result;
+}
+
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
   return result;
 }
 
@@ -175,6 +211,13 @@ function formatTodayInZone(timezone?: string) {
   if (!timezone) {
     return date.toISOString().slice(0, 10);
   }
+  return getZonedDateKey(date, timezone);
+}
+
+function getZonedDateKey(date: Date, timezone?: string) {
+  if (!timezone) {
+    return date.toISOString().slice(0, 10);
+  }
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone,
     year: 'numeric',
@@ -185,6 +228,39 @@ function formatTodayInZone(timezone?: string) {
   const month = parts.find((p) => p.type === 'month')?.value || '01';
   const day = parts.find((p) => p.type === 'day')?.value || '01';
   return `${year}-${month}-${day}`;
+}
+
+function getTimeZoneOffset(date: Date, timezone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'shortOffset',
+    }).formatToParts(date);
+    const tz = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (!tz) {
+      return null;
+    }
+    const match = tz.match(/GMT([+-]\d{1,2})(?::?(\d{2}))?/);
+    if (!match) {
+      return null;
+    }
+    const hours = match[1].padStart(3, '0');
+    const minutes = match[2] ?? '00';
+    return `${hours}:${minutes}`;
+  } catch {
+    return null;
+  }
+}
+
+function isPastSlot(slot: Date, now: Date, timezone?: string) {
+  const slotKey = getZonedDateKey(slot, timezone);
+  const nowKey = getZonedDateKey(now, timezone);
+  if (slotKey !== nowKey) {
+    return false;
+  }
+  const slotMinutes = getTimeMinutes(slot, timezone);
+  const nowMinutes = getTimeMinutes(now, timezone);
+  return slotMinutes <= nowMinutes;
 }
 
 function getZonedDayOfWeek(date: Date, timezone?: string) {
