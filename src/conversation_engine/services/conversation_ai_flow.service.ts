@@ -18,6 +18,7 @@ export class ConversationAIFlowService {
     tenantId: string;
     timezone?: string;
     durationMinutes?: number;
+    stepMinutes?: number;
   }) {
     const response = await this.aiService.chat(input.promptMessages, {
       response_format: {
@@ -63,12 +64,14 @@ export class ConversationAIFlowService {
               start: requested,
               durationMinutes,
               limit: 3,
+              stepMinutes: input.stepMinutes ?? durationMinutes,
               timezone: input.timezone,
             });
 
         const formattedAlternatives = alternatives.map((d) =>
           formatTime(d, input.timezone),
         );
+        console.log('AI_ALTERNATIVES:', formattedAlternatives);
         const finalReply = await this.buildAvailabilityReply({
           userMessage: findLastUserMessage(input.promptMessages),
           requestedDatetime: parsed.datetime,

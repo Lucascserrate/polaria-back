@@ -55,6 +55,15 @@ export class ConversationStateService {
     const match = await this.findServiceMatch(tenantId, message);
     return Boolean(match);
   }
+
+  async getServiceDurationMinutes(tenantId: string, serviceId: string) {
+    const service = await this.serviceRepository.findOneBy({
+      id: serviceId,
+      tenantId,
+      isActive: true,
+    });
+    return service?.durationMinutes ?? null;
+  }
 }
 
 function normalizeMessage(message: string) {

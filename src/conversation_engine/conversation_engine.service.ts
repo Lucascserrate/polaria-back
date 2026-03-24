@@ -103,10 +103,19 @@ export class ConversationEngineService {
     promptMessages.push(...history);
     promptMessages.push(messages[messages.length - 1]);
 
+    const serviceDurationMinutes =
+      typeof context.serviceId === 'string'
+        ? await this.conversationStateService.getServiceDurationMinutes(
+            tenantId,
+            context.serviceId,
+          )
+        : null;
     const aiReply = await this.conversationAIFlowService.getReply({
       promptMessages,
       tenantId,
       timezone: timezoneSafe ?? undefined,
+      durationMinutes: serviceDurationMinutes ?? undefined,
+      stepMinutes: serviceDurationMinutes ?? undefined,
     });
     let finalReply = aiReply.reply;
 
