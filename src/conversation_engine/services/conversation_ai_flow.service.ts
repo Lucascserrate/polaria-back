@@ -17,6 +17,7 @@ export class ConversationAIFlowService {
     }>;
     tenantId: string;
     timezone?: string;
+    durationMinutes?: number;
   }) {
     const response = await this.aiService.chat(input.promptMessages, {
       response_format: {
@@ -26,11 +27,12 @@ export class ConversationAIFlowService {
           schema: {
             type: 'object',
             additionalProperties: false,
-            required: ['reply', 'datetime', 'name'],
+            required: ['reply', 'datetime', 'name', 'confirmation_status'],
             properties: {
               reply: { type: 'string' },
               datetime: { type: ['string', 'null'] },
               name: { type: ['string', 'null'] },
+              confirmation_status: { type: ['string', 'null'] },
             },
           },
           strict: true,
@@ -44,7 +46,8 @@ export class ConversationAIFlowService {
     if (parsed.datetime) {
       const requested = new Date(parsed.datetime);
       if (!Number.isNaN(requested.getTime())) {
-        const end = addMinutes(requested, 30);
+        const durationMinutes = input.durationMinutes ?? 30;
+        const end = addMinutes(requested, durationMinutes);
         const isAvailable =
           await this.conversationAvailabilityService.isSlotAvailable(
             input.tenantId,
@@ -58,23 +61,27 @@ export class ConversationAIFlowService {
           : await this.conversationAvailabilityService.getAlternativeTimes({
               tenantId: input.tenantId,
               start: requested,
-              durationMinutes: 30,
+              durationMinutes,
               limit: 3,
               timezone: input.timezone,
             });
 
+        const formattedAlternatives = alternatives.map((d) =>
+          formatTime(d, input.timezone),
+        );
         const finalReply = await this.buildAvailabilityReply({
           userMessage: findLastUserMessage(input.promptMessages),
           requestedDatetime: parsed.datetime,
           isAvailable,
-          alternatives: alternatives.map((d) => formatTime(d)),
+          alternatives: formattedAlternatives,
         });
         return {
           reply: finalReply,
           name: parsed.name,
           datetime: parsed.datetime,
+          confirmationStatus: normalizeConfirmation(parsed.confirmationStatus),
           isAvailable,
-          alternatives: alternatives.map((d) => formatTime(d)),
+          alternatives: formattedAlternatives,
           requestedDate: parsed.datetime.slice(0, 10),
         };
       }
@@ -84,6 +91,7 @@ export class ConversationAIFlowService {
       reply: parsed.reply || response?.content || '',
       name: parsed.name,
       datetime: parsed.datetime,
+      confirmationStatus: normalizeConfirmation(parsed.confirmationStatus),
       isAvailable: undefined,
       alternatives: [],
       requestedDate: parsed.datetime ? parsed.datetime.slice(0, 10) : null,
@@ -127,21 +135,78 @@ function parseAiJson(raw: string): {
   reply: string;
   datetime: string | null;
   name: string | null;
+  confirmationStatus: string | null;
 } {
   try {
     const parsed = JSON.parse(raw) as {
       reply?: string;
       datetime?: string | null;
       name?: string | null;
+      confirmation_status?: string | null;
     };
     return {
       reply: typeof parsed.reply === 'string' ? parsed.reply : '',
       datetime: typeof parsed.datetime === 'string' ? parsed.datetime : null,
       name: typeof parsed.name === 'string' ? parsed.name : null,
+      confirmationStatus:
+        typeof parsed.confirmation_status === 'string'
+          ? parsed.confirmation_status
+          : null,
     };
   } catch {
-    return { reply: raw, datetime: null, name: null };
+    const extracted = extractJson(raw);
+    if (extracted) {
+      try {
+        const parsed = JSON.parse(extracted) as {
+          reply?: string;
+          datetime?: string | null;
+          name?: string | null;
+          confirmation_status?: string | null;
+        };
+        return {
+          reply: typeof parsed.reply === 'string' ? parsed.reply : raw,
+          datetime:
+            typeof parsed.datetime === 'string' ? parsed.datetime : null,
+          name: typeof parsed.name === 'string' ? parsed.name : null,
+          confirmationStatus:
+            typeof parsed.confirmation_status === 'string'
+              ? parsed.confirmation_status
+              : null,
+        };
+      } catch {
+        return {
+          reply: raw,
+          datetime: null,
+          name: null,
+          confirmationStatus: null,
+        };
+      }
+    }
+    return {
+      reply: raw,
+      datetime: null,
+      name: null,
+      confirmationStatus: null,
+    };
   }
+}
+
+function extractJson(raw: string) {
+  const start = raw.indexOf('{');
+  const end = raw.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) {
+    return null;
+  }
+  return raw.slice(start, end + 1);
+}
+
+function normalizeConfirmation(value: string | null) {
+  if (!value) return null;
+  const normalized = value.toLowerCase().trim();
+  if (normalized === 'confirmed') return 'confirmed';
+  if (normalized === 'pending') return 'pending';
+  if (normalized === 'rejected') return 'rejected';
+  return null;
 }
 
 function addMinutes(date: Date, minutes: number) {
@@ -150,10 +215,11 @@ function addMinutes(date: Date, minutes: number) {
   return result;
 }
 
-function formatTime(date: Date) {
+function formatTime(date: Date, timezone?: string) {
   return date.toLocaleTimeString('es-CO', {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: timezone,
   });
 }
 

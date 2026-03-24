@@ -4,7 +4,6 @@ import { AIModule } from '../ai/ai.module';
 import { Client } from '../clients/entities/client.entity';
 import { Conversation } from '../conversations/entities/conversation.entity';
 import { Message } from '../messages/entities/message.entity';
-import { Service } from '../services/entities/service.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { BusinessHour } from '../business_hours/entities/business_hour.entity';
@@ -17,9 +16,9 @@ import { ConversationStateService } from './services/conversation_state.service'
 import { ConversationAvailabilityService } from './services/conversation_availability.service';
 import { ConversationAIFlowService } from './services/conversation_ai_flow.service';
 import { ConversationAppointmentService } from './services/conversation_appointment.service';
-import { ConversationConfirmationService } from './services/conversation_confirmation.service';
 import { Staff } from '../staff/entities/staff.entity';
 import { ConversationBookingService } from './services/conversation_booking.service';
+import { Service } from '../services/entities/service.entity';
 
 @Module({
   imports: [
@@ -45,7 +44,6 @@ import { ConversationBookingService } from './services/conversation_booking.serv
     ConversationAvailabilityService,
     ConversationAIFlowService,
     ConversationAppointmentService,
-    ConversationConfirmationService,
     ConversationBookingService,
   ],
 })

@@ -2,7 +2,6 @@ import { Injectable } from '@nestjs/common';
 import { MessageRole } from '../../messages/entities/message.entity';
 import { ConversationState } from '../../conversations/entities/conversation.entity';
 import { ConversationAppointmentService } from './conversation_appointment.service';
-import { ConversationConfirmationService } from './conversation_confirmation.service';
 import { ConversationIdentityService } from './conversation_identity.service';
 import { ConversationMessagesService } from './conversation_messages.service';
 
@@ -10,14 +9,12 @@ import { ConversationMessagesService } from './conversation_messages.service';
 export class ConversationBookingService {
   constructor(
     private readonly conversationAppointmentService: ConversationAppointmentService,
-    private readonly conversationConfirmationService: ConversationConfirmationService,
     private readonly conversationIdentityService: ConversationIdentityService,
     private readonly conversationMessagesService: ConversationMessagesService,
   ) {}
 
-  async tryConfirmAndCreate(input: {
+  async confirmPending(input: {
     tenantId: string;
-    message: string;
     clientId: string;
     conversationId: string;
     context: Record<string, unknown>;
@@ -31,11 +28,7 @@ export class ConversationBookingService {
         ? input.context.serviceId
         : null;
 
-    if (
-      !this.conversationConfirmationService.isConfirm(input.message) ||
-      !pendingDatetime ||
-      !pendingServiceId
-    ) {
+    if (!pendingDatetime || !pendingServiceId) {
       return { handled: false as const };
     }
 
@@ -53,13 +46,6 @@ export class ConversationBookingService {
       ? 'Listo, tu cita quedo confirmada. Te esperamos.'
       : 'No pude confirmar la cita. Puedes intentar con otro horario.';
 
-    await this.conversationMessagesService.saveMessage({
-      tenantId: input.tenantId,
-      conversationId: input.conversationId,
-      clientId: input.clientId,
-      role: MessageRole.USER,
-      content: input.message,
-    });
     await this.conversationMessagesService.saveMessage({
       tenantId: input.tenantId,
       conversationId: input.conversationId,
