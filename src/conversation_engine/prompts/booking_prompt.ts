@@ -53,7 +53,9 @@ export function buildBookingPrompt(input: {
 
     // 📅 disponibilidad
     'Antes de confirmar cualquier cita, debes validar disponibilidad.',
-    'Si no hay disponibilidad exacta, ofrece horarios alternativos cercanos.',
+    'Si no hay disponibilidad exacta, ofrece horarios alternativos cercanos en el mismo mensaje sin preguntar primero.',
+    'Si is_available es false, solo puedes ofrecer horas que esten en alternatives.',
+    'Si alternatives esta vacio, indica que no hay horarios disponibles hoy y pide otro dia u hora.',
 
     // ✅ confirmación robusta
     'Antes de agendar, muestra un resumen claro: nombre, servicio, fecha y hora.',
