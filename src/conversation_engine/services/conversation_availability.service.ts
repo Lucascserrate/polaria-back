@@ -54,71 +54,65 @@ export class ConversationAvailabilityService {
     timezone?: string;
     maxDaysAhead?: number;
   }) {
-    const step = input.stepMinutes ?? 30;
-    const maxDaysAhead = input.maxDaysAhead ?? 7;
+    const step = input.durationMinutes;
+    const maxDaysAhead = input.maxDaysAhead ?? 3;
     const now = new Date();
-    const requestedKey = getZonedDateKey(input.start, input.timezone);
+
+    const allAvailable: Date[] = [];
 
     for (let offset = 0; offset <= maxDaysAhead; offset += 1) {
       const day = addDays(input.start, offset);
+
       const dayHours = await this.getBusinessHoursForDate(
         input.tenantId,
         day,
         input.timezone,
       );
-      if (!dayHours.length) {
-        continue;
-      }
 
-      const slots: Date[] = [];
+      if (!dayHours.length) continue;
+
       for (const hours of dayHours) {
         const intervalStart = combineDateAndTime(
           day,
           hours.startTime,
           input.timezone,
         );
+
         const intervalEnd = combineDateAndTime(
           day,
           hours.endTime,
           input.timezone,
         );
+
         let cursor = new Date(intervalStart);
+
         while (
           cursor.getTime() + input.durationMinutes * 60 * 1000 <=
           intervalEnd.getTime()
         ) {
-          slots.push(new Date(cursor));
+          if (!isPastSlot(cursor, now, input.timezone)) {
+            const end = addMinutes(cursor, input.durationMinutes);
+
+            const ok = await this.isSlotAvailable(
+              input.tenantId,
+              cursor,
+              end,
+              input.timezone,
+            );
+
+            if (ok) {
+              allAvailable.push(new Date(cursor));
+            }
+          }
+
           cursor = addMinutes(cursor, step);
         }
       }
-
-      const available: Date[] = [];
-      for (const slot of slots) {
-        if (isPastSlot(slot, now, input.timezone)) {
-          continue;
-        }
-        const end = addMinutes(slot, input.durationMinutes);
-        const ok = await this.isSlotAvailable(
-          input.tenantId,
-          slot,
-          end,
-          input.timezone,
-        );
-        if (ok) {
-          available.push(slot);
-        }
-      }
-      if (available.length) {
-        const filtered = available.filter(
-          (slot) =>
-            slot.getTime() !== input.start.getTime() ||
-            getZonedDateKey(slot, input.timezone) !== requestedKey,
-        );
-        return pickClosestTimes(filtered, input.start, input.limit);
-      }
     }
 
-    return [];
+    if (!allAvailable.length) return [];
+
+    return pickClosestTimes(allAvailable, input.start, input.limit);
   }
 
   private async isWithinBusinessHours(
@@ -150,8 +144,15 @@ export class ConversationAvailabilityService {
     timezone?: string,
   ) {
     const dayOfWeek = getZonedDayOfWeek(date, timezone);
-    return this.businessHourRepository.find({
+    const primary = await this.businessHourRepository.find({
       where: { tenantId, dayOfWeek },
+    });
+    if (primary.length || !timezone) {
+      return primary;
+    }
+    const fallbackDay = getZonedDayOfWeek(date, undefined);
+    return this.businessHourRepository.find({
+      where: { tenantId, dayOfWeek: fallbackDay },
     });
   }
 
