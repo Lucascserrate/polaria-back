@@ -54,9 +54,10 @@ export class ConversationAvailabilityService {
     timezone?: string;
     maxDaysAhead?: number;
   }) {
-    const step = input.durationMinutes;
-    const maxDaysAhead = input.maxDaysAhead ?? 3;
+    const step = input.stepMinutes ?? Math.min(input.durationMinutes, 10);
+    const maxDaysAhead = input.maxDaysAhead ?? 7;
     const now = new Date();
+    const requestedKey = getZonedDateKey(input.start, input.timezone);
 
     const allAvailable: Date[] = [];
 
@@ -83,6 +84,10 @@ export class ConversationAvailabilityService {
           hours.endTime,
           input.timezone,
         );
+
+        if (!intervalStart || !intervalEnd) {
+          continue;
+        }
 
         let cursor = new Date(intervalStart);
 
@@ -112,7 +117,16 @@ export class ConversationAvailabilityService {
 
     if (!allAvailable.length) return [];
 
-    return pickClosestTimes(allAvailable, input.start, input.limit);
+    const filtered = allAvailable.filter(
+      (slot) =>
+        slot.getTime() !== input.start.getTime() ||
+        getZonedDateKey(slot, input.timezone) !== requestedKey,
+    );
+    return pickClosestTimes(
+      filtered.length ? filtered : allAvailable,
+      input.start,
+      input.limit,
+    );
   }
 
   private async isWithinBusinessHours(
@@ -181,7 +195,11 @@ function combineDateAndTime(date: Date, time: string, timezone?: string) {
   const iso = `${dateKey}T${String(hour || 0).padStart(2, '0')}:${String(
     minute || 0,
   ).padStart(2, '0')}:${String(second || 0).padStart(2, '0')}${offset ?? ''}`;
-  return new Date(iso);
+  const result = new Date(iso);
+  if (Number.isNaN(result.getTime())) {
+    return null;
+  }
+  return result;
 }
 
 function addMinutes(date: Date, minutes: number) {
@@ -245,9 +263,14 @@ function getTimeZoneOffset(date: Date, timezone: string) {
     if (!match) {
       return null;
     }
-    const hours = match[1].padStart(3, '0');
-    const minutes = match[2] ?? '00';
-    return `${hours}:${minutes}`;
+    const rawHours = Number(match[1]);
+    if (Number.isNaN(rawHours)) {
+      return null;
+    }
+    const sign = rawHours < 0 ? '-' : '+';
+    const hours = Math.abs(rawHours).toString().padStart(2, '0');
+    const minutes = (match[2] ?? '00').padStart(2, '0');
+    return `${sign}${hours}:${minutes}`;
   } catch {
     return null;
   }
@@ -308,15 +331,3 @@ function isValidTimeZone(timezone: string) {
     return false;
   }
 }
-
-// function normalizeTimeZone(value: unknown) {
-//   if (typeof value !== 'string' || !value.trim()) {
-//     return null;
-//   }
-//   try {
-//     new Intl.DateTimeFormat('en-US', { timeZone: value });
-//     return value;
-//   } catch {
-//     return null;
-//   }
-// }
