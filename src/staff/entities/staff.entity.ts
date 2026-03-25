@@ -3,10 +3,12 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
+import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
 
 @Entity('staff')
 export class Staff {
@@ -30,6 +32,12 @@ export class Staff {
 
   @Column({ default: true })
   isActive: boolean;
+
+  @OneToMany(
+    () => AppointmentService,
+    (appointmentService) => appointmentService.staff,
+  )
+  appointmentServices: AppointmentService[];
 
   @CreateDateColumn()
   createdAt: Date;

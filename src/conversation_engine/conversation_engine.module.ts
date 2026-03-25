@@ -6,6 +6,7 @@ import { Conversation } from '../conversations/entities/conversation.entity';
 import { Message } from '../messages/entities/message.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { Appointment } from '../appointments/entities/appointment.entity';
+import { AppointmentService } from '../appointments/entities/appointment_service.entity';
 import { BusinessHour } from '../business_hours/entities/business_hour.entity';
 import { ConversationEngineController } from './conversation_engine.controller';
 import { ConversationEngineService } from './conversation_engine.service';
@@ -30,6 +31,7 @@ import { Service } from '../services/entities/service.entity';
       Tenant,
       Service,
       Appointment,
+      AppointmentService,
       BusinessHour,
       Staff,
     ]),

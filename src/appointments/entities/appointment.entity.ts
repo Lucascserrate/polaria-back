@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
   Index,
@@ -10,6 +11,7 @@ import {
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Staff } from '../../staff/entities/staff.entity';
 import { Client } from '../../clients/entities/client.entity';
+import { AppointmentService } from './appointment_service.entity';
 import { Service } from '../../services/entities/service.entity';
 
 export enum AppointmentStatus {
@@ -43,8 +45,15 @@ export class Appointment {
 
   @Column()
   serviceId: string;
+
   @ManyToOne(() => Service, (service) => service.id, { onDelete: 'CASCADE' })
   service: Service;
+
+  @OneToMany(
+    () => AppointmentService,
+    (appointmentService) => appointmentService.appointment,
+  )
+  services: AppointmentService[];
 
   @Column({ type: 'datetime' })
   startTime: Date;
