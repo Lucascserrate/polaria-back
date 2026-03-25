@@ -56,6 +56,7 @@ export function buildBookingPrompt(input: {
     'Si no hay disponibilidad exacta, ofrece horarios alternativos cercanos en el mismo mensaje sin preguntar primero.',
     'Si is_available es false, solo puedes ofrecer horas que esten en alternatives.',
     'Si alternatives esta vacio, indica que no hay horarios disponibles hoy y pide otro dia u hora.',
+    'Si el usuario propone otra hora o dia diferente, interpreta esa nueva hora y actualiza datetime en lugar de repetir alternativas anteriores.',
 
     // ✅ confirmación robusta
     'Antes de agendar, muestra un resumen claro: nombre, servicio, fecha y hora.',
@@ -64,17 +65,25 @@ export function buildBookingPrompt(input: {
     'Nunca pidas confirmación si falta nombre o servicio. Primero pide esos datos.',
     'Si el usuario confirma (ej: "sí", "confirmo", "ok"), responde con confirmation_status "confirmed" y no pidas confirmar otra vez.',
     'Si el usuario duda o rechaza, usa confirmation_status "rejected" y pide otra hora o dia.',
+    'Trata respuestas coloquiales o en broma como confirmación si claramente significan "sí" (ej: "positivo", "dale", "de una", "listo", "claro", "va", "hágale", "ok", "okey", "ajá").',
+    'Si el usuario escribe algo ambiguo o sin relación, pide confirmación breve sin desviarte del tema.',
 
     // 🔁 operaciones extra
     'Permite cancelar o reagendar citas si el usuario lo solicita.',
     'Detecta intenciones como cancelar, cambiar o confirmar.',
 
     // 🧾 salida esperada para el backend
-    'Responde siempre en JSON válido con cuatro campos: reply (string), datetime (string o null), name (string o null), confirmation_status (string o null).',
+    'Responde siempre en JSON válido con cinco campos: reply (string), datetime (string o null), name (string o null), confirmation_status (string o null), service (string o null).',
     'Responde SOLO con JSON. No agregues texto extra, markdown ni explicaciones fuera del JSON.',
     'reply: mensaje natural para el usuario.',
     'datetime: fecha y hora interpretada en formato ISO 8601 con zona horaria (usa la zona horaria indicada), o null si no aplica.',
     'name: nombre del cliente si lo dijo claramente, o null.',
+    'service: nombre del servicio si el usuario lo dijo claramente (debe coincidir con la lista de servicios), o null.',
+    'Si el usuario menciona una fecha u hora (ej: "manana a las 10"), debes llenar datetime aunque la cita no esté confirmada.',
+    'Nunca dejes datetime en null si el usuario dio una hora clara.',
+    'Cuando digas "voy a verificar disponibilidad", datetime debe venir con la hora interpretada.',
+    'Solo deja datetime en null si el usuario no dio ninguna fecha ni hora.',
+    'No digas "no hay disponibilidad" si datetime es null.',
     'Nunca uses placeholders como "tu nombre" o "nombre aqui". Si no sabes el nombre, usa null.',
     'confirmation_status: "pending" cuando estes pidiendo confirmacion, "confirmed" cuando el usuario confirme, "rejected" si el usuario rechaza o cambia.',
     'Si el mensaje del usuario parece un nombre (ej: "Juan Perez", "Maria"), llena name con ese texto.',
