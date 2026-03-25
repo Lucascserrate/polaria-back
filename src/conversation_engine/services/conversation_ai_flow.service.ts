@@ -28,12 +28,19 @@ export class ConversationAIFlowService {
           schema: {
             type: 'object',
             additionalProperties: false,
-            required: ['reply', 'datetime', 'name', 'confirmation_status'],
+            required: [
+              'reply',
+              'datetime',
+              'name',
+              'confirmation_status',
+              'service',
+            ],
             properties: {
               reply: { type: 'string' },
               datetime: { type: ['string', 'null'] },
               name: { type: ['string', 'null'] },
               confirmation_status: { type: ['string', 'null'] },
+              service: { type: ['string', 'null'] },
             },
           },
           strict: true,
@@ -41,7 +48,7 @@ export class ConversationAIFlowService {
       },
     });
     // dejo el log por si la IA no responde con el formato esperado, así se puede ajustar el prompt o revisar la respuesta.
-    console.log('AI_RAW:', response?.content);
+    // console.log('AI_RAW:', response?.content);
 
     const parsed = parseAiJson(response?.content ?? '');
     if (parsed.datetime) {
@@ -71,7 +78,7 @@ export class ConversationAIFlowService {
         const formattedAlternatives = alternatives.map((d) =>
           formatTime(d, input.timezone),
         );
-        console.log('AI_ALTERNATIVES:', formattedAlternatives);
+        // console.log('AI_ALTERNATIVES:', formattedAlternatives);
         const finalReply = await this.buildAvailabilityReply({
           userMessage: findLastUserMessage(input.promptMessages),
           requestedDatetime: parsed.datetime,
@@ -81,6 +88,7 @@ export class ConversationAIFlowService {
         return {
           reply: finalReply,
           name: parsed.name,
+          service: parsed.service,
           datetime: parsed.datetime,
           confirmationStatus: normalizeConfirmation(parsed.confirmationStatus),
           isAvailable,
@@ -93,6 +101,7 @@ export class ConversationAIFlowService {
     return {
       reply: parsed.reply || response?.content || '',
       name: parsed.name,
+      service: parsed.service,
       datetime: parsed.datetime,
       confirmationStatus: normalizeConfirmation(parsed.confirmationStatus),
       isAvailable: undefined,
@@ -138,6 +147,7 @@ function parseAiJson(raw: string): {
   reply: string;
   datetime: string | null;
   name: string | null;
+  service: string | null;
   confirmationStatus: string | null;
 } {
   try {
@@ -145,12 +155,14 @@ function parseAiJson(raw: string): {
       reply?: string;
       datetime?: string | null;
       name?: string | null;
+      service?: string | null;
       confirmation_status?: string | null;
     };
     return {
       reply: typeof parsed.reply === 'string' ? parsed.reply : '',
       datetime: typeof parsed.datetime === 'string' ? parsed.datetime : null,
       name: typeof parsed.name === 'string' ? parsed.name : null,
+      service: typeof parsed.service === 'string' ? parsed.service : null,
       confirmationStatus:
         typeof parsed.confirmation_status === 'string'
           ? parsed.confirmation_status
@@ -164,6 +176,7 @@ function parseAiJson(raw: string): {
           reply?: string;
           datetime?: string | null;
           name?: string | null;
+          service?: string | null;
           confirmation_status?: string | null;
         };
         return {
@@ -171,6 +184,7 @@ function parseAiJson(raw: string): {
           datetime:
             typeof parsed.datetime === 'string' ? parsed.datetime : null,
           name: typeof parsed.name === 'string' ? parsed.name : null,
+          service: typeof parsed.service === 'string' ? parsed.service : null,
           confirmationStatus:
             typeof parsed.confirmation_status === 'string'
               ? parsed.confirmation_status
@@ -181,6 +195,7 @@ function parseAiJson(raw: string): {
           reply: raw,
           datetime: null,
           name: null,
+          service: null,
           confirmationStatus: null,
         };
       }
@@ -189,6 +204,7 @@ function parseAiJson(raw: string): {
       reply: raw,
       datetime: null,
       name: null,
+      service: null,
       confirmationStatus: null,
     };
   }

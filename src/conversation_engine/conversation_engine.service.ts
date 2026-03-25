@@ -115,9 +115,22 @@ export class ConversationEngineService {
       tenantId,
       timezone: timezoneSafe ?? undefined,
       durationMinutes: serviceDurationMinutes ?? undefined,
-      stepMinutes: serviceDurationMinutes ?? undefined,
+      stepMinutes: serviceDurationMinutes ?? 10,
     });
     let finalReply = aiReply.reply;
+
+    const aiServiceName = readString(aiReply.service);
+    if (aiServiceName && !context.serviceId) {
+      const aiServiceMatch =
+        await this.conversationStateService.findServiceMatch(
+          tenantId,
+          aiServiceName,
+        );
+      if (aiServiceMatch) {
+        context.serviceId = aiServiceMatch.id;
+        context.serviceName = aiServiceMatch.name;
+      }
+    }
 
     await this.conversationMessagesService.saveMessage({
       tenantId: conversation.tenantId,
@@ -270,6 +283,7 @@ function isUserConfirmation(message: string) {
     normalized === 'si' ||
     normalized === 'sí' ||
     normalized === 'ok' ||
+    normalized === 'yes' ||
     normalized === 'de acuerdo' ||
     normalized.includes('confirmo') ||
     normalized.includes('confirmar')
