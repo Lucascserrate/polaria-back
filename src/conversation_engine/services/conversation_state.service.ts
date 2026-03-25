@@ -39,19 +39,31 @@ export class ConversationStateService {
     return ConversationState.CONFIRM_APPOINTMENT;
   }
 
-  async findServiceMatch(tenantId: string, message: string) {
+  async findServiceMatch(
+    tenantId: string,
+    message: string,
+  ): Promise<Service | null> {
+    const matches = await this.findServiceMatches(tenantId, message);
+    return matches[0] ?? null;
+  }
+
+  async findServiceMatches(
+    tenantId: string,
+    message: string,
+  ): Promise<Service[]> {
     const services = await this.serviceRepository.find({
       where: { tenantId, isActive: true },
     });
     const normalized = normalizeMessage(message);
-    return (
-      services.find((service) =>
-        normalized.includes(normalizeMessage(service.name)),
-      ) || null
+    return services.filter((service) =>
+      normalized.includes(normalizeMessage(service.name)),
     );
   }
 
-  private async hasServiceMention(tenantId: string, message: string) {
+  private async hasServiceMention(
+    tenantId: string,
+    message: string,
+  ): Promise<boolean> {
     const match = await this.findServiceMatch(tenantId, message);
     return Boolean(match);
   }
@@ -63,6 +75,23 @@ export class ConversationStateService {
       isActive: true,
     });
     return service?.durationMinutes ?? null;
+  }
+
+  async getServicesDurationMinutes(tenantId: string, serviceIds: string[]) {
+    if (!serviceIds.length) {
+      return null;
+    }
+    const services = await this.serviceRepository.find({
+      where: serviceIds.map((id) => ({
+        id,
+        tenantId,
+        isActive: true,
+      })),
+    });
+    if (!services.length || services.length !== serviceIds.length) {
+      return null;
+    }
+    return services.reduce((sum, service) => sum + service.durationMinutes, 0);
   }
 }
 

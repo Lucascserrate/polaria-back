@@ -23,12 +23,15 @@ export class ConversationBookingService {
       typeof input.context.pendingDatetime === 'string'
         ? input.context.pendingDatetime
         : null;
-    const pendingServiceId =
-      typeof input.context.serviceId === 'string'
-        ? input.context.serviceId
-        : null;
+    const pendingServiceIds = Array.isArray(input.context.serviceIds)
+      ? (input.context.serviceIds as string[]).filter(
+          (value) => typeof value === 'string',
+        )
+      : typeof input.context.serviceId === 'string'
+        ? [input.context.serviceId]
+        : [];
 
-    if (!pendingDatetime || !pendingServiceId) {
+    if (!pendingDatetime || !pendingServiceIds.length) {
       return { handled: false as const };
     }
 
@@ -38,7 +41,7 @@ export class ConversationBookingService {
       (await this.conversationAppointmentService.createConfirmedAppointment({
         tenantId: input.tenantId,
         clientId: input.clientId,
-        serviceId: pendingServiceId,
+        serviceIds: pendingServiceIds,
         startTime: start,
       }));
 

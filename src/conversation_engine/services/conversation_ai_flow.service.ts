@@ -19,7 +19,16 @@ export class ConversationAIFlowService {
     timezone?: string;
     durationMinutes?: number;
     stepMinutes?: number;
-  }) {
+  }): Promise<{
+    reply: string;
+    name: string | null;
+    services: string[] | null;
+    datetime: string | null;
+    confirmationStatus: 'confirmed' | 'pending' | 'rejected' | null;
+    isAvailable: boolean | undefined;
+    alternatives: string[];
+    requestedDate: string | null;
+  }> {
     const response = await this.aiService.chat(input.promptMessages, {
       response_format: {
         type: 'json_schema',
@@ -33,14 +42,17 @@ export class ConversationAIFlowService {
               'datetime',
               'name',
               'confirmation_status',
-              'service',
+              'services',
             ],
             properties: {
               reply: { type: 'string' },
               datetime: { type: ['string', 'null'] },
               name: { type: ['string', 'null'] },
               confirmation_status: { type: ['string', 'null'] },
-              service: { type: ['string', 'null'] },
+              services: {
+                type: ['array', 'null'],
+                items: { type: 'string' },
+              },
             },
           },
           strict: true,
@@ -48,11 +60,12 @@ export class ConversationAIFlowService {
       },
     });
     // dejo el log por si la IA no responde con el formato esperado, así se puede ajustar el prompt o revisar la respuesta.
-    // console.log('AI_RAW:', response?.content);
+    console.log('AI_RAW:', response?.content);
 
     const parsed = parseAiJson(response?.content ?? '');
-    if (parsed.datetime) {
-      const requested = new Date(parsed.datetime);
+    const normalizedDatetime = normalizeUtcDatetime(parsed.datetime);
+    if (normalizedDatetime) {
+      const requested = new Date(normalizedDatetime);
       if (!Number.isNaN(requested.getTime())) {
         const durationMinutes = input.durationMinutes ?? 30;
         const end = addMinutes(requested, durationMinutes);
@@ -81,19 +94,19 @@ export class ConversationAIFlowService {
         // console.log('AI_ALTERNATIVES:', formattedAlternatives);
         const finalReply = await this.buildAvailabilityReply({
           userMessage: findLastUserMessage(input.promptMessages),
-          requestedDatetime: parsed.datetime,
+          requestedDatetime: normalizedDatetime,
           isAvailable,
           alternatives: formattedAlternatives,
         });
         return {
           reply: finalReply,
           name: parsed.name,
-          service: parsed.service,
-          datetime: parsed.datetime,
+          services: parsed.services,
+          datetime: normalizedDatetime,
           confirmationStatus: normalizeConfirmation(parsed.confirmationStatus),
           isAvailable,
           alternatives: formattedAlternatives,
-          requestedDate: parsed.datetime.slice(0, 10),
+          requestedDate: normalizedDatetime.slice(0, 10),
         };
       }
     }
@@ -101,12 +114,14 @@ export class ConversationAIFlowService {
     return {
       reply: parsed.reply || response?.content || '',
       name: parsed.name,
-      service: parsed.service,
-      datetime: parsed.datetime,
+      services: parsed.services,
+      datetime: normalizedDatetime,
       confirmationStatus: normalizeConfirmation(parsed.confirmationStatus),
       isAvailable: undefined,
       alternatives: [],
-      requestedDate: parsed.datetime ? parsed.datetime.slice(0, 10) : null,
+      requestedDate: normalizedDatetime
+        ? normalizedDatetime.slice(0, 10)
+        : null,
     };
   }
 
@@ -147,7 +162,7 @@ function parseAiJson(raw: string): {
   reply: string;
   datetime: string | null;
   name: string | null;
-  service: string | null;
+  services: string[] | null;
   confirmationStatus: string | null;
 } {
   try {
@@ -155,14 +170,16 @@ function parseAiJson(raw: string): {
       reply?: string;
       datetime?: string | null;
       name?: string | null;
-      service?: string | null;
+      services?: string[] | null;
       confirmation_status?: string | null;
     };
     return {
       reply: typeof parsed.reply === 'string' ? parsed.reply : '',
       datetime: typeof parsed.datetime === 'string' ? parsed.datetime : null,
       name: typeof parsed.name === 'string' ? parsed.name : null,
-      service: typeof parsed.service === 'string' ? parsed.service : null,
+      services: Array.isArray(parsed.services)
+        ? parsed.services.filter((value) => typeof value === 'string')
+        : null,
       confirmationStatus:
         typeof parsed.confirmation_status === 'string'
           ? parsed.confirmation_status
@@ -176,7 +193,7 @@ function parseAiJson(raw: string): {
           reply?: string;
           datetime?: string | null;
           name?: string | null;
-          service?: string | null;
+          services?: string[] | null;
           confirmation_status?: string | null;
         };
         return {
@@ -184,7 +201,9 @@ function parseAiJson(raw: string): {
           datetime:
             typeof parsed.datetime === 'string' ? parsed.datetime : null,
           name: typeof parsed.name === 'string' ? parsed.name : null,
-          service: typeof parsed.service === 'string' ? parsed.service : null,
+          services: Array.isArray(parsed.services)
+            ? parsed.services.filter((value) => typeof value === 'string')
+            : null,
           confirmationStatus:
             typeof parsed.confirmation_status === 'string'
               ? parsed.confirmation_status
@@ -195,7 +214,7 @@ function parseAiJson(raw: string): {
           reply: raw,
           datetime: null,
           name: null,
-          service: null,
+          services: null,
           confirmationStatus: null,
         };
       }
@@ -204,7 +223,7 @@ function parseAiJson(raw: string): {
       reply: raw,
       datetime: null,
       name: null,
-      service: null,
+      services: null,
       confirmationStatus: null,
     };
   }
@@ -232,6 +251,18 @@ function addMinutes(date: Date, minutes: number) {
   const result = new Date(date);
   result.setMinutes(result.getMinutes() + minutes);
   return result;
+}
+
+function normalizeUtcDatetime(value: string | null) {
+  if (!value || typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const hasTimezone = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed);
+  return hasTimezone ? trimmed : `${trimmed}Z`;
 }
 
 function formatTime(date: Date, timezone?: string) {

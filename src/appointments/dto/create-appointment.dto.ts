@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -22,9 +23,20 @@ export class CreateAppointmentDto {
   @IsUUID()
   clientId: string;
 
-  @ApiProperty()
+  @ApiProperty({
+    type: [String],
+    description: 'Lista de IDs de servicios incluidos en la cita.',
+  })
+  @IsArray()
+  @IsUUID('4', { each: true })
+  serviceIds: string[];
+
+  @ApiPropertyOptional({
+    description: 'Compatibilidad: ID de un solo servicio.',
+  })
+  @IsOptional()
   @IsUUID()
-  serviceId: string;
+  serviceId?: string;
 
   @ApiProperty({ type: String, format: 'date-time' })
   @IsDateString()

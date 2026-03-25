@@ -5,6 +5,7 @@ import {
   Appointment,
   AppointmentStatus,
 } from '../../appointments/entities/appointment.entity';
+import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
 import { Service } from '../../services/entities/service.entity';
 import { Staff } from '../../staff/entities/staff.entity';
 
@@ -13,6 +14,8 @@ export class ConversationAppointmentService {
   constructor(
     @InjectRepository(Appointment)
     private readonly appointmentRepository: Repository<Appointment>,
+    @InjectRepository(AppointmentService)
+    private readonly appointmentServiceRepository: Repository<AppointmentService>,
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
     @InjectRepository(Staff)
@@ -22,15 +25,22 @@ export class ConversationAppointmentService {
   async createConfirmedAppointment(input: {
     tenantId: string;
     clientId: string;
-    serviceId: string;
+    serviceIds: string[];
     startTime: Date;
   }) {
-    const service = await this.serviceRepository.findOneBy({
-      id: input.serviceId,
-      tenantId: input.tenantId,
-      isActive: true,
+    const serviceIds = input.serviceIds.filter(Boolean);
+    if (!serviceIds.length) {
+      return null;
+    }
+
+    const services = await this.serviceRepository.find({
+      where: serviceIds.map((id) => ({
+        id,
+        tenantId: input.tenantId,
+        isActive: true,
+      })),
     });
-    if (!service) {
+    if (!services.length || services.length !== serviceIds.length) {
       return null;
     }
 
@@ -42,19 +52,45 @@ export class ConversationAppointmentService {
       return null;
     }
 
+    const totalDuration = services.reduce(
+      (sum, service) => sum + service.durationMinutes,
+      0,
+    );
     const endTime = new Date(
-      input.startTime.getTime() + service.durationMinutes * 60 * 1000,
+      input.startTime.getTime() + totalDuration * 60 * 1000,
     );
 
     const record = this.appointmentRepository.create({
       tenantId: input.tenantId,
       clientId: input.clientId,
-      serviceId: input.serviceId,
+      serviceId: serviceIds[0],
       staffId: staff.id,
       startTime: input.startTime,
       endTime,
       status: AppointmentStatus.CONFIRMED,
     });
-    return this.appointmentRepository.save(record);
+    const saved = await this.appointmentRepository.save(record);
+
+    let cursor = new Date(input.startTime);
+    const rows = services.map((service, index) => {
+      const serviceStart = new Date(cursor);
+      const serviceEnd = new Date(
+        serviceStart.getTime() + service.durationMinutes * 60 * 1000,
+      );
+      cursor = new Date(serviceEnd);
+      return this.appointmentServiceRepository.create({
+        appointmentId: saved.id,
+        serviceId: service.id,
+        staffId: staff.id,
+        startTime: serviceStart,
+        endTime: serviceEnd,
+        priceAtBooking: Number(service.price),
+        durationAtBooking: service.durationMinutes,
+        sequenceOrder: index + 1,
+      });
+    });
+    await this.appointmentServiceRepository.save(rows);
+
+    return saved;
   }
 }

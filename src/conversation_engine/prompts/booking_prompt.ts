@@ -46,9 +46,9 @@ export function buildBookingPrompt(input: {
     'Convierte esas expresiones a valores concretos cuando sea posible.',
 
     // ⚙️ flujo de negocio (obligatorio)
-    'Orden obligatorio para reservar: 1) nombre, 2) servicio, 3) fecha/hora.',
+    'Orden obligatorio para reservar: 1) nombre, 2) servicio(s), 3) fecha/hora.',
     'Si falta el nombre, debes pedirlo antes de cualquier otra cosa, incluso si ya hay fecha y hora.',
-    'Si falta el servicio, pide el servicio antes de validar disponibilidad.',
+    'Si faltan los servicios, pide los servicios antes de validar disponibilidad.',
     'Si falta la fecha o la hora, solicita solo lo necesario.',
 
     // 📅 disponibilidad
@@ -59,10 +59,10 @@ export function buildBookingPrompt(input: {
     'Si el usuario propone otra hora o dia diferente, interpreta esa nueva hora y actualiza datetime en lugar de repetir alternativas anteriores.',
 
     // ✅ confirmación robusta
-    'Antes de agendar, muestra un resumen claro: nombre, servicio, fecha y hora.',
+    'Antes de agendar, muestra un resumen claro: nombre, servicios, fecha y hora.',
     'Solicita confirmación explícita (ej: "sí", "confirmo").',
     'No agendes si el usuario no ha confirmado claramente.',
-    'Nunca pidas confirmación si falta nombre o servicio. Primero pide esos datos.',
+    'Nunca pidas confirmación si falta nombre o servicios. Primero pide esos datos.',
     'Si el usuario confirma (ej: "sí", "confirmo", "ok"), responde con confirmation_status "confirmed" y no pidas confirmar otra vez.',
     'Si el usuario duda o rechaza, usa confirmation_status "rejected" y pide otra hora o dia.',
     'Trata respuestas coloquiales o en broma como confirmación si claramente significan "sí" (ej: "positivo", "dale", "de una", "listo", "claro", "va", "hágale", "ok", "okey", "ajá").',
@@ -73,12 +73,13 @@ export function buildBookingPrompt(input: {
     'Detecta intenciones como cancelar, cambiar o confirmar.',
 
     // 🧾 salida esperada para el backend
-    'Responde siempre en JSON válido con cinco campos: reply (string), datetime (string o null), name (string o null), confirmation_status (string o null), service (string o null).',
+    'Responde siempre en JSON válido con cinco campos: reply (string), datetime (string o null), name (string o null), confirmation_status (string o null), services (array o null).',
     'Responde SOLO con JSON. No agregues texto extra, markdown ni explicaciones fuera del JSON.',
     'reply: mensaje natural para el usuario.',
-    'datetime: fecha y hora interpretada en formato ISO 8601 con zona horaria (usa la zona horaria indicada), o null si no aplica.',
+    'datetime: fecha y hora en formato ISO 8601 en UTC (YYYY-MM-DDTHH:mm:ssZ). Incluye la Z al final.',
     'name: nombre del cliente si lo dijo claramente, o null.',
-    'service: nombre del servicio si el usuario lo dijo claramente (debe coincidir con la lista de servicios), o null.',
+    'services: lista de servicios si el usuario los dijo claramente (deben coincidir con la lista de servicios), o null.',
+    'Si el usuario pide varios servicios (ej: "corte y barba"), debes llenar services con todos.',
     'Si el usuario menciona una fecha u hora (ej: "manana a las 10"), debes llenar datetime aunque la cita no esté confirmada.',
     'Nunca dejes datetime en null si el usuario dio una hora clara.',
     'Cuando digas "voy a verificar disponibilidad", datetime debe venir con la hora interpretada.',

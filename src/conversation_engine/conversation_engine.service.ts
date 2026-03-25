@@ -42,7 +42,7 @@ export class ConversationEngineService {
       }
     }
 
-    const timezoneSafe = 'America/La_Paz';
+    const timezoneSafe = 'UTC';
     const serviceNames = tenant ? await this.loadServiceNames(tenantId) : [];
     const tenantPrompt = tenant
       ? buildBookingPrompt({
@@ -80,13 +80,33 @@ export class ConversationEngineService {
       );
     const context =
       (conversation.contextJson as Record<string, unknown> | null) || {};
-    const serviceMatch = await this.conversationStateService.findServiceMatch(
-      tenantId,
-      message,
-    );
-    if (serviceMatch && !context.serviceId) {
-      context.serviceId = serviceMatch.id;
-      context.serviceName = serviceMatch.name;
+    const serviceMatches =
+      await this.conversationStateService.findServiceMatches(tenantId, message);
+    const existingServiceIds = readStringArray(context.serviceIds);
+    const existingServiceNames = readStringArray(context.serviceNames);
+    if (!existingServiceIds.length) {
+      const fallbackId = readString(context.serviceId);
+      if (fallbackId) {
+        existingServiceIds.push(fallbackId);
+      }
+    }
+    if (!existingServiceNames.length) {
+      const fallbackName = readString(context.serviceName);
+      if (fallbackName) {
+        existingServiceNames.push(fallbackName);
+      }
+    }
+    if (serviceMatches.length) {
+      const mergedIds = new Set(existingServiceIds);
+      const mergedNames = new Set(existingServiceNames);
+      for (const match of serviceMatches) {
+        mergedIds.add(match.id);
+        mergedNames.add(match.name);
+      }
+      context.serviceIds = Array.from(mergedIds);
+      context.serviceNames = Array.from(mergedNames);
+      delete context.serviceId;
+      delete context.serviceName;
     }
 
     const history = await this.conversationMessagesService.getRecentMessages(
@@ -103,13 +123,19 @@ export class ConversationEngineService {
     promptMessages.push(...history);
     promptMessages.push(messages[messages.length - 1]);
 
-    const serviceDurationMinutes =
-      typeof context.serviceId === 'string'
-        ? await this.conversationStateService.getServiceDurationMinutes(
-            tenantId,
-            context.serviceId,
-          )
-        : null;
+    const serviceIdsForDuration = readStringArray(context.serviceIds);
+    if (!serviceIdsForDuration.length) {
+      const fallbackId = readString(context.serviceId);
+      if (fallbackId) {
+        serviceIdsForDuration.push(fallbackId);
+      }
+    }
+    const serviceDurationMinutes = serviceIdsForDuration.length
+      ? await this.conversationStateService.getServicesDurationMinutes(
+          tenantId,
+          serviceIdsForDuration,
+        )
+      : null;
     const aiReply = await this.conversationAIFlowService.getReply({
       promptMessages,
       tenantId,
@@ -119,17 +145,22 @@ export class ConversationEngineService {
     });
     let finalReply = aiReply.reply;
 
-    const aiServiceName = readString(aiReply.service);
-    if (aiServiceName && !context.serviceId) {
-      const aiServiceMatch =
-        await this.conversationStateService.findServiceMatch(
-          tenantId,
-          aiServiceName,
-        );
-      if (aiServiceMatch) {
-        context.serviceId = aiServiceMatch.id;
-        context.serviceName = aiServiceMatch.name;
+    const aiServiceNames = readStringArray(aiReply.services);
+    if (aiServiceNames.length) {
+      const mergedIds = new Set(existingServiceIds);
+      const mergedNames = new Set(existingServiceNames);
+      for (const name of aiServiceNames) {
+        const aiServiceMatch =
+          await this.conversationStateService.findServiceMatch(tenantId, name);
+        if (aiServiceMatch) {
+          mergedIds.add(aiServiceMatch.id);
+          mergedNames.add(aiServiceMatch.name);
+        }
       }
+      context.serviceIds = Array.from(mergedIds);
+      context.serviceNames = Array.from(mergedNames);
+      delete context.serviceId;
+      delete context.serviceName;
     }
 
     await this.conversationMessagesService.saveMessage({
@@ -154,7 +185,9 @@ export class ConversationEngineService {
       await identity.updateClientName(client.id, normalizedName);
     }
     const hasName = Boolean(client.name || normalizedName);
-    const hasService = typeof context.serviceId === 'string';
+    const hasService =
+      readStringArray(context.serviceIds).length > 0 ||
+      typeof context.serviceId === 'string';
     const normalizedDatetime = normalizeIsoDatetime(aiReply.datetime);
     if (normalizedDatetime && aiReply.isAvailable && hasName && hasService) {
       context.pendingDatetime = normalizedDatetime;
@@ -253,6 +286,13 @@ function readString(value: unknown) {
   return value;
 }
 
+function readStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter((item): item is string => typeof item === 'string');
+}
+
 function normalizeName(value: string | null | undefined) {
   if (!value || typeof value !== 'string') {
     return undefined;
@@ -269,8 +309,11 @@ function normalizeIsoDatetime(value: string | null | undefined) {
   if (!trimmed.length) {
     return undefined;
   }
-  const parsed = new Date(trimmed);
-  return Number.isNaN(parsed.getTime()) ? undefined : trimmed;
+  const normalized = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed)
+    ? trimmed
+    : `${trimmed}Z`;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? undefined : normalized;
 }
 
 function isUserConfirmation(message: string) {
