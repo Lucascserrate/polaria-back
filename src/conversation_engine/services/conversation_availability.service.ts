@@ -256,6 +256,10 @@ export class ConversationAvailabilityService {
     return formatTodayInZone(timezone);
   }
 
+  formatNowInZone(timezone?: string) {
+    return formatNowInZone(timezone);
+  }
+
   private async hasOverlapForStaff(input: {
     tenantId: string;
     staffId: string;
@@ -357,6 +361,22 @@ function formatTodayInZone(timezone?: string) {
     return date.toISOString().slice(0, 10);
   }
   return getZonedDateKey(date, timezone);
+}
+
+function formatNowInZone(timezone?: string) {
+  const date = new Date();
+  if (!timezone) {
+    return date.toISOString().slice(11, 16);
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: timezone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+  const hour = parts.find((p) => p.type === 'hour')?.value || '00';
+  const minute = parts.find((p) => p.type === 'minute')?.value || '00';
+  return `${hour}:${minute}`;
 }
 
 function getZonedDateKey(date: Date, timezone?: string) {

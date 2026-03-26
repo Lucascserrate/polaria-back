@@ -101,15 +101,8 @@ export class ConversationAIFlowService {
           formatTime(d, input.timezone),
         );
         // console.log('AI_ALTERNATIVES:', formattedAlternatives);
-        const requestedLocal = formatLocalIso(requested, input.timezone);
-        const finalReply = await this.buildAvailabilityReply({
-          userMessage: findLastUserMessage(input.promptMessages),
-          requestedDatetime: requestedLocal ?? normalizedDatetime,
-          isAvailable,
-          alternatives: formattedAlternatives,
-        });
         return {
-          reply: finalReply,
+          reply: parsed.reply || response?.content || '',
           name: parsed.name,
           services: parsed.services,
           staff: parsed.staff,
@@ -135,38 +128,6 @@ export class ConversationAIFlowService {
         ? normalizedDatetime.slice(0, 10)
         : null,
     };
-  }
-
-  private async buildAvailabilityReply(input: {
-    userMessage: string;
-    requestedDatetime: string;
-    isAvailable: boolean;
-    alternatives: string[];
-  }) {
-    const system = [
-      'Responde como una persona real, natural y breve.',
-      'Si is_available es true, confirma que ese horario esta disponible y pide confirmacion.',
-      'Si is_available es false, ofrece las alternativas si existen.',
-      'Si no hay alternativas, pide otra hora o dia.',
-    ].join(' ');
-
-    const payload = JSON.stringify(
-      {
-        user_message: input.userMessage,
-        requested_datetime: input.requestedDatetime,
-        is_available: input.isAvailable,
-        alternatives: input.alternatives,
-      },
-      null,
-      2,
-    );
-
-    const response = await this.aiService.chat([
-      { role: 'system', content: system },
-      { role: 'user', content: payload },
-    ]);
-
-    return response?.content ?? '';
   }
 }
 
@@ -324,42 +285,4 @@ function formatTime(date: Date, timezone?: string) {
     minute: '2-digit',
     timeZone: timezone,
   });
-}
-
-function formatLocalIso(date: Date, timezone?: string) {
-  if (!timezone) {
-    return date.toISOString().slice(0, 19);
-  }
-  try {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(date);
-    const year = parts.find((p) => p.type === 'year')?.value || '0000';
-    const month = parts.find((p) => p.type === 'month')?.value || '01';
-    const day = parts.find((p) => p.type === 'day')?.value || '01';
-    const hour = parts.find((p) => p.type === 'hour')?.value || '00';
-    const minute = parts.find((p) => p.type === 'minute')?.value || '00';
-    const second = parts.find((p) => p.type === 'second')?.value || '00';
-    return `${year}-${month}-${day}T${hour}:${minute}:${second}`;
-  } catch {
-    return date.toISOString().slice(0, 19);
-  }
-}
-
-function findLastUserMessage(
-  messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
-) {
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    if (messages[i].role === 'user') {
-      return messages[i].content;
-    }
-  }
-  return '';
 }

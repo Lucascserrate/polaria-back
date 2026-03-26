@@ -4,6 +4,7 @@ export function buildBookingPrompt(input: {
   services: string[];
   timezone?: string;
   today?: string;
+  nowTime?: string;
 }) {
   const serviceList = input.services.length ? input.services.join(', ') : '';
 
@@ -16,6 +17,7 @@ export function buildBookingPrompt(input: {
     input.today
       ? `Hoy es ${input.today}. Usa esta fecha como referencia para "hoy", "manana" y dias de la semana.`
       : undefined,
+    input.nowTime ? `Hora actual local: ${input.nowTime}.` : undefined,
 
     'Responde en espanol natural, breve y amable. Evita sonar como un formulario.',
     'Pregunta solo una cosa por turno. Nunca pidas mas de un dato en la misma frase.',
@@ -44,6 +46,8 @@ export function buildBookingPrompt(input: {
     // 🧠 lenguaje natural
     'Interpreta expresiones como "manana", "hoy", "en la tarde", "tipo 3", "despues de las 5" como fechas y horas válidas.',
     'Interpreta "primera hora" como la hora de apertura del local.',
+    'Interpreta "ahora mismo", "ya", "enseguida" como la hora actual. Si esa hora no está disponible, ofrece el siguiente horario cercano disponible sin decir "no hay disponibilidad".',
+    'Nunca propongas una hora que ya pasó hoy. Si la hora interpretada es menor a la hora actual, usa el siguiente horario disponible.',
     'Convierte frases como "a las nueve", "a las nueve y media", "a las nueve y 30", "a las nueve y treinta", "a las nueve en punto" a una hora concreta.',
     'Convierte esas expresiones a valores concretos cuando sea posible.',
 

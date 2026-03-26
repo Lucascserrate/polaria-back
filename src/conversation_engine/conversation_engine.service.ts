@@ -53,6 +53,9 @@ export class ConversationEngineService {
           today: this.conversationAvailabilityService.formatTodayInZone(
             timezoneSafe ?? undefined,
           ),
+          nowTime: this.conversationAvailabilityService.formatNowInZone(
+            timezoneSafe ?? undefined,
+          ),
         })
       : null;
     if (!systemPromptOverride && !tenantPrompt) {
