@@ -5,15 +5,21 @@ import {
   Appointment,
   AppointmentStatus,
 } from '../../appointments/entities/appointment.entity';
+import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
 import { BusinessHour } from '../../business_hours/entities/business_hour.entity';
+import { Staff } from '../../staff/entities/staff.entity';
 
 @Injectable()
 export class ConversationAvailabilityService {
   constructor(
     @InjectRepository(Appointment)
     private readonly appointmentRepository: Repository<Appointment>,
+    @InjectRepository(AppointmentService)
+    private readonly appointmentServiceRepository: Repository<AppointmentService>,
     @InjectRepository(BusinessHour)
     private readonly businessHourRepository: Repository<BusinessHour>,
+    @InjectRepository(Staff)
+    private readonly staffRepository: Repository<Staff>,
   ) {}
 
   async isSlotAvailable(
@@ -21,7 +27,12 @@ export class ConversationAvailabilityService {
     start: Date,
     end: Date,
     timezone?: string,
+    staffId?: string,
   ) {
+    const now = new Date();
+    if (isPastSlot(start, now, timezone)) {
+      return false;
+    }
     const hasHours = await this.isWithinBusinessHours(
       tenantId,
       start,
@@ -32,17 +43,77 @@ export class ConversationAvailabilityService {
       return false;
     }
 
-    const overlapCount = await this.appointmentRepository
-      .createQueryBuilder('appointment')
-      .where('appointment.tenantId = :tenantId', { tenantId })
-      .andWhere('appointment.status != :status', {
-        status: AppointmentStatus.CANCELLED,
-      })
-      .andWhere('appointment.startTime < :end', { end })
-      .andWhere('appointment.endTime > :start', { start })
-      .getCount();
+    if (staffId) {
+      const hasOverlap = await this.hasOverlapForStaff({
+        tenantId,
+        staffId,
+        start,
+        end,
+      });
+      return !hasOverlap;
+    }
 
-    return overlapCount === 0;
+    const staffList = await this.staffRepository.find({
+      where: { tenantId, isActive: true },
+    });
+    for (const staff of staffList) {
+      const hasOverlap = await this.hasOverlapForStaff({
+        tenantId,
+        staffId: staff.id,
+        start,
+        end,
+      });
+      if (!hasOverlap) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  async findAvailableStaffIdForSlot(input: {
+    tenantId: string;
+    start: Date;
+    end: Date;
+    timezone?: string;
+    staffId?: string | null;
+  }) {
+    const hasHours = await this.isWithinBusinessHours(
+      input.tenantId,
+      input.start,
+      input.end,
+      input.timezone,
+    );
+    if (!hasHours) {
+      return null;
+    }
+
+    if (input.staffId) {
+      const hasOverlap = await this.hasOverlapForStaff({
+        tenantId: input.tenantId,
+        staffId: input.staffId,
+        start: input.start,
+        end: input.end,
+      });
+      return hasOverlap ? null : input.staffId;
+    }
+
+    const staffList = await this.staffRepository.find({
+      where: { tenantId: input.tenantId, isActive: true },
+    });
+    for (const staff of staffList) {
+      const hasOverlap = await this.hasOverlapForStaff({
+        tenantId: input.tenantId,
+        staffId: staff.id,
+        start: input.start,
+        end: input.end,
+      });
+      if (!hasOverlap) {
+        return staff.id;
+      }
+    }
+
+    return null;
   }
 
   async getAlternativeTimes(input: {
@@ -53,16 +124,19 @@ export class ConversationAvailabilityService {
     stepMinutes?: number;
     timezone?: string;
     maxDaysAhead?: number;
+    staffId?: string | null;
   }) {
     const step = input.stepMinutes ?? Math.min(input.durationMinutes, 10);
     const maxDaysAhead = input.maxDaysAhead ?? 7;
     const now = new Date();
     const requestedKey = getZonedDateKey(input.start, input.timezone);
+    const requestedMinutes = getTimeMinutes(input.start, input.timezone);
 
     const allAvailable: Date[] = [];
 
     for (let offset = 0; offset <= maxDaysAhead; offset += 1) {
       const day = addDays(input.start, offset);
+      const dayKey = getZonedDateKey(day, input.timezone);
 
       const dayHours = await this.getBusinessHoursForDate(
         input.tenantId,
@@ -95,6 +169,13 @@ export class ConversationAvailabilityService {
           cursor.getTime() + input.durationMinutes * 60 * 1000 <=
           intervalEnd.getTime()
         ) {
+          if (
+            dayKey === requestedKey &&
+            getTimeMinutes(cursor, input.timezone) < requestedMinutes
+          ) {
+            cursor = addMinutes(cursor, step);
+            continue;
+          }
           if (!isPastSlot(cursor, now, input.timezone)) {
             const end = addMinutes(cursor, input.durationMinutes);
 
@@ -103,6 +184,7 @@ export class ConversationAvailabilityService {
               cursor,
               end,
               input.timezone,
+              input.staffId ?? undefined,
             );
 
             if (ok) {
@@ -172,6 +254,50 @@ export class ConversationAvailabilityService {
 
   formatTodayInZone(timezone?: string) {
     return formatTodayInZone(timezone);
+  }
+
+  private async hasOverlapForStaff(input: {
+    tenantId: string;
+    staffId: string;
+    start: Date;
+    end: Date;
+  }) {
+    const appointmentServiceOverlap = await this.appointmentServiceRepository
+      .createQueryBuilder('appointmentService')
+      .innerJoin(
+        'appointmentService.appointment',
+        'appointment',
+        'appointment.id = appointmentService.appointmentId',
+      )
+      .where('appointment.tenantId = :tenantId', {
+        tenantId: input.tenantId,
+      })
+      .andWhere('appointment.status != :status', {
+        status: AppointmentStatus.CANCELLED,
+      })
+      .andWhere('appointmentService.staffId = :staffId', {
+        staffId: input.staffId,
+      })
+      .andWhere('appointmentService.startTime < :end', { end: input.end })
+      .andWhere('appointmentService.endTime > :start', { start: input.start })
+      .getCount();
+
+    if (appointmentServiceOverlap > 0) {
+      return true;
+    }
+
+    const appointmentOverlap = await this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.tenantId = :tenantId', { tenantId: input.tenantId })
+      .andWhere('appointment.status != :status', {
+        status: AppointmentStatus.CANCELLED,
+      })
+      .andWhere('appointment.staffId = :staffId', { staffId: input.staffId })
+      .andWhere('appointment.startTime < :end', { end: input.end })
+      .andWhere('appointment.endTime > :start', { start: input.start })
+      .getCount();
+
+    return appointmentOverlap > 0;
   }
 }
 
