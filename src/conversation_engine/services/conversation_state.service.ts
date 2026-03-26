@@ -3,12 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { ConversationState } from '../../conversations/entities/conversation.entity';
 import { Service } from '../../services/entities/service.entity';
+import { Staff } from '../../staff/entities/staff.entity';
 
 @Injectable()
 export class ConversationStateService {
   constructor(
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
+    @InjectRepository(Staff)
+    private readonly staffRepository: Repository<Staff>,
   ) {}
 
   // Resuelve el estado segun el mensaje del usuario.
@@ -57,6 +60,24 @@ export class ConversationStateService {
     const normalized = normalizeMessage(message);
     return services.filter((service) =>
       normalized.includes(normalizeMessage(service.name)),
+    );
+  }
+
+  async findStaffMatch(
+    tenantId: string,
+    message: string,
+  ): Promise<Staff | null> {
+    const matches = await this.findStaffMatches(tenantId, message);
+    return matches[0] ?? null;
+  }
+
+  async findStaffMatches(tenantId: string, message: string): Promise<Staff[]> {
+    const staffList = await this.staffRepository.find({
+      where: { tenantId, isActive: true },
+    });
+    const normalized = normalizeMessage(message);
+    return staffList.filter((staff) =>
+      normalized.includes(normalizeMessage(staff.name)),
     );
   }
 

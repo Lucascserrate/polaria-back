@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { ChatMessageDto } from './dto/chat-message.dto';
 import { MessageRole } from '../messages/entities/message.entity';
 import { ConversationIdentityService } from './services/conversation_identity.service';
@@ -42,7 +42,7 @@ export class ConversationEngineService {
       }
     }
 
-    const timezoneSafe = 'UTC';
+    const timezoneSafe = 'America/La_Paz';
     const serviceNames = tenant ? await this.loadServiceNames(tenantId) : [];
     const tenantPrompt = tenant
       ? buildBookingPrompt({
@@ -82,8 +82,14 @@ export class ConversationEngineService {
       (conversation.contextJson as Record<string, unknown> | null) || {};
     const serviceMatches =
       await this.conversationStateService.findServiceMatches(tenantId, message);
+    const staffMatches = await this.conversationStateService.findStaffMatches(
+      tenantId,
+      message,
+    );
     const existingServiceIds = readStringArray(context.serviceIds);
     const existingServiceNames = readStringArray(context.serviceNames);
+    const existingStaffId = readString(context.staffId);
+    const existingStaffName = readString(context.staffName);
     if (!existingServiceIds.length) {
       const fallbackId = readString(context.serviceId);
       if (fallbackId) {
@@ -107,6 +113,14 @@ export class ConversationEngineService {
       context.serviceNames = Array.from(mergedNames);
       delete context.serviceId;
       delete context.serviceName;
+    }
+    if (staffMatches.length) {
+      const staff = staffMatches[0];
+      context.staffId = staff.id;
+      context.staffName = staff.name;
+    } else if (!existingStaffId && !existingStaffName) {
+      delete context.staffId;
+      delete context.staffName;
     }
 
     const history = await this.conversationMessagesService.getRecentMessages(
@@ -142,6 +156,7 @@ export class ConversationEngineService {
       timezone: timezoneSafe ?? undefined,
       durationMinutes: serviceDurationMinutes ?? undefined,
       stepMinutes: serviceDurationMinutes ?? 10,
+      staffId: readString(context.staffId),
     });
     let finalReply = aiReply.reply;
 
@@ -161,6 +176,16 @@ export class ConversationEngineService {
       context.serviceNames = Array.from(mergedNames);
       delete context.serviceId;
       delete context.serviceName;
+    }
+    if (aiReply.staff) {
+      const aiStaffMatch = await this.conversationStateService.findStaffMatch(
+        tenantId,
+        aiReply.staff,
+      );
+      if (aiStaffMatch) {
+        context.staffId = aiStaffMatch.id;
+        context.staffName = aiStaffMatch.name;
+      }
     }
 
     await this.conversationMessagesService.saveMessage({
@@ -188,7 +213,10 @@ export class ConversationEngineService {
     const hasService =
       readStringArray(context.serviceIds).length > 0 ||
       typeof context.serviceId === 'string';
-    const normalizedDatetime = normalizeIsoDatetime(aiReply.datetime);
+    const normalizedDatetime = normalizeIsoDatetime(
+      aiReply.datetime,
+      timezoneSafe ?? undefined,
+    );
     if (normalizedDatetime && aiReply.isAvailable && hasName && hasService) {
       context.pendingDatetime = normalizedDatetime;
     }
@@ -200,10 +228,25 @@ export class ConversationEngineService {
           : null;
     }
 
+    const userConfirmed = isUserConfirmation(message);
     let confirmationStatus =
-      aiReply.confirmationStatus === 'pending' && isUserConfirmation(message)
+      aiReply.confirmationStatus === 'pending' && userConfirmed
         ? 'confirmed'
         : aiReply.confirmationStatus;
+    if (confirmationStatus === 'confirmed' && !userConfirmed) {
+      confirmationStatus = 'pending';
+    }
+
+    if (normalizedDatetime && (!hasName || !hasService)) {
+      confirmationStatus = null;
+      delete context.pendingDatetime;
+      if (!hasName) {
+        finalReply =
+          'Necesito tu nombre para continuar con la reserva. ¿Cuál es?';
+      } else if (!hasService) {
+        finalReply = '¿Qué servicio deseas reservar?';
+      }
+    }
 
     if (
       (confirmationStatus === 'pending' ||
@@ -233,6 +276,7 @@ export class ConversationEngineService {
           clientId: client.id,
           conversationId: conversation.id,
           context,
+          timezone: timezoneSafe ?? undefined,
         });
       if (bookingResult.handled) {
         return { message: bookingResult.reply };
@@ -301,7 +345,10 @@ function normalizeName(value: string | null | undefined) {
   return trimmed.length ? trimmed : undefined;
 }
 
-function normalizeIsoDatetime(value: string | null | undefined) {
+function normalizeIsoDatetime(
+  value: string | null | undefined,
+  timezone?: string,
+) {
   if (!value || typeof value !== 'string') {
     return undefined;
   }
@@ -311,9 +358,36 @@ function normalizeIsoDatetime(value: string | null | undefined) {
   }
   const normalized = /([zZ]|[+-]\d{2}:?\d{2})$/.test(trimmed)
     ? trimmed
-    : `${trimmed}Z`;
+    : `${trimmed}${getTimeZoneOffset(timezone ?? 'UTC') ?? ''}`;
   const parsed = new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? undefined : normalized;
+  return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+}
+
+function getTimeZoneOffset(timezone: string) {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'shortOffset',
+    }).formatToParts(new Date());
+    const tz = parts.find((p) => p.type === 'timeZoneName')?.value;
+    if (!tz) {
+      return null;
+    }
+    const match = tz.match(/GMT([+-]\d{1,2})(?::?(\d{2}))?/);
+    if (!match) {
+      return null;
+    }
+    const rawHours = Number(match[1]);
+    if (Number.isNaN(rawHours)) {
+      return null;
+    }
+    const sign = rawHours < 0 ? '-' : '+';
+    const hours = Math.abs(rawHours).toString().padStart(2, '0');
+    const minutes = (match[2] ?? '00').padStart(2, '0');
+    return `${sign}${hours}:${minutes}`;
+  } catch {
+    return null;
+  }
 }
 
 function isUserConfirmation(message: string) {
@@ -324,7 +398,7 @@ function isUserConfirmation(message: string) {
     .replace(/[\u0300-\u036f]/g, '');
   return (
     normalized === 'si' ||
-    normalized === 'sí' ||
+    normalized === 'sÃ­' ||
     normalized === 'ok' ||
     normalized === 'yes' ||
     normalized === 'de acuerdo' ||
