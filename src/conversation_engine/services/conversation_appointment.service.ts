@@ -8,7 +8,6 @@ import {
 import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
 import { Service } from '../../services/entities/service.entity';
 import { Staff } from '../../staff/entities/staff.entity';
-import { ConversationAvailabilityService } from './conversation_availability.service';
 
 @Injectable()
 export class ConversationAppointmentService {
@@ -21,7 +20,6 @@ export class ConversationAppointmentService {
     private readonly serviceRepository: Repository<Service>,
     @InjectRepository(Staff)
     private readonly staffRepository: Repository<Staff>,
-    private readonly conversationAvailabilityService: ConversationAvailabilityService,
   ) {}
 
   async createConfirmedAppointment(input: {
@@ -29,8 +27,6 @@ export class ConversationAppointmentService {
     clientId: string;
     serviceIds: string[];
     startTime: Date;
-    staffId?: string | null;
-    timezone?: string;
   }) {
     const serviceIds = input.serviceIds.filter(Boolean);
     if (!serviceIds.length) {
@@ -48,6 +44,14 @@ export class ConversationAppointmentService {
       return null;
     }
 
+    const staff = await this.staffRepository.findOneBy({
+      tenantId: input.tenantId,
+      isActive: true,
+    });
+    if (!staff) {
+      return null;
+    }
+
     const totalDuration = services.reduce(
       (sum, service) => sum + service.durationMinutes,
       0,
@@ -56,28 +60,11 @@ export class ConversationAppointmentService {
       input.startTime.getTime() + totalDuration * 60 * 1000,
     );
 
-    const staffId = await this.conversationAvailabilityService
-      .findAvailableStaffIdForSlot({
-        tenantId: input.tenantId,
-        start: input.startTime,
-        end: endTime,
-        timezone: input.timezone,
-        staffId: input.staffId ?? null,
-      })
-      .then((id) => id ?? null);
-    if (!staffId) {
-      return null;
-    }
-    const staff = await this.staffRepository.findOneBy({ id: staffId });
-    if (!staff) {
-      return null;
-    }
-
     const record = this.appointmentRepository.create({
       tenantId: input.tenantId,
       clientId: input.clientId,
       serviceId: serviceIds[0],
-      staffId,
+      staffId: staff.id,
       startTime: input.startTime,
       endTime,
       status: AppointmentStatus.CONFIRMED,
@@ -94,7 +81,7 @@ export class ConversationAppointmentService {
       return this.appointmentServiceRepository.create({
         appointmentId: saved.id,
         serviceId: service.id,
-        staffId,
+        staffId: staff.id,
         startTime: serviceStart,
         endTime: serviceEnd,
         priceAtBooking: Number(service.price),

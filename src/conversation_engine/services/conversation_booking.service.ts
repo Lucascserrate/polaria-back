@@ -18,7 +18,6 @@ export class ConversationBookingService {
     clientId: string;
     conversationId: string;
     context: Record<string, unknown>;
-    timezone?: string;
   }) {
     const pendingDatetime =
       typeof input.context.pendingDatetime === 'string'
@@ -31,8 +30,6 @@ export class ConversationBookingService {
       : typeof input.context.serviceId === 'string'
         ? [input.context.serviceId]
         : [];
-    const pendingStaffId =
-      typeof input.context.staffId === 'string' ? input.context.staffId : null;
 
     if (!pendingDatetime || !pendingServiceIds.length) {
       return { handled: false as const };
@@ -46,8 +43,6 @@ export class ConversationBookingService {
         clientId: input.clientId,
         serviceIds: pendingServiceIds,
         startTime: start,
-        staffId: pendingStaffId,
-        timezone: input.timezone,
       }));
 
     const reply = appointment
