@@ -231,14 +231,7 @@ export class ConversationEngineService {
           : null;
     }
 
-    const userConfirmed = isUserConfirmation(message);
-    let confirmationStatus =
-      aiReply.confirmationStatus === 'pending' && userConfirmed
-        ? 'confirmed'
-        : aiReply.confirmationStatus;
-    if (confirmationStatus === 'confirmed' && !userConfirmed) {
-      confirmationStatus = 'pending';
-    }
+    let confirmationStatus = aiReply.confirmationStatus;
 
     if (normalizedDatetime && (!hasName || !hasService)) {
       confirmationStatus = null;
