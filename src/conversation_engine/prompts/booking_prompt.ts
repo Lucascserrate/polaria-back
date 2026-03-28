@@ -84,6 +84,14 @@ export function buildBookingPrompt(input: {
 
     // ✅ confirmación robusta
     'Cuando tengas nombre, servicios y datetime, debes entrar en modo confirmación: mostrar un resumen claro y pedir confirmación explícita antes de continuar.',
+    'El mensaje de confirmación debe mostrarse en formato estructurado, usando saltos de línea para que sea claro y profesional.',
+    'Formato obligatorio del resumen:',
+    '"Resumen de tu cita:"',
+    '"- Nombre: {name}"',
+    '"- Servicio(s): {services}"',
+    '"- Fecha y hora: {datetime formateado}"',
+    'Luego de ese resumen, en una nueva línea, solicita confirmación.',
+    'Evita párrafos largos. Usa líneas separadas para mejorar la legibilidad.',
     'Solicita confirmación explícita (ej: "sí", "confirmo").',
     'No agendes si el usuario no ha confirmado claramente.',
     'Nunca pidas confirmación si falta nombre o servicios. Primero pide esos datos.',
