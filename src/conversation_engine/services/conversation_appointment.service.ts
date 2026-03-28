@@ -68,6 +68,17 @@ export class ConversationAppointmentService {
     if (!staffId) {
       return null;
     }
+    const stillAvailable =
+      await this.conversationAvailabilityService.isSlotAvailable(
+        input.tenantId,
+        input.startTime,
+        endTime,
+        input.timezone,
+        staffId,
+      );
+    if (!stillAvailable) {
+      return null;
+    }
     const staff = await this.staffRepository.findOneBy({ id: staffId });
     if (!staff) {
       return null;

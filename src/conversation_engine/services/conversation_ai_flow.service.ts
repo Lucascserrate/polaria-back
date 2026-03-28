@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AIService } from '../../ai/ai.service';
 import { ConversationAvailabilityService } from './conversation_availability.service';
+import { formatTime } from '../utils/time_format';
 
 @Injectable()
 export class ConversationAIFlowService {
@@ -277,12 +278,4 @@ function getTimeZoneOffset(timezone: string) {
   } catch {
     return null;
   }
-}
-
-function formatTime(date: Date, timezone?: string) {
-  return date.toLocaleTimeString('es-CO', {
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: timezone,
-  });
 }
