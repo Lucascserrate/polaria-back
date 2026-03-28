@@ -44,6 +44,9 @@ export class ConversationEngineService {
 
     const timezoneSafe = 'America/La_Paz';
     const serviceNames = tenant ? await this.loadServiceNames(tenantId) : [];
+    const businessHours = tenant ? await this.safeBusinessHours(tenantId) : [];
+    const businessHoursSummary = formatBusinessHoursSummary(businessHours);
+    const businessHoursByDay = formatBusinessHoursByDay(businessHours);
     const tenantPrompt = tenant
       ? buildBookingPrompt({
           businessName: tenant.name,
@@ -56,6 +59,8 @@ export class ConversationEngineService {
           nowTime: this.conversationAvailabilityService.formatNowInZone(
             timezoneSafe ?? undefined,
           ),
+          businessHoursSummary: businessHoursSummary ?? undefined,
+          businessHoursByDay: businessHoursByDay ?? undefined,
         })
       : null;
     if (!systemPromptOverride && !tenantPrompt) {
@@ -308,6 +313,17 @@ export class ConversationEngineService {
       return [];
     }
   }
+
+  private async safeBusinessHours(
+    tenantId: string,
+  ): Promise<BusinessHourSlot[]> {
+    const raw: unknown =
+      await this.conversationTenantService.findBusinessHours(tenantId);
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    return raw.filter(isBusinessHourSlot);
+  }
 }
 
 function normalizePrompt(value: unknown) {
@@ -386,19 +402,98 @@ function getTimeZoneOffset(timezone: string) {
   }
 }
 
-function isUserConfirmation(message: string) {
-  const normalized = message
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+type BusinessHourSlot = {
+  dayOfWeek: number;
+  startTime: string;
+  endTime: string;
+};
+
+function isBusinessHourSlot(value: unknown): value is BusinessHourSlot {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const record = value as {
+    dayOfWeek?: unknown;
+    startTime?: unknown;
+    endTime?: unknown;
+  };
   return (
-    normalized === 'si' ||
-    normalized === 'sÃ­' ||
-    normalized === 'ok' ||
-    normalized === 'yes' ||
-    normalized === 'de acuerdo' ||
-    normalized.includes('confirmo') ||
-    normalized.includes('confirmar')
+    typeof record.dayOfWeek === 'number' &&
+    typeof record.startTime === 'string' &&
+    typeof record.endTime === 'string'
   );
+}
+
+function formatBusinessHoursSummary(
+  hours: Array<{ dayOfWeek: number; startTime: string; endTime: string }>,
+) {
+  if (!hours.length) {
+    return null;
+  }
+  const byDay = buildBusinessHoursByDay(hours);
+  const dayNames = getDayNames();
+  const grouped: Array<{ start: number; end: number; hours: string }> = [];
+  for (let i = 0; i < dayNames.length; i += 1) {
+    const hoursText = byDay[i] ?? 'Cerrado';
+    const prev = grouped[grouped.length - 1];
+    if (prev && prev.hours === hoursText && prev.end === i - 1) {
+      prev.end = i;
+    } else {
+      grouped.push({ start: i, end: i, hours: hoursText });
+    }
+  }
+  const parts = grouped.map((group) => {
+    const startName = dayNames[group.start];
+    const endName = dayNames[group.end];
+    const label =
+      group.start === group.end ? startName : `${startName} a ${endName}`;
+    return `${label}: ${group.hours}`;
+  });
+  return parts.join('. ');
+}
+
+function formatBusinessHoursByDay(
+  hours: Array<{ dayOfWeek: number; startTime: string; endTime: string }>,
+) {
+  if (!hours.length) {
+    return null;
+  }
+  const byDay = buildBusinessHoursByDay(hours);
+  const dayNames = getDayNames();
+  return dayNames
+    .map((name, index) => `${name}: ${byDay[index] ?? 'Cerrado'}`)
+    .join('. ');
+}
+
+function buildBusinessHoursByDay(
+  hours: Array<{ dayOfWeek: number; startTime: string; endTime: string }>,
+) {
+  const byDay: Record<number, string[]> = {};
+  for (const item of hours) {
+    const start = item.startTime.slice(0, 5);
+    const end = item.endTime.slice(0, 5);
+    const range = `${start}-${end}`;
+    if (!byDay[item.dayOfWeek]) {
+      byDay[item.dayOfWeek] = [];
+    }
+    byDay[item.dayOfWeek].push(range);
+  }
+  const result: Record<number, string> = {};
+  for (const [dayKey, ranges] of Object.entries(byDay)) {
+    const unique = Array.from(new Set(ranges));
+    result[Number(dayKey)] = unique.join(' y ');
+  }
+  return result;
+}
+
+function getDayNames() {
+  return [
+    'Domingo',
+    'Lunes',
+    'Martes',
+    'Miércoles',
+    'Jueves',
+    'Viernes',
+    'Sábado',
+  ];
 }

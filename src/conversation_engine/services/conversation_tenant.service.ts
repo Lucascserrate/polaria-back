@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Service } from '../../services/entities/service.entity';
+import { BusinessHour } from '../../business_hours/entities/business_hour.entity';
 
 @Injectable()
 export class ConversationTenantService {
@@ -11,6 +12,8 @@ export class ConversationTenantService {
     private readonly tenantRepository: Repository<Tenant>,
     @InjectRepository(Service)
     private readonly serviceRepository: Repository<Service>,
+    @InjectRepository(BusinessHour)
+    private readonly businessHourRepository: Repository<BusinessHour>,
   ) {}
 
   // Obtiene el tenant para personalizar el prompt.
@@ -25,5 +28,12 @@ export class ConversationTenantService {
       order: { name: 'ASC' },
     });
     return services.map((service) => service.name);
+  }
+
+  async findBusinessHours(tenantId: string): Promise<BusinessHour[]> {
+    return this.businessHourRepository.find({
+      where: { tenantId },
+      order: { dayOfWeek: 'ASC', startTime: 'ASC' },
+    });
   }
 }
