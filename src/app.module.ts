@@ -12,6 +12,7 @@ import { BusinessHoursModule } from './business_hours/business_hours.module';
 import { AIModule } from './ai/ai.module';
 import { MessagesModule } from './messages/messages.module';
 import { dbConfig } from './config/data-source';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { dbConfig } from './config/data-source';
     MessagesModule,
     BusinessHoursModule,
     AIModule,
+    AuthModule,
   ],
   controllers: [],
   providers: [],

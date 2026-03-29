@@ -28,6 +28,15 @@ export class Tenant {
   @Column()
   timezone: string;
 
+  @Column({ nullable: true })
+  email?: string;
+
+  @Column({ nullable: true })
+  googleId?: string;
+
+  @Column({ default: 'active' })
+  status: string;
+
   @Column()
   googleRefreshToken: string;
 

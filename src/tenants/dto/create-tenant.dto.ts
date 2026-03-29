@@ -23,6 +23,21 @@ export class CreateTenantDto {
   @IsString()
   timezone: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  email?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  googleId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  status?: string;
+
   @ApiProperty()
   @IsString()
   googleRefreshToken: string;

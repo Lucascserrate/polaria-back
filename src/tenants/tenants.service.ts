@@ -26,6 +26,19 @@ export class TenantsService {
     return this.tenantRepository.findOneBy({ id });
   }
 
+  findByGoogleId(googleId: string) {
+    return this.tenantRepository.findOneBy({ googleId });
+  }
+
+  findByEmail(email: string) {
+    return this.tenantRepository.findOneBy({ email });
+  }
+
+  async setGoogleId(id: string, googleId: string) {
+    await this.tenantRepository.update(id, { googleId });
+    return this.findOne(id);
+  }
+
   async update(id: string, updateTenantDto: UpdateTenantDto) {
     await this.tenantRepository.update(id, updateTenantDto);
     return this.findOne(id);
