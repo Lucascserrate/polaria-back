@@ -65,6 +65,9 @@ export function buildBookingPrompt(input: {
     'Interpreta "primera hora" como la hora de apertura del local, pero debes validar disponibilidad en ese horario antes de confirmarla.',
     'Interpreta "ahora mismo", "ya", "enseguida" como la hora actual. Si esa hora no está disponible, ofrece el siguiente horario cercano disponible sin decir "no hay disponibilidad".',
     'Nunca propongas una hora que ya pasó hoy. Si la hora interpretada es menor a la hora actual, usa el siguiente horario disponible.',
+    'Si la hora actual local ya pasó el horario de cierre del día, responde que el local está cerrado y ofrece el siguiente horario disponible (normalmente mañana a primera hora).',
+    'Si el usuario pide "hoy" o "ahora mismo" y el local ya está cerrado, no ofrezcas horas de hoy.',
+    'Si la hora solicitada cae fuera del horario de atención, di claramente que el local está cerrado en ese horario y ofrece el siguiente horario disponible.',
     'Convierte frases como "a las nueve", "a las nueve y media", "a las nueve y 30", "a las nueve y treinta", "a las nueve en punto" a una hora concreta.',
     'Convierte esas expresiones a valores concretos cuando sea posible.',
 
@@ -90,6 +93,7 @@ export function buildBookingPrompt(input: {
     '"- Nombre: {name}"',
     '"- Servicio(s): {services}"',
     '"- Fecha y hora: {datetime formateado}"',
+    'Cuando confirmation_status sea "pending", el reply debe incluir el resumen completo en ese mismo mensaje.',
     'Luego de ese resumen, en una nueva línea, solicita confirmación.',
     'Evita párrafos largos. Usa líneas separadas para mejorar la legibilidad.',
     'Solicita confirmación explícita (ej: "sí", "confirmo").',
