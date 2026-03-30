@@ -84,11 +84,11 @@ export class AuthService {
       const { data, notFound, notActive } = await this.oauthLogin(user);
       const isProd = process.env.NODE_ENV === 'prod';
       if (notFound) {
-        res.redirect(`${CLIENT_BASE_URL ?? ''}/contacto`);
+        res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
       }
       if (notActive) {
-        res.redirect(`${CLIENT_BASE_URL ?? ''}/contacto`);
+        res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
       }
 

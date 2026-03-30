@@ -1,6 +1,6 @@
 import { Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
-import type { Request, Response } from 'express';
+import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import type { GoogleUserDto } from './dto/google-user.dto';
 
@@ -37,5 +37,22 @@ export class AuthController {
   @UseGuards(AuthGuard('jwt'))
   validateToken(@Req() req: JwtAuthRequest) {
     return this.authService.validateTenant(req.user);
+  }
+
+  @Post('logout')
+  logout(@Res() res: Response) {
+    const cookieOptions: CookieOptions = {
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+    };
+
+    if (process.env.NODE_ENV === 'prod') {
+      cookieOptions.domain = '.polaria.io';
+    }
+    res.clearCookie('accessToken', cookieOptions);
+    res.clearCookie('refreshToken', cookieOptions);
+
+    return res.status(200).json({ message: 'Logged out successfully' });
   }
 }
