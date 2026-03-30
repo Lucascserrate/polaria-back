@@ -9,6 +9,7 @@ import { ConversationStateService } from './services/conversation_state.service'
 import { ConversationAIFlowService } from './services/conversation_ai_flow.service';
 import { ConversationBookingService } from './services/conversation_booking.service';
 import { ConversationAvailabilityService } from './services/conversation_availability.service';
+import { getTemporaryClientName } from './temporary_client_names';
 
 @Injectable()
 export class ConversationEngineService {
@@ -47,11 +48,16 @@ export class ConversationEngineService {
     const businessHours = tenant ? await this.safeBusinessHours(tenantId) : [];
     const businessHoursSummary = formatBusinessHoursSummary(businessHours);
     const businessHoursByDay = formatBusinessHoursByDay(businessHours);
+    // Simulacion de nombre de WhatsApp cuando no hay nombre real.
+    const tempUserName = getTemporaryClientName(phone);
+    console.log(tempUserName);
+
     const tenantPrompt = tenant
       ? buildBookingPrompt({
           businessName: tenant.name,
           businessType: tenant.businessType as string,
           services: serviceNames,
+          userName: tempUserName,
           timezone: timezoneSafe ?? undefined,
           today: this.conversationAvailabilityService.formatTodayInZone(
             timezoneSafe ?? undefined,
