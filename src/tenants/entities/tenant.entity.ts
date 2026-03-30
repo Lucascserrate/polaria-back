@@ -37,8 +37,8 @@ export class Tenant {
   @Column({ default: 'active' })
   status: string;
 
-  @Column()
-  googleRefreshToken: string;
+  @Column({ nullable: true })
+  googleRefreshToken?: string;
 
   @Column({ nullable: true })
   googleAccessToken?: string;

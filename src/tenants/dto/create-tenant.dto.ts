@@ -38,7 +38,8 @@ export class CreateTenantDto {
   @IsString()
   status?: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  googleRefreshToken: string;
+  googleRefreshToken?: string;
 }
