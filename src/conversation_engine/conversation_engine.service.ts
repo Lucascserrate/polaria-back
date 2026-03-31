@@ -246,6 +246,23 @@ export class ConversationEngineService {
 
     let confirmationStatus = aiReply.confirmationStatus;
 
+    if (
+      confirmationStatus === 'confirmed' &&
+      !readString(context.pendingDatetime)
+    ) {
+      confirmationStatus = null;
+      if (aiReply.alternatives && aiReply.alternatives.length) {
+        finalReply = `Lo siento, ese horario ya no está disponible. Tengo ${aiReply.alternatives.join(
+          ', ',
+        )}. ¿Quieres alguna de esas opciones?`;
+      } else if (!normalizedDatetime) {
+        finalReply = '¿Qué horario te queda mejor?';
+      } else {
+        finalReply =
+          'Lo siento, ese horario no está disponible. ¿Quieres otra hora?';
+      }
+    }
+
     if (normalizedDatetime && (!hasName || !hasService)) {
       confirmationStatus = null;
       delete context.pendingDatetime;

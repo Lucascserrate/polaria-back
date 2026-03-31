@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8" />
@@ -114,7 +114,7 @@
 
   <body>
     <header>
-      <h3>Polaria � Chat IA</h3>
+      <h3>Polaria · Chat IA</h3>
     </header>
 
     <div class="container">
@@ -142,8 +142,31 @@
       const sendBtn = document.getElementById('sendMessage');
       const messageInput = document.getElementById('messageInput');
       const chatStatus = document.getElementById('chatStatus');
+      const phoneInput = document.getElementById('phoneInput');
 
       let sending = false;
+
+      function generateRandomPhone(length = 10) {
+        const digits = [];
+
+        if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+          const bytes = new Uint8Array(length);
+          window.crypto.getRandomValues(bytes);
+          for (let i = 0; i < length; i += 1) {
+            digits.push((bytes[i] % 10).toString());
+          }
+        } else {
+          for (let i = 0; i < length; i += 1) {
+            digits.push(Math.floor(Math.random() * 10).toString());
+          }
+        }
+
+        return digits.join('');
+      }
+
+      function setNewPhoneId() {
+        phoneInput.value = generateRandomPhone();
+      }
 
       function addBubble(text, type) {
         const el = document.createElement('div');
@@ -172,7 +195,7 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               tenantId: document.getElementById('tenantIdInput').value,
-              phone: document.getElementById('phoneInput').value,
+              phone: phoneInput.value,
               message,
             }),
           });
@@ -189,6 +212,7 @@
         sendBtn.disabled = false;
       }
 
+      setNewPhoneId();
       sendBtn.onclick = sendMessage;
 
       messageInput.addEventListener('keydown', (e) => {
@@ -200,3 +224,5 @@
     </script>
   </body>
 </html>
+
+
