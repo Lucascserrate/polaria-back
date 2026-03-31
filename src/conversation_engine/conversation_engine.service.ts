@@ -46,6 +46,7 @@ export class ConversationEngineService {
     const timezoneSafe = 'America/La_Paz';
     const serviceNames = tenant ? await this.loadServiceNames(tenantId) : [];
     const businessHours = tenant ? await this.safeBusinessHours(tenantId) : [];
+    const staffNames = tenant ? await this.loadStaffNames(tenantId) : [];
     const businessHoursSummary = formatBusinessHoursSummary(businessHours);
     const businessHoursByDay = formatBusinessHoursByDay(businessHours);
     // Simulacion de nombre de WhatsApp cuando no hay nombre real.
@@ -57,6 +58,7 @@ export class ConversationEngineService {
           businessName: tenant.name,
           businessType: tenant.businessType as string,
           services: serviceNames,
+          staff: staffNames,
           userName: tempUserName,
           timezone: timezoneSafe ?? undefined,
           today: this.conversationAvailabilityService.formatTodayInZone(
@@ -311,6 +313,19 @@ export class ConversationEngineService {
     try {
       const names =
         await this.conversationTenantService.findActiveServiceNames(tenantId);
+      if (!Array.isArray(names)) {
+        return [];
+      }
+      return names.filter((name): name is string => typeof name === 'string');
+    } catch {
+      return [];
+    }
+  }
+
+  private async loadStaffNames(tenantId: string): Promise<string[]> {
+    try {
+      const names =
+        await this.conversationTenantService.findActiveStaffNames(tenantId);
       if (!Array.isArray(names)) {
         return [];
       }
