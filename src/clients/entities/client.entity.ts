@@ -13,16 +13,16 @@ import { Tenant } from '../../tenants/entities/tenant.entity';
 @Entity('clients')
 export class Client {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  tenantId: string;
+  tenantId!: string;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
-  tenant: Tenant;
+  tenant!: Tenant;
 
   @Column()
-  phone: string;
+  phone!: string;
 
   @Column({ nullable: true })
   name?: string;
@@ -31,8 +31,8 @@ export class Client {
   notes?: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

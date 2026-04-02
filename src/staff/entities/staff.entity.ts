@@ -5,35 +5,40 @@ import {
   ManyToOne,
   CreateDateColumn,
   UpdateDateColumn,
+  OneToMany,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
+import { AppointmentService } from '../../appointments/entities/AppointmentService';
 
 @Entity('staff')
 export class Staff {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  tenantId: string;
+  tenantId!: string;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
-  tenant: Tenant;
+  tenant!: Tenant;
+
+  @OneToMany(() => AppointmentService, (as) => as.staff)
+  appointmentServices!: AppointmentService[];
 
   @Column()
-  name: string;
+  name!: string;
 
   @Column()
-  email: string;
+  email!: string;
 
   @Column({ nullable: true })
   calendarId?: string;
 
   @Column({ default: true })
-  isActive: boolean;
+  isActive!: boolean;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

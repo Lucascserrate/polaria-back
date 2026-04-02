@@ -24,26 +24,26 @@ export enum ConversationState {
 @Entity('conversations')
 export class Conversation {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  tenantId: string;
+  tenantId!: string;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
-  tenant: Tenant;
+  tenant!: Tenant;
 
   @Column()
-  clientId: string;
+  clientId!: string;
 
   @ManyToOne(() => Client, (client) => client.id, { onDelete: 'CASCADE' })
-  client: Client;
+  client!: Client;
 
   @Column({
     type: 'enum',
     enum: ConversationState,
     default: ConversationState.IDLE,
   })
-  currentState: ConversationState;
+  currentState!: ConversationState;
 
   @Column({ type: 'json', nullable: true })
   contextJson?: any;
@@ -52,8 +52,8 @@ export class Conversation {
   lastMessageAt?: Date;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

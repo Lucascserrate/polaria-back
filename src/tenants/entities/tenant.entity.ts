@@ -11,22 +11,22 @@ import {
 @Entity('tenants')
 export class Tenant {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  name: string;
+  name!: string;
 
   @Column({ nullable: true })
   businessType?: string;
 
   @Column()
-  whatsappPhoneNumber: string;
+  whatsappPhoneNumber!: string;
 
   @Column()
-  whatsappPhoneId: string;
+  whatsappPhoneId!: string;
 
   @Column()
-  timezone: string;
+  timezone!: string;
 
   @Column({ nullable: true })
   email?: string;
@@ -35,7 +35,7 @@ export class Tenant {
   googleId?: string;
 
   @Column({ default: 'active' })
-  status: string;
+  status!: string;
 
   @Column({ nullable: true })
   googleRefreshToken?: string;
@@ -47,8 +47,8 @@ export class Tenant {
   calendarId?: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

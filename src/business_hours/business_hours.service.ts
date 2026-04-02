@@ -14,8 +14,9 @@ export class BusinessHoursService {
   ) {}
 
   create(createBusinessHourDto: CreateBusinessHourDto) {
-    const businessHour =
-      this.businessHourRepository.create(createBusinessHourDto);
+    const businessHour = this.businessHourRepository.create(
+      createBusinessHourDto,
+    );
     return this.businessHourRepository.save(businessHour);
   }
 

@@ -13,26 +13,26 @@ import { Tenant } from '../../tenants/entities/tenant.entity';
 @Entity('business_hours')
 export class BusinessHour {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  tenantId: string;
+  tenantId!: string;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
-  tenant: Tenant;
+  tenant!: Tenant;
 
   @Column({ type: 'int' })
-  dayOfWeek: number;
+  dayOfWeek!: number;
 
   @Column({ type: 'time' })
-  startTime: string;
+  startTime!: string;
 
   @Column({ type: 'time' })
-  endTime: string;
+  endTime!: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

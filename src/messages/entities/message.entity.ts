@@ -20,37 +20,37 @@ export enum MessageRole {
 @Entity('messages')
 export class Message {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  tenantId: string;
+  tenantId!: string;
 
   @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
-  tenant: Tenant;
+  tenant!: Tenant;
 
   @Column()
-  conversationId: string;
+  conversationId!: string;
 
   @ManyToOne(() => Conversation, (conversation) => conversation.id, {
     onDelete: 'CASCADE',
   })
-  conversation: Conversation;
+  conversation!: Conversation;
 
   @Column()
-  clientId: string;
+  clientId!: string;
 
   @ManyToOne(() => Client, (client) => client.id, { onDelete: 'CASCADE' })
-  client: Client;
+  client!: Client;
 
   @Column({ type: 'enum', enum: MessageRole })
-  role: MessageRole;
+  role!: MessageRole;
 
   @Column({ type: 'text' })
-  content: string;
+  content!: string;
 
   @Column({ type: 'json', nullable: true })
   rawJson?: any;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 }
