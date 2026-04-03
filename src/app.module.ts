@@ -13,6 +13,7 @@ import { AIModule } from './ai/ai.module';
 import { MessagesModule } from './messages/messages.module';
 import { dbConfig } from './config/data-source';
 import { ConversationEngineModule } from './conversation_engine/conversation_engine.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { ConversationEngineModule } from './conversation_engine/conversation_eng
     MessagesModule,
     BusinessHoursModule,
     AIModule,
+    AuthModule,
     ConversationEngineModule,
   ],
   controllers: [],
