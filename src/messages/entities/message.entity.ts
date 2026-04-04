@@ -5,6 +5,7 @@ import {
   ManyToOne,
   CreateDateColumn,
   Index,
+  JoinColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Conversation } from '../../conversations/entities/conversation.entity';
@@ -20,37 +21,42 @@ export enum MessageRole {
 @Entity('messages')
 export class Message {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  tenantId: string;
+  tenantId!: string;
 
-  @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
-  tenant: Tenant;
+  @ManyToOne(() => Tenant, (tenant) => tenant.messages, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tenantId' })
+  tenant!: Tenant;
 
   @Column()
-  conversationId: string;
+  conversationId!: string;
 
-  @ManyToOne(() => Conversation, (conversation) => conversation.id, {
+  @ManyToOne(() => Conversation, (conversation) => conversation.messages, {
     onDelete: 'CASCADE',
   })
-  conversation: Conversation;
+  @JoinColumn({ name: 'conversationId' })
+  conversation!: Conversation;
 
   @Column()
-  clientId: string;
+  clientId!: string;
 
-  @ManyToOne(() => Client, (client) => client.id, { onDelete: 'CASCADE' })
-  client: Client;
+  @ManyToOne(() => Client, (client) => client.messages, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'clientId' })
+  client!: Client;
 
   @Column({ type: 'enum', enum: MessageRole })
-  role: MessageRole;
+  role!: MessageRole;
 
   @Column({ type: 'text' })
-  content: string;
+  content!: string;
 
   @Column({ type: 'json', nullable: true })
   rawJson?: any;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 }
