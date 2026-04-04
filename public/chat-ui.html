@@ -1,0 +1,228 @@
+﻿<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Polaria Chat IA</title>
+
+    <style>
+      :root {
+        --bg: #0f131a;
+        --panel: #151b24;
+        --panel-2: #1b2330;
+        --text: #e6eef7;
+        --muted: #9fb0c3;
+        --accent: #2dd4bf;
+        --bubble-user: #2563eb;
+        --bubble-bot: #1f2937;
+        --border: #263243;
+      }
+
+      * {
+        box-sizing: border-box;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: radial-gradient(circle at top, #1d2431, #0f131a 45%);
+        color: var(--text);
+      }
+
+      header {
+        padding: 12px 16px;
+        border-bottom: 1px solid var(--border);
+        background: rgba(13, 17, 23, 0.9);
+        position: sticky;
+        top: 0;
+      }
+
+      .container {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 12px;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .chat {
+        flex: 1;
+        overflow: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 6px;
+        min-height: 360px;
+      }
+
+      .bubble {
+        max-width: 70%;
+        padding: 8px 12px;
+        border-radius: 16px;
+        font-size: 14px;
+        white-space: pre-wrap;
+      }
+
+      .user {
+        align-self: flex-end;
+        background: var(--bubble-user);
+      }
+
+      .bot {
+        align-self: flex-start;
+        background: var(--bubble-bot);
+      }
+
+      textarea,
+      input {
+        width: 100%;
+        padding: 8px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        background: #0d1117;
+        color: var(--text);
+      }
+
+      button {
+        background: var(--accent);
+        border: none;
+        padding: 8px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-weight: bold;
+      }
+
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <h3>Polaria · Chat IA</h3>
+    </header>
+
+    <div class="container">
+      <section class="panel">
+        <div id="chat" class="chat"></div>
+
+        <input
+          id="tenantIdInput"
+          placeholder="Tenant ID"
+          value="034e71ea-3d77-47ca-8d6e-6aeb16121fd1"
+        />
+        <input id="phoneInput" placeholder="Telefono" />
+        <textarea
+          id="messageInput"
+          placeholder="Escribe tu mensaje..."
+        ></textarea>
+
+        <button id="sendMessage">Enviar</button>
+        <div id="chatStatus" class="status"></div>
+      </section>
+    </div>
+
+    <script>
+      const chatEl = document.getElementById('chat');
+      const sendBtn = document.getElementById('sendMessage');
+      const messageInput = document.getElementById('messageInput');
+      const chatStatus = document.getElementById('chatStatus');
+      const phoneInput = document.getElementById('phoneInput');
+
+      let sending = false;
+
+      function generateRandomPhone(length = 10) {
+        const digits = [];
+
+        if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
+          const bytes = new Uint8Array(length);
+          window.crypto.getRandomValues(bytes);
+          for (let i = 0; i < length; i += 1) {
+            digits.push((bytes[i] % 10).toString());
+          }
+        } else {
+          for (let i = 0; i < length; i += 1) {
+            digits.push(Math.floor(Math.random() * 10).toString());
+          }
+        }
+
+        return digits.join('');
+      }
+
+      function setNewPhoneId() {
+        phoneInput.value = generateRandomPhone();
+      }
+
+      function addBubble(text, type) {
+        const el = document.createElement('div');
+        el.className = `bubble ${type}`;
+        el.textContent = text;
+        chatEl.appendChild(el);
+        chatEl.scrollTop = chatEl.scrollHeight;
+      }
+
+      async function sendMessage() {
+        if (sending) return;
+
+        const message = messageInput.value.trim();
+        if (!message) return;
+
+        sending = true;
+        sendBtn.disabled = true;
+        chatStatus.textContent = 'Enviando...';
+
+        addBubble(message, 'user');
+        messageInput.value = '';
+
+        try {
+          const res = await fetch('/chat/message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tenantId: document.getElementById('tenantIdInput').value,
+              phone: phoneInput.value,
+              message,
+            }),
+          });
+
+          const data = await res.json();
+          addBubble(data.message || 'Sin respuesta', 'bot');
+          chatStatus.textContent = '';
+        } catch {
+          addBubble('Error de conexion', 'bot');
+          chatStatus.textContent = 'Error al enviar';
+        }
+
+        sending = false;
+        sendBtn.disabled = false;
+      }
+
+      setNewPhoneId();
+      sendBtn.onclick = sendMessage;
+
+      messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          sendMessage();
+        }
+      });
+    </script>
+  </body>
+</html>
+
+

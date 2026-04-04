@@ -6,9 +6,10 @@ import {
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
+  JoinColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
-import { AppointmentService } from '../../appointments/entities/AppointmentService';
+import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
 
 @Entity('services')
 export class Service {
@@ -18,7 +19,8 @@ export class Service {
   @Column()
   tenantId!: string;
 
-  @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tenant, (tenant) => tenant.services, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tenantId' })
   tenant!: Tenant;
 
   @Column()

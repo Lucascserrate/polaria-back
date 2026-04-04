@@ -6,6 +6,7 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  JoinColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
@@ -18,7 +19,10 @@ export class BusinessHour {
   @Column()
   tenantId!: string;
 
-  @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tenant, (tenant) => tenant.businessHours, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'tenantId' })
   tenant!: Tenant;
 
   @Column({ type: 'int' })

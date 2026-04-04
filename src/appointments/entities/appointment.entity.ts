@@ -7,12 +7,12 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  JoinColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Staff } from '../../staff/entities/staff.entity';
 import { Client } from '../../clients/entities/client.entity';
-import { Service } from '../../services/entities/service.entity';
-import { AppointmentService } from './AppointmentService';
+import { AppointmentService } from './appointment_service.entity';
 
 export enum AppointmentStatus {
   PENDING = 'pending',
@@ -30,24 +30,21 @@ export class Appointment {
 
   @Column()
   tenantId!: string;
-  @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tenant, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tenantId' })
   tenant!: Tenant;
 
   @Column()
   staffId!: string;
-  @ManyToOne(() => Staff, (staff) => staff.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Staff, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'staffId' })
   staff!: Staff;
 
   @Column()
   clientId!: string;
-  @ManyToOne(() => Client, (client) => client.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Client, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'clientId' })
   client!: Client;
-
-  @Column()
-  serviceId!: string;
-
-  @ManyToOne(() => Service, (service) => service.id, { onDelete: 'CASCADE' })
-  service!: Service;
 
   @OneToMany(
     () => AppointmentService,
@@ -55,10 +52,10 @@ export class Appointment {
   )
   services!: AppointmentService[];
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamp' })
   startTime!: Date;
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamp' })
   endTime!: Date;
 
   @Column({

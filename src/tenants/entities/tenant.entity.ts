@@ -5,7 +5,14 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  OneToMany,
 } from 'typeorm';
+import { Staff } from '../../staff/entities/staff.entity';
+import { Service } from '../../services/entities/service.entity';
+import { Client } from '../../clients/entities/client.entity';
+import { Conversation } from '../../conversations/entities/conversation.entity';
+import { Message } from '../../messages/entities/message.entity';
+import { BusinessHour } from '../../business_hours/entities/business_hour.entity';
 
 @Index(['whatsappPhoneNumber'], { unique: true })
 @Entity('tenants')
@@ -45,6 +52,24 @@ export class Tenant {
 
   @Column({ nullable: true })
   calendarId?: string;
+
+  @OneToMany(() => Staff, (staff) => staff.tenant)
+  staff!: Staff[];
+
+  @OneToMany(() => Service, (service) => service.tenant)
+  services!: Service[];
+
+  @OneToMany(() => Client, (client) => client.tenant)
+  clients!: Client[];
+
+  @OneToMany(() => Conversation, (conversation) => conversation.tenant)
+  conversations!: Conversation[];
+
+  @OneToMany(() => Message, (message) => message.tenant)
+  messages!: Message[];
+
+  @OneToMany(() => BusinessHour, (businessHour) => businessHour.tenant)
+  businessHours!: BusinessHour[];
 
   @CreateDateColumn()
   createdAt!: Date;

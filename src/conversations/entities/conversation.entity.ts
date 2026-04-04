@@ -3,12 +3,18 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  JoinColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Client } from '../../clients/entities/client.entity';
+import { Message } from '../../messages/entities/message.entity';
+export interface ConversationContext {
+  [key: string]: unknown;
+}
 
 export enum ConversationState {
   IDLE = 'IDLE',
@@ -18,6 +24,9 @@ export enum ConversationState {
   ASK_SLOT = 'ASK_SLOT',
   CONFIRM_APPOINTMENT = 'CONFIRM_APPOINTMENT',
   BOOKING_COMPLETE = 'BOOKING_COMPLETE',
+  ASK_CLIENT_NAME = 'ASK_CLIENT_NAME',
+  CANCEL_FLOW = 'CANCEL_FLOW',
+  RESCHEDULE_FLOW = 'RESCHEDULE_FLOW',
 }
 
 @Index(['tenantId', 'clientId'])
@@ -29,13 +38,19 @@ export class Conversation {
   @Column()
   tenantId!: string;
 
-  @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Tenant, (tenant) => tenant.conversations, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'tenantId' })
   tenant!: Tenant;
 
   @Column()
   clientId!: string;
 
-  @ManyToOne(() => Client, (client) => client.id, { onDelete: 'CASCADE' })
+  @ManyToOne(() => Client, (client) => client.conversations, {
+    onDelete: 'CASCADE',
+  })
+  @JoinColumn({ name: 'clientId' })
   client!: Client;
 
   @Column({
@@ -46,10 +61,13 @@ export class Conversation {
   currentState!: ConversationState;
 
   @Column({ type: 'json', nullable: true })
-  contextJson?: any;
+  contextJson?: ConversationContext;
 
-  @Column({ type: 'datetime', nullable: true })
+  @Column({ type: 'timestamp', nullable: true })
   lastMessageAt?: Date;
+
+  @OneToMany(() => Message, (message) => message.conversation)
+  messages!: Message[];
 
   @CreateDateColumn()
   createdAt!: Date;

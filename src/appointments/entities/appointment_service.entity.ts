@@ -4,13 +4,15 @@ import {
   Column,
   ManyToOne,
   Index,
+  JoinColumn,
 } from 'typeorm';
+import { Appointment } from './appointment.entity';
 import { Service } from '../../services/entities/service.entity';
 import { Staff } from '../../staff/entities/staff.entity';
-import { Appointment } from './appointment.entity';
 
 @Index(['appointmentId', 'serviceId'])
 @Index(['staffId', 'startTime'])
+@Index(['staffId', 'startTime', 'endTime'])
 @Entity('appointment_services')
 export class AppointmentService {
   @PrimaryGeneratedColumn('uuid')
@@ -22,6 +24,7 @@ export class AppointmentService {
   @ManyToOne(() => Appointment, (appointment) => appointment.services, {
     onDelete: 'CASCADE',
   })
+  @JoinColumn({ name: 'appointmentId' })
   appointment!: Appointment;
 
   @Column()
@@ -30,6 +33,7 @@ export class AppointmentService {
   @ManyToOne(() => Service, (service) => service.appointmentServices, {
     onDelete: 'CASCADE',
   })
+  @JoinColumn({ name: 'serviceId' })
   service!: Service;
 
   @Column()
@@ -38,12 +42,13 @@ export class AppointmentService {
   @ManyToOne(() => Staff, (staff) => staff.appointmentServices, {
     onDelete: 'CASCADE',
   })
+  @JoinColumn({ name: 'staffId' })
   staff!: Staff;
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamp' })
   startTime!: Date;
 
-  @Column({ type: 'datetime' })
+  @Column({ type: 'timestamp' })
   endTime!: Date;
 
   @Column('decimal', { precision: 10, scale: 2 })
