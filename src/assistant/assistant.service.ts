@@ -61,7 +61,10 @@ export class AssistantService {
       content: input.messageText,
     });
 
-    const promptContext = await this.promptContextService.build(input.tenantId);
+    const promptContext = await this.promptContextService.build(
+      input.tenantId,
+      client.name ?? undefined,
+    );
     const history = await this.messagesService.findRecentByConversation(
       conversation.id,
       12,

@@ -18,7 +18,10 @@ export class AssistantPromptContextService {
     private readonly tenantsService: TenantsService,
   ) {}
 
-  async build(tenantId?: string): Promise<AssistantPromptContext> {
+  async build(
+    tenantId?: string,
+    clientName?: string,
+  ): Promise<AssistantPromptContext> {
     let timezone = 'America/Bogota';
     const currentDateTime = new Date().toISOString();
 
@@ -29,6 +32,7 @@ export class AssistantPromptContextService {
         businessHours: [],
         services: [],
         staff: [],
+        clientName,
       };
     }
 
@@ -59,6 +63,7 @@ export class AssistantPromptContextService {
       businessHours: businessHoursText,
       services: serviceNames,
       staff: staffNames,
+      clientName,
     };
   }
 }

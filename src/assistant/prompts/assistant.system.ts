@@ -4,6 +4,7 @@ export interface AssistantPromptContext {
   businessHours: string[];
   services: string[];
   staff: string[];
+  clientName?: string;
 }
 
 export const buildAssistantSystemPrompt = (context: AssistantPromptContext) => {
@@ -24,5 +25,8 @@ Contexto del negocio:
 - Horario de atencion: ${businessHours}
 - Servicios disponibles: ${services}
 - Staff disponible: ${staff}
+
+Contexto del usuario:
+- Nombre: ${context.clientName ?? 'No definido'}
 `.trim();
 };
