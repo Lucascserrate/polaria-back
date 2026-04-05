@@ -12,6 +12,7 @@ import type { Conversation } from '../conversations/entities/conversation.entity
 import { buildAssistantSystemPrompt } from './prompts/assistant.system';
 import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
 import { buildTempName } from './utils/assistant-utils';
+import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 
 @Injectable()
 export class AssistantService {
@@ -61,9 +62,21 @@ export class AssistantService {
     });
 
     const promptContext = await this.promptContextService.build(input.tenantId);
+    const history = await this.messagesService.findRecentByConversation(
+      conversation.id,
+      12,
+    );
+    const historyMessages: ChatCompletionMessageParam[] = history
+      .slice()
+      .reverse()
+      .map((message) => ({
+        role: message.role,
+        content: message.content,
+      }));
+
     const response = await this.aiService.chat([
       { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
-      { role: 'user', content: input.messageText },
+      ...historyMessages,
     ]);
 
     const reply = response.content ?? 'Sin respuesta';

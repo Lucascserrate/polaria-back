@@ -24,4 +24,15 @@ export class MessagesService {
   findOne(id: string): Promise<Message | null> {
     return this.messageRepository.findOneBy({ id });
   }
+
+  findRecentByConversation(
+    conversationId: string,
+    limit: number,
+  ): Promise<Message[]> {
+    return this.messageRepository.find({
+      where: { conversationId },
+      order: { createdAt: 'DESC' },
+      take: limit,
+    });
+  }
 }
