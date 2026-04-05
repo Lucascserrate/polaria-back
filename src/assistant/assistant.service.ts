@@ -13,6 +13,7 @@ import { buildAssistantSystemPrompt } from './prompts/assistant.system';
 import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
 import { buildTempName } from './utils/assistant-utils';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import { parseAssistantResponse } from './utils/assistant-response-parser';
 
 @Injectable()
 export class AssistantService {
@@ -82,7 +83,7 @@ export class AssistantService {
       ...historyMessages,
     ]);
 
-    const reply = response.content ?? 'Sin respuesta';
+    const { reply } = parseAssistantResponse(response);
 
     await this.messagesService.create({
       tenantId: input.tenantId,
@@ -107,6 +108,6 @@ export class AssistantService {
       { role: 'user', content: input.messageText },
     ]);
 
-    return { reply: response.content ?? 'Sin respuesta' };
+    return parseAssistantResponse(response);
   }
 }
