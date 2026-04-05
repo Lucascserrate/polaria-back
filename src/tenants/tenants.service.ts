@@ -13,24 +13,24 @@ export class TenantsService {
     private tenantRepository: Repository<Tenant>,
   ) {}
 
-  create(createTenantDto: CreateTenantDto) {
+  create(createTenantDto: CreateTenantDto): Promise<Tenant> {
     const tenant = this.tenantRepository.create(createTenantDto);
     return this.tenantRepository.save(tenant);
   }
 
-  findAll() {
+  findAll(): Promise<Tenant[]> {
     return this.tenantRepository.find();
   }
 
-  findOne(id: string) {
+  findOne(id: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ id });
   }
 
-  findByGoogleId(googleId: string) {
+  findByGoogleId(googleId: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ googleId });
   }
 
-  findByEmail(email: string) {
+  findByEmail(email: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ email });
   }
 

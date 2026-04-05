@@ -13,19 +13,26 @@ export class BusinessHoursService {
     private businessHourRepository: Repository<BusinessHour>,
   ) {}
 
-  create(createBusinessHourDto: CreateBusinessHourDto) {
+  create(createBusinessHourDto: CreateBusinessHourDto): Promise<BusinessHour> {
     const businessHour = this.businessHourRepository.create(
       createBusinessHourDto,
     );
     return this.businessHourRepository.save(businessHour);
   }
 
-  findAll() {
+  findAll(): Promise<BusinessHour[]> {
     return this.businessHourRepository.find();
   }
 
-  findOne(id: string) {
+  findOne(id: string): Promise<BusinessHour | null> {
     return this.businessHourRepository.findOneBy({ id });
+  }
+
+  findByTenant(tenantId: string): Promise<BusinessHour[]> {
+    return this.businessHourRepository.find({
+      where: { tenantId },
+      order: { dayOfWeek: 'ASC' },
+    });
   }
 
   async update(id: string, updateBusinessHourDto: UpdateBusinessHourDto) {

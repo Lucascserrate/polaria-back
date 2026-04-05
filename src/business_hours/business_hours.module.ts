@@ -9,5 +9,6 @@ import { BusinessHoursController } from './business_hours.controller';
   imports: [TypeOrmModule.forFeature([BusinessHour])],
   controllers: [BusinessHoursController],
   providers: [BusinessHoursService],
+  exports: [BusinessHoursService],
 })
 export class BusinessHoursModule {}

@@ -13,17 +13,24 @@ export class StaffService {
     private staffRepository: Repository<Staff>,
   ) {}
 
-  create(createStaffDto: CreateStaffDto) {
+  create(createStaffDto: CreateStaffDto): Promise<Staff> {
     const staff = this.staffRepository.create(createStaffDto);
     return this.staffRepository.save(staff);
   }
 
-  findAll() {
+  findAll(): Promise<Staff[]> {
     return this.staffRepository.find();
   }
 
-  findOne(id: string) {
+  findOne(id: string): Promise<Staff | null> {
     return this.staffRepository.findOneBy({ id });
+  }
+
+  findByTenant(tenantId: string): Promise<Staff[]> {
+    return this.staffRepository.find({
+      where: { tenantId },
+      order: { name: 'ASC' },
+    });
   }
 
   async update(id: string, updateStaffDto: UpdateStaffDto) {
