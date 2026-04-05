@@ -1,5 +1,6 @@
 export interface AssistantParsedResponse {
   reply?: string;
+  action?: string;
   entities?: {
     services?: string[] | null;
     staff?: string | null;
@@ -11,7 +12,11 @@ export interface AssistantParsedResponse {
 export function parseAssistantResponse(
   response: { content?: string | null },
   logger: Pick<Console, 'log'> = console,
-): { reply: string; entities?: AssistantParsedResponse['entities'] } {
+): {
+  reply: string;
+  entities?: AssistantParsedResponse['entities'];
+  action?: string;
+} {
   const responseText = response.content ?? '';
   const parsed = tryParseAssistantJson(responseText);
   if (parsed) {
@@ -25,6 +30,7 @@ export function parseAssistantResponse(
       parsed?.reply ??
       (responseText.trim().length > 0 ? responseText : 'Sin respuesta'),
     entities: parsed?.entities,
+    action: parsed?.action,
   };
 }
 
