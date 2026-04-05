@@ -9,6 +9,7 @@ import { StaffModule } from '../staff/staff.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
+import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
 
 @Module({
   imports: [
@@ -22,6 +23,6 @@ import { AssistantService } from './assistant.service';
     TenantsModule,
   ],
   controllers: [AssistantController],
-  providers: [AssistantService],
+  providers: [AssistantService, AssistantPromptContextService],
 })
 export class AssistantModule {}

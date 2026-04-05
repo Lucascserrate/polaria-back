@@ -9,18 +9,9 @@ import { ClientsService } from '../clients/clients.service';
 import { ConversationState } from '../conversations/entities/conversation.entity';
 import type { Client } from '../clients/entities/client.entity';
 import type { Conversation } from '../conversations/entities/conversation.entity';
-import {
-  AssistantPromptContext,
-  buildAssistantSystemPrompt,
-} from './prompts/assistant.system';
-import { BusinessHoursService } from '../business_hours/business_hours.service';
-import { ServicesService } from '../services/services.service';
-import { StaffService } from '../staff/staff.service';
-import type { BusinessHour } from '../business_hours/entities/business_hour.entity';
-import type { Service } from '../services/entities/service.entity';
-import type { Staff } from '../staff/entities/staff.entity';
-import { TenantsService } from '../tenants/tenants.service';
-import type { Tenant } from '../tenants/entities/tenant.entity';
+import { buildAssistantSystemPrompt } from './prompts/assistant.system';
+import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
+import { buildTempName } from './utils/assistant-utils';
 
 @Injectable()
 export class AssistantService {
@@ -29,10 +20,7 @@ export class AssistantService {
     private readonly conversationsService: ConversationsService,
     private readonly messagesService: MessagesService,
     private readonly clientsService: ClientsService,
-    private readonly businessHoursService: BusinessHoursService,
-    private readonly servicesService: ServicesService,
-    private readonly staffService: StaffService,
-    private readonly tenantsService: TenantsService,
+    private readonly promptContextService: AssistantPromptContextService,
   ) {}
 
   async chat(
@@ -43,10 +31,11 @@ export class AssistantService {
       input.phone,
     );
     if (!client) {
+      const tempName = buildTempName(input.phone);
       client = await this.clientsService.create({
         tenantId: input.tenantId,
         phone: input.phone,
-        name: undefined,
+        name: tempName,
       });
     }
 
@@ -71,7 +60,7 @@ export class AssistantService {
       content: input.messageText,
     });
 
-    const promptContext = await this.buildPromptContext(input.tenantId);
+    const promptContext = await this.promptContextService.build(input.tenantId);
     const response = await this.aiService.chat([
       { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
       { role: 'user', content: input.messageText },
@@ -96,58 +85,12 @@ export class AssistantService {
   }
 
   async simpleChat(input: AssistantSimpleDto): Promise<{ reply: string }> {
-    const promptContext = await this.buildPromptContext();
+    const promptContext = await this.promptContextService.build();
     const response = await this.aiService.chat([
       { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
       { role: 'user', content: input.messageText },
     ]);
 
     return { reply: response.content ?? 'Sin respuesta' };
-  }
-
-  private async buildPromptContext(
-    tenantId?: string,
-  ): Promise<AssistantPromptContext> {
-    let timezone = 'America/Bogota';
-    const currentDateTime = new Date().toISOString();
-
-    if (!tenantId) {
-      return {
-        timezone,
-        currentDateTime,
-        businessHours: [],
-        services: [],
-        staff: [],
-      };
-    }
-
-    const tenant: Tenant | null = await this.tenantsService.findOne(tenantId);
-    if (tenant?.timezone) {
-      timezone = tenant.timezone;
-    }
-
-    const [businessHours, services, staff]: [
-      BusinessHour[],
-      Service[],
-      Staff[],
-    ] = await Promise.all([
-      this.businessHoursService.findByTenant(tenantId),
-      this.servicesService.findByTenant(tenantId),
-      this.staffService.findByTenant(tenantId),
-    ]);
-
-    const businessHoursText = businessHours.map(
-      (item) => `Dia ${item.dayOfWeek}: ${item.startTime}-${item.endTime}`,
-    );
-    const serviceNames = services.map((item) => item.name);
-    const staffNames = staff.map((item) => item.name);
-
-    return {
-      timezone,
-      currentDateTime,
-      businessHours: businessHoursText,
-      services: serviceNames,
-      staff: staffNames,
-    };
   }
 }
