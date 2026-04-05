@@ -16,6 +16,7 @@ import { AssistantModule } from './assistant/assistant.module';
 import { MessagesModule } from './messages/messages.module';
 import { dbConfig } from './config/data-source';
 import { AuthModule } from './auth/auth.module';
+import { AvailabilityModule } from './availability/availability.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { AuthModule } from './auth/auth.module';
     AIModule,
     AssistantModule,
     AuthModule,
+    AvailabilityModule,
   ],
   controllers: [],
   providers: [],
