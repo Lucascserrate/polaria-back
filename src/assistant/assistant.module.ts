@@ -8,6 +8,7 @@ import { ServicesModule } from '../services/services.module';
 import { StaffModule } from '../staff/staff.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { AvailabilityModule } from '../availability/availability.module';
+import { AppointmentsModule } from '../appointments/appointments.module';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
 import { AssistantAvailabilityService } from './services/assistant-availability.service';
@@ -24,6 +25,7 @@ import { AssistantPromptContextService } from './services/assistant-prompt-conte
     StaffModule,
     TenantsModule,
     AvailabilityModule,
+    AppointmentsModule,
   ],
   controllers: [AssistantController],
   providers: [

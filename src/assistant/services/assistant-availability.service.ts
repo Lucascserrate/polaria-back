@@ -30,7 +30,20 @@ export class AssistantAvailabilityService {
     promptContext: AssistantPromptContext;
     reply: string;
     entities: AssistantParsedResponse['entities'] | undefined;
-  }): Promise<{ handled: boolean; finalReply: string }> {
+    action: string | undefined;
+  }): Promise<{
+    handled: boolean;
+    finalReply: string;
+    finalEntities?: AssistantParsedResponse['entities'];
+    finalAction?: string;
+    bookingData?: {
+      serviceIds: string[];
+      staffId?: string;
+      date: string;
+      time: string;
+    };
+    isAvailable?: boolean;
+  }> {
     const {
       input,
       conversation,
@@ -38,10 +51,16 @@ export class AssistantAvailabilityService {
       promptContext,
       reply,
       entities,
+      action,
     } = params;
 
     if (!this.hasAvailabilityEntities(entities)) {
-      return { handled: false, finalReply: reply };
+      return {
+        handled: false,
+        finalReply: reply,
+        finalEntities: entities,
+        finalAction: action,
+      };
     }
 
     const serviceIds = await this.mapServices(
@@ -51,7 +70,12 @@ export class AssistantAvailabilityService {
     const staffId = await this.mapStaff(entities.staff ?? null, input.tenantId);
 
     if (serviceIds.length === 0) {
-      return { handled: false, finalReply: reply };
+      return {
+        handled: false,
+        finalReply: reply,
+        finalEntities: entities,
+        finalAction: action,
+      };
     }
 
     const availabilityKey = this.buildAvailabilityKey(
@@ -67,7 +91,19 @@ export class AssistantAvailabilityService {
         : undefined;
 
     if (lastKey === availabilityKey) {
-      return { handled: true, finalReply: reply };
+      return {
+        handled: true,
+        finalReply: reply,
+        finalEntities: entities,
+        finalAction: action,
+        bookingData: {
+          serviceIds,
+          staffId,
+          date: entities.date,
+          time: entities.time,
+        },
+        isAvailable: undefined,
+      };
     }
 
     const availability = await this.availabilityService.findAvailableSlots({
@@ -77,22 +113,42 @@ export class AssistantAvailabilityService {
       desiredTime: entities.time,
       staffId,
     });
+    const friendly = await this.availabilityService.getFriendlySlots({
+      tenantId: input.tenantId,
+      serviceIds,
+      desiredDate: entities.date,
+      desiredTime: entities.time,
+      staffId,
+    });
 
     const availabilitySystemContent = `
       Resultado de disponibilidad:
-        ${JSON.stringify(availability)}
-
-        Instrucciones:
-        - Si isAvailable es true -> confirma la cita de forma natural
-        - Si isAvailable es false -> ofrece suggestedSlots
-        - Usa staffName y horas reales
-        - NO inventes horarios
-        - Se claro y amigable
-        - Manten el formato JSON obligatorio`;
-    console.log(
-      '[assistant] availability suggestedSlots:',
-      availability.suggestedSlots,
-    );
+      ${JSON.stringify({
+        isAvailable: availability.isAvailable,
+        friendlySlots: friendly.friendlySlots,
+      })}
+      
+      Instrucciones:
+      
+      - Si isAvailable es true:
+        Responde confirmando disponibilidad y pregunta si desea confirmar la cita.
+      
+      - Si isAvailable es false:
+        Usa este formato EXACTO:
+      
+        "No tengo disponibilidad a esa hora, pero mira estos horarios cercanos 👇
+        - HH:mm
+        - HH:mm
+        - HH:mm
+        ¿Cuál te queda mejor?"
+      
+      - Usa SOLO friendlySlots
+      - NO inventes horarios
+      - NO uses frases como "¿Deseas otro horario?"
+      - Usa un tono natural tipo WhatsApp
+      - Se claro, corto y amigable
+      - Mantén el formato JSON obligatorio
+      `;
 
     const availabilityResponse = await this.aiService.chat([
       { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
@@ -101,6 +157,11 @@ export class AssistantAvailabilityService {
     ]);
 
     const parsedFinal = parseAssistantResponse(availabilityResponse);
+    const mergedEntities = {
+      ...(entities ?? {}),
+      ...(parsedFinal.entities ?? {}),
+    } as AssistantParsedResponse['entities'];
+    const finalReply = parsedFinal.reply;
 
     await this.conversationsService.update(conversation.id, {
       currentState: availability.isAvailable
@@ -112,7 +173,44 @@ export class AssistantAvailabilityService {
       },
     });
 
-    return { handled: true, finalReply: parsedFinal.reply };
+    return {
+      handled: true,
+      finalReply,
+      finalEntities: mergedEntities,
+      finalAction: parsedFinal.action ?? action,
+      bookingData: {
+        serviceIds,
+        staffId,
+        date: entities.date,
+        time: entities.time,
+      },
+      isAvailable: availability.isAvailable,
+    };
+  }
+
+  async resolveBookingData(params: {
+    tenantId: string;
+    entities: AssistantParsedResponse['entities'] | undefined;
+  }): Promise<
+    | {
+        serviceIds: string[];
+        staffId?: string;
+        date: string;
+        time: string;
+      }
+    | undefined
+  > {
+    const { tenantId, entities } = params;
+    if (!this.hasAvailabilityEntities(entities)) return undefined;
+    const serviceIds = await this.mapServices(entities.services, tenantId);
+    const staffId = await this.mapStaff(entities.staff ?? null, tenantId);
+    if (serviceIds.length === 0) return undefined;
+    return {
+      serviceIds,
+      staffId,
+      date: entities.date,
+      time: entities.time,
+    };
   }
 
   private async mapServices(

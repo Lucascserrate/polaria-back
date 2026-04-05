@@ -15,6 +15,7 @@ import { buildTempName } from './utils/assistant-utils';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { parseAssistantResponse } from './utils/assistant-response-parser';
 import { AssistantAvailabilityService } from './services/assistant-availability.service';
+import { AppointmentsService } from '../appointments/appointments.service';
 
 @Injectable()
 export class AssistantService {
@@ -25,6 +26,7 @@ export class AssistantService {
     private readonly clientsService: ClientsService,
     private readonly promptContextService: AssistantPromptContextService,
     private readonly assistantAvailabilityService: AssistantAvailabilityService,
+    private readonly appointmentsService: AppointmentsService,
   ) {}
 
   async chat(
@@ -88,6 +90,7 @@ export class AssistantService {
     let parsed = parseAssistantResponse(response);
     let reply = parsed.reply;
     let entities = parsed.entities;
+    let action = parsed.action;
 
     if (!entities) {
       const correctionResponse = await this.aiService.chat([
@@ -102,6 +105,7 @@ export class AssistantService {
       parsed = parseAssistantResponse(correctionResponse);
       reply = parsed.reply;
       entities = parsed.entities;
+      action = parsed.action;
     }
     let finalReply = reply;
     const availabilityResult =
@@ -112,9 +116,35 @@ export class AssistantService {
         promptContext,
         reply,
         entities,
+        action,
       });
     if (availabilityResult.handled) {
       finalReply = availabilityResult.finalReply;
+    }
+
+    const finalAction = availabilityResult.finalAction ?? action;
+    const finalEntities = availabilityResult.finalEntities ?? entities;
+
+    if (
+      finalAction === 'CONFIRM_BOOKING' &&
+      availabilityResult.isAvailable !== false
+    ) {
+      const bookingData =
+        availabilityResult.bookingData ??
+        (await this.assistantAvailabilityService.resolveBookingData({
+          tenantId: input.tenantId,
+          entities: finalEntities,
+        }));
+      if (bookingData) {
+        await this.appointmentsService.createFromAssistant({
+          tenantId: input.tenantId,
+          clientId: client.id,
+          serviceIds: bookingData.serviceIds,
+          staffId: bookingData.staffId,
+          date: bookingData.date,
+          time: bookingData.time,
+        });
+      }
     }
 
     await this.messagesService.create({
