@@ -7,8 +7,10 @@ import { BusinessHoursModule } from '../business_hours/business_hours.module';
 import { ServicesModule } from '../services/services.module';
 import { StaffModule } from '../staff/staff.module';
 import { TenantsModule } from '../tenants/tenants.module';
+import { AvailabilityModule } from '../availability/availability.module';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
+import { AssistantAvailabilityService } from './services/assistant-availability.service';
 import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
 
 @Module({
@@ -21,8 +23,13 @@ import { AssistantPromptContextService } from './services/assistant-prompt-conte
     ServicesModule,
     StaffModule,
     TenantsModule,
+    AvailabilityModule,
   ],
   controllers: [AssistantController],
-  providers: [AssistantService, AssistantPromptContextService],
+  providers: [
+    AssistantService,
+    AssistantPromptContextService,
+    AssistantAvailabilityService,
+  ],
 })
 export class AssistantModule {}

@@ -14,6 +14,7 @@ import { AssistantPromptContextService } from './services/assistant-prompt-conte
 import { buildTempName } from './utils/assistant-utils';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { parseAssistantResponse } from './utils/assistant-response-parser';
+import { AssistantAvailabilityService } from './services/assistant-availability.service';
 
 @Injectable()
 export class AssistantService {
@@ -23,6 +24,7 @@ export class AssistantService {
     private readonly messagesService: MessagesService,
     private readonly clientsService: ClientsService,
     private readonly promptContextService: AssistantPromptContextService,
+    private readonly assistantAvailabilityService: AssistantAvailabilityService,
   ) {}
 
   async chat(
@@ -68,7 +70,7 @@ export class AssistantService {
     );
     const history = await this.messagesService.findRecentByConversation(
       conversation.id,
-      12,
+      6,
     );
     const historyMessages: ChatCompletionMessageParam[] = history
       .slice()
@@ -83,14 +85,44 @@ export class AssistantService {
       ...historyMessages,
     ]);
 
-    const { reply } = parseAssistantResponse(response);
+    let parsed = parseAssistantResponse(response);
+    let reply = parsed.reply;
+    let entities = parsed.entities;
+
+    if (!entities) {
+      const correctionResponse = await this.aiService.chat([
+        { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
+        ...historyMessages,
+        {
+          role: 'system',
+          content:
+            'Responde SOLO con JSON válido en el formato indicado. No incluyas texto adicional.',
+        },
+      ]);
+      parsed = parseAssistantResponse(correctionResponse);
+      reply = parsed.reply;
+      entities = parsed.entities;
+    }
+    let finalReply = reply;
+    const availabilityResult =
+      await this.assistantAvailabilityService.handleAvailability({
+        input,
+        conversation,
+        historyMessages,
+        promptContext,
+        reply,
+        entities,
+      });
+    if (availabilityResult.handled) {
+      finalReply = availabilityResult.finalReply;
+    }
 
     await this.messagesService.create({
       tenantId: input.tenantId,
       conversationId: conversation.id,
       clientId: client.id,
       role: MessageRole.ASSISTANT,
-      content: reply,
+      content: finalReply,
       rawJson: response,
     });
 
@@ -98,7 +130,11 @@ export class AssistantService {
       lastMessageAt: new Date(),
     });
 
-    return { reply, conversationId: conversation.id, clientId: client.id };
+    return {
+      reply: finalReply,
+      conversationId: conversation.id,
+      clientId: client.id,
+    };
   }
 
   async simpleChat(input: AssistantSimpleDto): Promise<{ reply: string }> {
@@ -108,6 +144,7 @@ export class AssistantService {
       { role: 'user', content: input.messageText },
     ]);
 
-    return parseAssistantResponse(response);
+    const { reply } = parseAssistantResponse(response);
+    return { reply };
   }
 }

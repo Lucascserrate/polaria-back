@@ -11,7 +11,7 @@ export interface AssistantParsedResponse {
 export function parseAssistantResponse(
   response: { content?: string | null },
   logger: Pick<Console, 'log'> = console,
-): { reply: string } {
+): { reply: string; entities?: AssistantParsedResponse['entities'] } {
   const responseText = response.content ?? '';
   const parsed = tryParseAssistantJson(responseText);
   if (parsed) {
@@ -24,6 +24,7 @@ export function parseAssistantResponse(
     reply:
       parsed?.reply ??
       (responseText.trim().length > 0 ? responseText : 'Sin respuesta'),
+    entities: parsed?.entities,
   };
 }
 
@@ -35,6 +36,22 @@ function tryParseAssistantJson(text: string): AssistantParsedResponse | null {
     const parsed = JSON.parse(text) as AssistantParsedResponse;
     return parsed;
   } catch {
-    return null;
+    // Intentar sacar un JSON válido de un texto que viene mezclado o mal formateado.
+    const cleaned = text
+      .trim()
+      .replace(/```(?:json)?/gi, '')
+      .trim();
+    const firstBrace = cleaned.indexOf('{');
+    const lastBrace = cleaned.lastIndexOf('}');
+    if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+      return null;
+    }
+    const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+    try {
+      const parsed = JSON.parse(candidate) as AssistantParsedResponse;
+      return parsed;
+    } catch {
+      return null;
+    }
   }
 }

@@ -11,6 +11,15 @@ import type { AssistantPromptContext } from '../prompts/assistant.system';
 
 @Injectable()
 export class AssistantPromptContextService {
+  private readonly cache = new Map<
+    string,
+    {
+      expiresAt: number;
+      context: Omit<AssistantPromptContext, 'currentDateTime' | 'clientName'>;
+    }
+  >();
+  private readonly cacheTtlMs = 5 * 60 * 1000;
+
   constructor(
     private readonly businessHoursService: BusinessHoursService,
     private readonly servicesService: ServicesService,
@@ -24,6 +33,16 @@ export class AssistantPromptContextService {
   ): Promise<AssistantPromptContext> {
     if (!tenantId) {
       throw new Error('TenantId is required');
+    }
+
+    const now = Date.now();
+    const cached = this.cache.get(tenantId);
+    if (cached && cached.expiresAt > now) {
+      return {
+        ...cached.context,
+        currentDateTime: this.formatNow(cached.context.timezone),
+        clientName,
+      };
     }
 
     const tenant: Tenant | null = await this.tenantsService.findOne(tenantId);
@@ -45,12 +64,21 @@ export class AssistantPromptContextService {
     const serviceNames = services.map((item) => item.name);
     const staffNames = staff.map((item) => item.name);
 
-    return {
+    const baseContext = {
       timezone,
-      currentDateTime: this.formatNow(timezone),
       businessHours: businessHoursText,
       services: serviceNames,
       staff: staffNames,
+    };
+
+    this.cache.set(tenantId, {
+      expiresAt: now + this.cacheTtlMs,
+      context: baseContext,
+    });
+
+    return {
+      ...baseContext,
+      currentDateTime: this.formatNow(timezone),
       clientName,
     };
   }
