@@ -88,7 +88,6 @@ export class AvailabilityService {
       }
     }
 
-
     const exactMatch = allAvailableSlots.find((slot) =>
       this.availabilityCalculator.isExactMatch(slot, desiredStart),
     );
