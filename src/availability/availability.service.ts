@@ -7,6 +7,7 @@ import type {
   StaffSlot,
 } from './utils/availability.types';
 import { getDayOfWeek, makeDateInTimeZone } from './utils/availability.helpers';
+import { normalizeSlots } from './utils/availability-formatter';
 
 @Injectable()
 export class AvailabilityService {
@@ -56,11 +57,13 @@ export class AvailabilityService {
     const desiredStart = makeDateInTimeZone(
       input.desiredDate,
       input.desiredTime,
+      timeZone,
     );
 
     const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
       businessHours,
       input.desiredDate,
+      timeZone,
       totalDuration,
     );
 
@@ -70,6 +73,7 @@ export class AvailabilityService {
       const appointments = await this.availabilityRepository.getAppointments(
         input.tenantId,
         input.desiredDate,
+        timeZone,
         staff.id,
       );
 
@@ -104,7 +108,7 @@ export class AvailabilityService {
     const closestSlots = this.availabilityCalculator.findClosestSlots(
       allAvailableSlots,
       desiredStart,
-      3,
+      10,
     );
 
     return {
@@ -112,6 +116,24 @@ export class AvailabilityService {
       suggestedSlots: closestSlots.map((slot) =>
         this.availabilityCalculator.toSuggestedSlot(slot),
       ),
+    };
+  }
+
+  async getFriendlySlots(input: FindAvailableSlotsInput): Promise<{
+    isAvailable: boolean;
+    friendlySlots: string[];
+  }> {
+    const availability = await this.findAvailableSlots(input);
+    const tenant = await this.availabilityRepository.getTenant(input.tenantId);
+    const timeZone = tenant?.timezone ?? 'America/La_Paz';
+
+    const friendlySlots = normalizeSlots(availability.suggestedSlots, timeZone);
+    console.log('[availability] friendlySlots count:', friendlySlots.length);
+    console.log('[availability] friendlySlots:', friendlySlots);
+
+    return {
+      isAvailable: availability.isAvailable,
+      friendlySlots,
     };
   }
 }

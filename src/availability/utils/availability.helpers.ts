@@ -42,16 +42,53 @@ export const toSuggestedSlot = (slot: StaffSlot): SuggestedSlot => {
   };
 };
 
-export const makeDateInTimeZone = (date: string, time: string): Date => {
-  return new Date(`${date}T${time}:00`);
+export const makeDateInTimeZone = (
+  date: string,
+  time: string,
+  timeZone: string,
+): Date => {
+  const [year, month, day] = date.split('-').map(Number);
+  const [hour, minute] = time.split(':').map(Number);
+
+  const utcDate = new Date(Date.UTC(year, month - 1, day, hour, minute, 0));
+  const offsetMinutes = getTimeZoneOffset(utcDate, timeZone);
+  return new Date(utcDate.getTime() - offsetMinutes * 60_000);
 };
 
 export const getDayOfWeek = (date: string, timeZone: string): number => {
-  const reference = makeDateInTimeZone(date, '12:00');
+  const reference = makeDateInTimeZone(date, '12:00', timeZone);
   const day = new Intl.DateTimeFormat('en-US', {
     timeZone,
     weekday: 'short',
   }).format(reference);
   const map = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   return Math.max(0, map.indexOf(day));
+};
+
+const getTimeZoneOffset = (date: Date, timeZone: string): number => {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  const parts = dtf.formatToParts(date);
+  const get = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value || '0');
+
+  const asUTC = Date.UTC(
+    get('year'),
+    get('month') - 1,
+    get('day'),
+    get('hour'),
+    get('minute'),
+    get('second'),
+  );
+
+  return (asUTC - date.getTime()) / 60_000;
 };

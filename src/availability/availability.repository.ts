@@ -77,9 +77,10 @@ export class AvailabilityRepository {
   async getAppointments(
     tenantId: string,
     desiredDate: string,
+    timeZone: string,
     staffId?: string,
   ): Promise<Appointment[]> {
-    const dayStart = makeDateInTimeZone(desiredDate, '00:00');
+    const dayStart = makeDateInTimeZone(desiredDate, '00:00', timeZone);
     const nextDayStart = addMinutes(dayStart, 24 * 60);
     const dayEnd = new Date(nextDayStart.getTime() - 1);
 

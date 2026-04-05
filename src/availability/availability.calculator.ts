@@ -27,6 +27,7 @@ export class AvailabilityCalculator {
   generateCandidateSlots(
     businessHours: BusinessHour[],
     desiredDate: string,
+    timeZone: string,
     durationMinutes: number,
   ): SlotRange[] {
     const slots: SlotRange[] = [];
@@ -36,10 +37,12 @@ export class AvailabilityCalculator {
       const startTime = makeDateInTimeZone(
         desiredDate,
         normalizeTime(hours.startTime),
+        timeZone,
       );
       const endTime = makeDateInTimeZone(
         desiredDate,
         normalizeTime(hours.endTime),
+        timeZone,
       );
 
       if (endTime <= startTime) continue;
