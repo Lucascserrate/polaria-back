@@ -22,24 +22,12 @@ export class AssistantPromptContextService {
     tenantId?: string,
     clientName?: string,
   ): Promise<AssistantPromptContext> {
-    let timezone = 'America/Bogota';
-    const currentDateTime = new Date().toISOString();
-
     if (!tenantId) {
-      return {
-        timezone,
-        currentDateTime,
-        businessHours: [],
-        services: [],
-        staff: [],
-        clientName,
-      };
+      throw new Error('TenantId is required');
     }
 
     const tenant: Tenant | null = await this.tenantsService.findOne(tenantId);
-    if (tenant?.timezone) {
-      timezone = tenant.timezone;
-    }
+    const timezone = this.normalizeTimezone(tenant?.timezone);
 
     const [businessHours, services, staff]: [
       BusinessHour[],
@@ -59,11 +47,35 @@ export class AssistantPromptContextService {
 
     return {
       timezone,
-      currentDateTime,
+      currentDateTime: this.formatNow(timezone),
       businessHours: businessHoursText,
       services: serviceNames,
       staff: staffNames,
       clientName,
     };
+  }
+
+  private formatNow(timezone: string): string {
+    const formatter = new Intl.DateTimeFormat('es-CO', {
+      timeZone: timezone,
+      dateStyle: 'full',
+      timeStyle: 'short',
+    });
+    return formatter.format(new Date());
+  }
+
+  private normalizeTimezone(timezone?: string): string {
+    const fallback = 'America/La_Paz';
+    if (!timezone || timezone.trim().length === 0) {
+      return fallback;
+    }
+    try {
+      new Intl.DateTimeFormat('es-CO', { timeZone: timezone }).format(
+        new Date(),
+      );
+      return timezone;
+    } catch {
+      return fallback;
+    }
   }
 }
