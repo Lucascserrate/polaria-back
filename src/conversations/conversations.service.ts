@@ -13,18 +13,26 @@ export class ConversationsService {
     private conversationRepository: Repository<Conversation>,
   ) {}
 
-  create(createConversationDto: CreateConversationDto) {
-    const conversation =
-      this.conversationRepository.create(createConversationDto);
+  create(createConversationDto: CreateConversationDto): Promise<Conversation> {
+    const conversation = this.conversationRepository.create(
+      createConversationDto,
+    );
     return this.conversationRepository.save(conversation);
   }
 
-  findAll() {
+  findAll(): Promise<Conversation[]> {
     return this.conversationRepository.find();
   }
 
-  findOne(id: string) {
+  findOne(id: string): Promise<Conversation | null> {
     return this.conversationRepository.findOneBy({ id });
+  }
+
+  findByTenantAndClient(
+    tenantId: string,
+    clientId: string,
+  ): Promise<Conversation | null> {
+    return this.conversationRepository.findOneBy({ tenantId, clientId });
   }
 
   async update(id: string, updateConversationDto: UpdateConversationDto) {

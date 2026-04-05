@@ -12,16 +12,16 @@ export class MessagesService {
     private messageRepository: Repository<Message>,
   ) {}
 
-  create(createMessageDto: CreateMessageDto) {
+  create(createMessageDto: CreateMessageDto): Promise<Message> {
     const message = this.messageRepository.create(createMessageDto);
     return this.messageRepository.save(message);
   }
 
-  findAll() {
+  findAll(): Promise<Message[]> {
     return this.messageRepository.find();
   }
 
-  findOne(id: string) {
+  findOne(id: string): Promise<Message | null> {
     return this.messageRepository.findOneBy({ id });
   }
 }

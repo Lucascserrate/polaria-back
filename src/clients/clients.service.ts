@@ -13,17 +13,24 @@ export class ClientsService {
     private clientRepository: Repository<Client>,
   ) {}
 
-  create(createClientDto: CreateClientDto) {
+  create(createClientDto: CreateClientDto): Promise<Client> {
     const client = this.clientRepository.create(createClientDto);
     return this.clientRepository.save(client);
   }
 
-  findAll() {
+  findAll(): Promise<Client[]> {
     return this.clientRepository.find();
   }
 
-  findOne(id: string) {
+  findOne(id: string): Promise<Client | null> {
     return this.clientRepository.findOneBy({ id });
+  }
+
+  findByTenantAndPhone(
+    tenantId: string,
+    phone: string,
+  ): Promise<Client | null> {
+    return this.clientRepository.findOneBy({ tenantId, phone });
   }
 
   async update(id: string, updateClientDto: UpdateClientDto) {

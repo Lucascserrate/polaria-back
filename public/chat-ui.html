@@ -123,10 +123,11 @@
 
         <input
           id="tenantIdInput"
-          placeholder="Tenant ID"
           value="034e71ea-3d77-47ca-8d6e-6aeb16121fd1"
+          placeholder="Tenant ID"
+          readonly
         />
-        <input id="phoneInput" placeholder="Telefono" />
+        <input id="phoneInput" placeholder="Teléfono" readonly />
         <textarea
           id="messageInput"
           placeholder="Escribe tu mensaje..."
@@ -142,31 +143,10 @@
       const sendBtn = document.getElementById('sendMessage');
       const messageInput = document.getElementById('messageInput');
       const chatStatus = document.getElementById('chatStatus');
+      const tenantInput = document.getElementById('tenantIdInput');
       const phoneInput = document.getElementById('phoneInput');
 
       let sending = false;
-
-      function generateRandomPhone(length = 10) {
-        const digits = [];
-
-        if (window.crypto && typeof window.crypto.getRandomValues === 'function') {
-          const bytes = new Uint8Array(length);
-          window.crypto.getRandomValues(bytes);
-          for (let i = 0; i < length; i += 1) {
-            digits.push((bytes[i] % 10).toString());
-          }
-        } else {
-          for (let i = 0; i < length; i += 1) {
-            digits.push(Math.floor(Math.random() * 10).toString());
-          }
-        }
-
-        return digits.join('');
-      }
-
-      function setNewPhoneId() {
-        phoneInput.value = generateRandomPhone();
-      }
 
       function addBubble(text, type) {
         const el = document.createElement('div');
@@ -180,7 +160,13 @@
         if (sending) return;
 
         const message = messageInput.value.trim();
+        const tenantId = tenantInput.value.trim();
+        const phone = phoneInput.value.trim();
         if (!message) return;
+        if (!tenantId || !phone) {
+          chatStatus.textContent = 'Falta tenant o teléfono';
+          return;
+        }
 
         sending = true;
         sendBtn.disabled = true;
@@ -190,18 +176,18 @@
         messageInput.value = '';
 
         try {
-          const res = await fetch('/chat/message', {
+          const res = await fetch('/assistant/chat', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              tenantId: document.getElementById('tenantIdInput').value,
-              phone: phoneInput.value,
-              message,
+              tenantId,
+              phone,
+              messageText: message,
             }),
           });
 
           const data = await res.json();
-          addBubble(data.message || 'Sin respuesta', 'bot');
+          addBubble(data.reply || 'Sin respuesta', 'bot');
           chatStatus.textContent = '';
         } catch {
           addBubble('Error de conexion', 'bot');
@@ -212,7 +198,8 @@
         sendBtn.disabled = false;
       }
 
-      setNewPhoneId();
+      phoneInput.value = `57${Math.floor(Math.random() * 1000000000)}`;
+
       sendBtn.onclick = sendMessage;
 
       messageInput.addEventListener('keydown', (e) => {
@@ -224,5 +211,3 @@
     </script>
   </body>
 </html>
-
-
