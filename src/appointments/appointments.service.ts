@@ -63,6 +63,18 @@ export class AppointmentsService {
     return this.appointmentRepository.findOneBy({ id });
   }
 
+  async findLastByClient(tenantId: string, clientId: string) {
+    return this.appointmentRepository.findOne({
+      where: {
+        tenantId,
+        clientId,
+        status: AppointmentStatus.CONFIRMED,
+      },
+      relations: ['services', 'services.service', 'services.staff'],
+      order: { startTime: 'DESC' },
+    });
+  }
+
   async createFromAssistant(input: {
     tenantId: string;
     clientId: string;
