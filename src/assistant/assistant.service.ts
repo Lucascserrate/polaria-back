@@ -137,7 +137,6 @@ export class AssistantService {
       },
     });
 
-
     if (
       finalAction === 'CONFIRM_BOOKING' &&
       availabilityResult.isAvailable !== false

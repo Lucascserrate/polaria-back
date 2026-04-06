@@ -27,6 +27,11 @@ export class AppointmentsService {
     return this.appointmentRepository.save(appointment);
   }
 
+  async update(id: string, updateAppointmentDto: UpdateAppointmentDto) {
+    await this.appointmentRepository.update(id, updateAppointmentDto);
+    return this.findOne(id);
+  }
+
   async findAll() {
     const appointments = await this.appointmentRepository.find({
       relations: {
@@ -56,16 +61,6 @@ export class AppointmentsService {
 
   findOne(id: string) {
     return this.appointmentRepository.findOneBy({ id });
-  }
-
-  async update(id: string, updateAppointmentDto: UpdateAppointmentDto) {
-    await this.appointmentRepository.update(id, updateAppointmentDto);
-    return this.findOne(id);
-  }
-
-  async remove(id: string) {
-    await this.appointmentRepository.delete(id);
-    return { deleted: true };
   }
 
   async createFromAssistant(input: {
@@ -124,6 +119,78 @@ export class AppointmentsService {
     }
 
     return appointment;
+  }
+
+  async updateFromAssistant(input: {
+    appointmentId: string;
+    tenantId: string;
+    serviceIds: string[];
+    staffId?: string;
+    date: string;
+    time: string;
+  }): Promise<Appointment> {
+    const appointment = await this.appointmentRepository.findOne({
+      where: { id: input.appointmentId },
+    });
+
+    if (!appointment) {
+      throw new Error('Cita no encontrada');
+    }
+
+    const availability = await this.availabilityService.findAvailableSlots({
+      tenantId: input.tenantId,
+      serviceIds: input.serviceIds,
+      desiredDate: input.date,
+      desiredTime: input.time,
+      staffId: input.staffId,
+    });
+
+    if (!availability.isAvailable || availability.suggestedSlots.length === 0) {
+      throw new Error('Nuevo horario no disponible');
+    }
+
+    const slot = availability.suggestedSlots[0];
+
+    appointment.staffId = slot.staffId;
+    appointment.startTime = new Date(slot.startTime);
+    appointment.endTime = new Date(slot.endTime);
+
+    await this.appointmentRepository.save(appointment);
+
+    await this.appointmentServiceRepository.delete({
+      appointmentId: appointment.id,
+    });
+
+    const services = await this.serviceRepository.find({
+      where: {
+        id: In(input.serviceIds),
+        tenantId: input.tenantId,
+      },
+    });
+
+    const appointmentServices = services.map((service, index) =>
+      this.appointmentServiceRepository.create({
+        appointmentId: appointment.id,
+        serviceId: service.id,
+        staffId: slot.staffId,
+        startTime: appointment.startTime,
+        endTime: appointment.endTime,
+        priceAtBooking: service.price,
+        durationAtBooking: service.durationMinutes,
+        sequenceOrder: index,
+      }),
+    );
+
+    if (appointmentServices.length > 0) {
+      await this.appointmentServiceRepository.save(appointmentServices);
+    }
+
+    return appointment;
+  }
+
+  async remove(id: string) {
+    await this.appointmentRepository.delete(id);
+    return { deleted: true };
   }
 
   private formatDateTime(date: Date, timezone: string): string {
