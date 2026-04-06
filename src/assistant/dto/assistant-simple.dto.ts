@@ -4,5 +4,5 @@ import { IsString } from 'class-validator';
 export class AssistantSimpleDto {
   @ApiProperty()
   @IsString()
-  messageText: string;
+  messageText!: string;
 }
