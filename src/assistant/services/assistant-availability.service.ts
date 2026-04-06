@@ -91,6 +91,12 @@ export class AssistantAvailabilityService {
         : undefined;
 
     if (lastKey === availabilityKey) {
+      await this.conversationsService.update(conversation.id, {
+        contextJson: {
+          ...currentContext,
+          lastAvailabilityKey: availabilityKey,
+        },
+      });
       return {
         handled: true,
         finalReply: reply,
@@ -106,86 +112,97 @@ export class AssistantAvailabilityService {
       };
     }
 
-    const availability = await this.availabilityService.findAvailableSlots({
-      tenantId: input.tenantId,
-      serviceIds,
-      desiredDate: entities.date,
-      desiredTime: entities.time,
-      staffId,
-    });
-    const friendly = await this.availabilityService.getFriendlySlots({
-      tenantId: input.tenantId,
-      serviceIds,
-      desiredDate: entities.date,
-      desiredTime: entities.time,
-      staffId,
-    });
-
-    const availabilitySystemContent = `
-      Resultado de disponibilidad:
-      ${JSON.stringify({
-        isAvailable: availability.isAvailable,
-        friendlySlots: friendly.friendlySlots,
-      })}
-      
-      Instrucciones:
-      
-      - Si isAvailable es true:
-        Responde confirmando disponibilidad y pregunta si desea confirmar la cita.
-      
-      - Si isAvailable es false:
-        Usa este formato EXACTO:
-      
-        "No tengo disponibilidad a esa hora, pero mira estos horarios cercanos 👇
-        - HH:mm
-        - HH:mm
-        - HH:mm
-        ¿Cuál te queda mejor?"
-      
-      - Usa SOLO friendlySlots
-      - NO inventes horarios
-      - NO uses frases como "¿Deseas otro horario?"
-      - Usa un tono natural tipo WhatsApp
-      - Se claro, corto y amigable
-      - Mantén el formato JSON obligatorio
-      `;
-
-    const availabilityResponse = await this.aiService.chat([
-      { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
-      ...historyMessages,
-      { role: 'system', content: availabilitySystemContent },
-    ]);
-
-    const parsedFinal = parseAssistantResponse(availabilityResponse);
-    const mergedEntities = {
-      ...(entities ?? {}),
-      ...(parsedFinal.entities ?? {}),
-    } as AssistantParsedResponse['entities'];
-    const finalReply = parsedFinal.reply;
-
-    await this.conversationsService.update(conversation.id, {
-      currentState: availability.isAvailable
-        ? ConversationState.CONFIRM_APPOINTMENT
-        : ConversationState.SUGGEST_SLOTS,
-      contextJson: {
-        ...currentContext,
-        lastAvailabilityKey: availabilityKey,
-      },
-    });
-
-    return {
-      handled: true,
-      finalReply,
-      finalEntities: mergedEntities,
-      finalAction: parsedFinal.action ?? action,
-      bookingData: {
+    try {
+      const availability = await this.availabilityService.findAvailableSlots({
+        tenantId: input.tenantId,
         serviceIds,
+        desiredDate: entities.date,
+        desiredTime: entities.time,
         staffId,
-        date: entities.date,
-        time: entities.time,
-      },
-      isAvailable: availability.isAvailable,
-    };
+      });
+      const friendly = await this.availabilityService.getFriendlySlots({
+        tenantId: input.tenantId,
+        serviceIds,
+        desiredDate: entities.date,
+        desiredTime: entities.time,
+        staffId,
+      });
+
+      const availabilitySystemContent = `
+        Resultado de disponibilidad:
+        ${JSON.stringify({
+          isAvailable: availability.isAvailable,
+          friendlySlots: friendly.friendlySlots,
+        })}
+        
+        Instrucciones:
+        
+        - Si isAvailable es true:
+          Responde confirmando disponibilidad y pregunta si desea confirmar la cita.
+        
+        - Si isAvailable es false:
+          Usa este formato EXACTO:
+        
+          "No tengo disponibilidad a esa hora, pero mira estos horarios cercanos 👇
+          - HH:mm
+          - HH:mm
+          - HH:mm
+          ¿Cuál te queda mejor?"
+        
+        - Usa SOLO friendlySlots
+        - NO inventes horarios
+        - NO uses frases como "¿Deseas otro horario?"
+        - Usa un tono natural tipo WhatsApp
+        - Se claro, corto y amigable
+        - Mantén el formato JSON obligatorio
+        `;
+
+      const availabilityResponse = await this.aiService.chat([
+        { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
+        ...historyMessages,
+        { role: 'system', content: availabilitySystemContent },
+      ]);
+
+      const parsedFinal = parseAssistantResponse(availabilityResponse);
+      const mergedEntities = {
+        ...(entities ?? {}),
+        ...(parsedFinal.entities ?? {}),
+      } as AssistantParsedResponse['entities'];
+      const finalReply = parsedFinal.reply;
+
+      await this.conversationsService.update(conversation.id, {
+        currentState: availability.isAvailable
+          ? ConversationState.CONFIRM_APPOINTMENT
+          : ConversationState.SUGGEST_SLOTS,
+        contextJson: {
+          ...currentContext,
+          lastAvailabilityKey: availabilityKey,
+        },
+      });
+
+      return {
+        handled: true,
+        finalReply,
+        finalEntities: mergedEntities,
+        finalAction: parsedFinal.action ?? action,
+        bookingData: {
+          serviceIds,
+          staffId,
+          date: entities.date,
+          time: entities.time,
+        },
+        isAvailable: availability.isAvailable,
+      };
+    } catch (error) {
+      console.error('Error handling availability:', error);
+      return {
+        handled: false,
+        finalReply:
+          'Hubo un problema al verificar la disponibilidad. Por favor, intenta nuevamente.',
+        finalEntities: entities,
+        finalAction: action,
+      };
+    }
   }
 
   async resolveBookingData(params: {

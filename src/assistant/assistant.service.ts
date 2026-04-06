@@ -125,6 +125,19 @@ export class AssistantService {
     const finalAction = availabilityResult.finalAction ?? action;
     const finalEntities = availabilityResult.finalEntities ?? entities;
 
+    const mergedEntities = {
+      ...(conversation.contextJson?.entities ?? {}),
+      ...(entities ?? {}),
+    };
+
+    await this.conversationsService.update(conversation.id, {
+      contextJson: {
+        ...conversation.contextJson,
+        entities: mergedEntities,
+      },
+    });
+
+
     if (
       finalAction === 'CONFIRM_BOOKING' &&
       availabilityResult.isAvailable !== false

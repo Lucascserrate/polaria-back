@@ -19,19 +19,22 @@ export function parseAssistantResponse(
 } {
   const responseText = response.content ?? '';
   const parsed = tryParseAssistantJson(responseText);
+
   if (parsed) {
     logger.log('[assistant] parsed json:', parsed);
+    return {
+      reply: parsed.reply ?? 'Sin respuesta',
+      entities: parsed.entities,
+      action: parsed.action,
+    };
   } else {
     logger.log('[assistant] raw response:', responseText);
+    return {
+      reply: responseText.trim().length > 0 ? responseText : 'Sin respuesta',
+      entities: undefined,
+      action: undefined,
+    };
   }
-
-  return {
-    reply:
-      parsed?.reply ??
-      (responseText.trim().length > 0 ? responseText : 'Sin respuesta'),
-    entities: parsed?.entities,
-    action: parsed?.action,
-  };
 }
 
 function tryParseAssistantJson(text: string): AssistantParsedResponse | null {
