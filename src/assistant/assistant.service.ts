@@ -125,9 +125,14 @@ export class AssistantService {
     const finalAction = availabilityResult.finalAction ?? action;
     const finalEntities = availabilityResult.finalEntities ?? entities;
 
+    const prev = entities ?? {};
+    const next = finalEntities ?? {};
+
     const mergedEntities = {
-      ...(conversation.contextJson?.entities ?? {}),
-      ...(entities ?? {}),
+      services: next.services ?? prev.services ?? null,
+      staff: next.staff ?? prev.staff ?? null,
+      date: next.date ?? prev.date ?? null,
+      time: next.time ?? prev.time ?? null,
     };
 
     await this.conversationsService.update(conversation.id, {
