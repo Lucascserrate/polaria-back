@@ -169,16 +169,31 @@ export class AssistantService {
           await this.conversationsService.update(conversation.id, {
             currentState: ConversationState.IDLE,
             contextJson: {
-              ...conversation.contextJson,
+              ...(conversation.contextJson ?? {}), // si es undefined, usamos un objeto vacío
+              appointmentCreated: true,
               entities: {
-                services: null,
-                staff: null,
+                ...(conversation.contextJson?.entities ?? {}), // si entities es undefined, usamos vacío
                 date: null,
                 time: null,
               },
-              appointmentCreated: true, // Set temporary flag
             },
           });
+
+          // Suponiendo bookingData.date = '2026-04-07', bookingData.time = '09:00'
+          const dateTime = new Date(`${bookingData.date}T${bookingData.time}`);
+
+          // Formateo legible en español
+          const formatted = dateTime.toLocaleString('es-CO', {
+            weekday: 'long',
+            day: 'numeric',
+            month: 'long',
+            hour: 'numeric',
+            minute: '2-digit',
+            hour12: true,
+          });
+
+          // Mensaje final
+          finalReply = `¡Listo! Tu cita quedó agendada para el ${formatted}.`;
 
           setTimeout(() => {
             void (async () => {

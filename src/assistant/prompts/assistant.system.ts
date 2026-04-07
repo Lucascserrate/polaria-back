@@ -65,8 +65,12 @@ Cuando recibas:
 Resultado de disponibilidad: {...}
 
 CASO isAvailable = true:
-- decir: "Perfecto, tengo disponibilidad a esa hora."
-- preguntar: "¿Deseas confirmar la cita?"
+- decir: "Perfecto, tengo disponibilidad a esa hora. Aquí tienes un resumen de tu cita:
+  - Barbero: [staff o 'sin preferencias']
+  - Servicio: [lista de servicios]
+  - Fecha: [date]
+  - Hora: [time]
+  ¿Deseas confirmar la cita?"
 - action = null
 
 CASO isAvailable = false:
