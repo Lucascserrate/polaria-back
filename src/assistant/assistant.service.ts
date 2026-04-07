@@ -16,6 +16,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { parseAssistantResponse } from './utils/assistant-response-parser';
 import { AssistantAvailabilityService } from './services/assistant-availability.service';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { AssistantEntities } from './types/assistant-entities.type';
 
 @Injectable()
 export class AssistantService {
@@ -124,15 +125,16 @@ export class AssistantService {
 
     const finalAction = availabilityResult.finalAction ?? action;
     const finalEntities = availabilityResult.finalEntities ?? entities;
-
+    const stored = (conversation.contextJson?.entities ??
+      {}) as Partial<AssistantEntities>;
     const prev = entities ?? {};
     const next = finalEntities ?? {};
 
-    const mergedEntities = {
-      services: next.services ?? prev.services ?? null,
-      staff: next.staff ?? prev.staff ?? null,
-      date: next.date ?? prev.date ?? null,
-      time: next.time ?? prev.time ?? null,
+    const mergedEntities: AssistantEntities = {
+      services: next.services ?? prev.services ?? stored.services ?? null,
+      staff: next.staff ?? prev.staff ?? stored.staff ?? null,
+      date: next.date ?? prev.date ?? stored.date ?? null,
+      time: next.time ?? prev.time ?? stored.time ?? null,
     };
 
     await this.conversationsService.update(conversation.id, {
@@ -150,7 +152,7 @@ export class AssistantService {
         availabilityResult.bookingData ??
         (await this.assistantAvailabilityService.resolveBookingData({
           tenantId: input.tenantId,
-          entities: finalEntities,
+          entities: mergedEntities,
         }));
       if (bookingData) {
         await this.appointmentsService.createFromAssistant({
