@@ -143,11 +143,11 @@ export class AssistantAvailabilityService {
         - Si isAvailable es false:
           Usa este formato EXACTO:
         
-          "No tengo disponibilidad a esa hora, pero mira estos horarios cercanos 👇
+          "No tengo disponibilidad a esa hora, pero te propongo estos horarios disponibles 👇
           - HH:mm
           - HH:mm
           - HH:mm
-          ¿Cuál te queda mejor?"
+          ¿Cuál te queda mejor o quieres intentar otra hora?"
         
         - Usa SOLO friendlySlots
         - NO inventes horarios
