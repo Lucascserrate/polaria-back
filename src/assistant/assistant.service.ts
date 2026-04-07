@@ -148,21 +148,51 @@ export class AssistantService {
       finalAction === 'CONFIRM_BOOKING' &&
       availabilityResult.isAvailable !== false
     ) {
-      const bookingData =
-        availabilityResult.bookingData ??
-        (await this.assistantAvailabilityService.resolveBookingData({
-          tenantId: input.tenantId,
-          entities: mergedEntities,
-        }));
-      if (bookingData) {
-        await this.appointmentsService.createFromAssistant({
-          tenantId: input.tenantId,
-          clientId: client.id,
-          serviceIds: bookingData.serviceIds,
-          staffId: bookingData.staffId,
-          date: bookingData.date,
-          time: bookingData.time,
-        });
+      if (!conversation.contextJson?.appointmentCreated) {
+        const bookingData =
+          availabilityResult.bookingData ??
+          (await this.assistantAvailabilityService.resolveBookingData({
+            tenantId: input.tenantId,
+            entities: mergedEntities,
+          }));
+
+        if (bookingData) {
+          await this.appointmentsService.createFromAssistant({
+            tenantId: input.tenantId,
+            clientId: client.id,
+            serviceIds: bookingData.serviceIds,
+            staffId: bookingData.staffId,
+            date: bookingData.date,
+            time: bookingData.time,
+          });
+
+          await this.conversationsService.update(conversation.id, {
+            currentState: ConversationState.IDLE,
+            contextJson: {
+              ...conversation.contextJson,
+              entities: {
+                services: null,
+                staff: null,
+                date: null,
+                time: null,
+              },
+              appointmentCreated: true, // Set temporary flag
+            },
+          });
+
+          setTimeout(() => {
+            void (async () => {
+              await this.conversationsService.update(conversation.id, {
+                contextJson: {
+                  ...conversation.contextJson,
+                  appointmentCreated: false,
+                },
+              });
+            })();
+          }, 5000);
+        }
+      } else {
+        finalReply = 'La cita ya ha sido creada.';
       }
     }
 
