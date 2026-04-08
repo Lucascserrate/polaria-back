@@ -143,6 +143,17 @@ export class AvailabilityService {
     let selected: StaffSlot[] = [];
 
     if (hasDesiredTime) {
+      const exactMatch = uniqueSlots.find((slot) =>
+        this.availabilityCalculator.isExactMatch(slot, desiredStart),
+      );
+      if (exactMatch) {
+        return {
+          isAvailable: true,
+          suggestedSlots: [
+            this.availabilityCalculator.toSuggestedSlot(exactMatch),
+          ],
+        };
+      }
       const closest = this.availabilityCalculator.findClosestSlots(
         uniqueSlots,
         desiredStart,
