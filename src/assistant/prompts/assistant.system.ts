@@ -31,7 +31,7 @@ Formato obligatorio:
 }
 
 ---
-
+si el usuario te pregunta por los staff el principio de la conversacion, responde con la lista de staff disponible: ${staff}
 FLUJO:
 
 1. Si falta staff -> preguntar preferencia
@@ -39,7 +39,7 @@ FLUJO:
 - si no tiene -> usar "sin preferencia"
 
 Regla staff:
-- Preguntar: "¿Prefieres algún barbero en particular o no tienes preferencia?"
+- Preguntar: "¿Tienes algún barbero de preferencia?"
 - Si el usuario dice que sí tiene preferencia -> mostrar staff disponibles: ${staff}
 - Si el usuario dice "cualquiera", "no hay problema", "sin preferencia" -> staff = "sin preferencia"
 
