@@ -3,14 +3,16 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
   Index,
+  JoinColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Staff } from '../../staff/entities/staff.entity';
 import { Client } from '../../clients/entities/client.entity';
-import { Service } from '../../services/entities/service.entity';
+import { AppointmentService } from './appointment_service.entity';
 
 export enum AppointmentStatus {
   PENDING = 'pending',
@@ -24,50 +26,54 @@ export enum AppointmentStatus {
 @Entity('appointments')
 export class Appointment {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  tenantId: string;
-  @ManyToOne(() => Tenant, (tenant) => tenant.id, { onDelete: 'CASCADE' })
-  tenant: Tenant;
+  tenantId!: string;
+  @ManyToOne(() => Tenant, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'tenantId' })
+  tenant!: Tenant;
 
   @Column()
-  staffId: string;
-  @ManyToOne(() => Staff, (staff) => staff.id, { onDelete: 'CASCADE' })
-  staff: Staff;
+  staffId!: string;
+  @ManyToOne(() => Staff, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'staffId' })
+  staff!: Staff;
 
   @Column()
-  clientId: string;
-  @ManyToOne(() => Client, (client) => client.id, { onDelete: 'CASCADE' })
-  client: Client;
+  clientId!: string;
+  @ManyToOne(() => Client, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'clientId' })
+  client!: Client;
 
-  @Column()
-  serviceId: string;
-  @ManyToOne(() => Service, (service) => service.id, { onDelete: 'CASCADE' })
-  service: Service;
+  @OneToMany(
+    () => AppointmentService,
+    (appointmentService) => appointmentService.appointment,
+  )
+  services!: AppointmentService[];
 
-  @Column({ type: 'datetime' })
-  startTime: Date;
+  @Column({ type: 'timestamp' })
+  startTime!: Date;
 
-  @Column({ type: 'datetime' })
-  endTime: Date;
+  @Column({ type: 'timestamp' })
+  endTime!: Date;
 
   @Column({
     type: 'enum',
     enum: AppointmentStatus,
     default: AppointmentStatus.PENDING,
   })
-  status: AppointmentStatus;
+  status!: AppointmentStatus;
 
   @Column({ nullable: true })
   googleEventId?: string;
 
   @Column({ default: false })
-  reminderSent: boolean;
+  reminderSent!: boolean;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

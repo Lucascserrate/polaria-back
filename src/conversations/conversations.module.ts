@@ -9,5 +9,6 @@ import { ConversationsController } from './conversations.controller';
   imports: [TypeOrmModule.forFeature([Conversation])],
   controllers: [ConversationsController],
   providers: [ConversationsService],
+  exports: [ConversationsService],
 })
 export class ConversationsModule {}

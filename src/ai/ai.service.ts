@@ -1,6 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
-import { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type {
+  ChatCompletionMessage,
+  ChatCompletionMessageParam,
+} from 'openai/resources/chat/completions';
 
 @Injectable()
 export class AIService {
@@ -12,7 +15,9 @@ export class AIService {
     });
   }
 
-  async chat(messages: ChatCompletionMessageParam[]) {
+  async chat(
+    messages: ChatCompletionMessageParam[],
+  ): Promise<ChatCompletionMessage> {
     const response = await this.openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,

@@ -13,17 +13,24 @@ export class ServicesService {
     private serviceRepository: Repository<Service>,
   ) {}
 
-  create(createServiceDto: CreateServiceDto) {
+  create(createServiceDto: CreateServiceDto): Promise<Service> {
     const service = this.serviceRepository.create(createServiceDto);
     return this.serviceRepository.save(service);
   }
 
-  findAll() {
+  findAll(): Promise<Service[]> {
     return this.serviceRepository.find();
   }
 
-  findOne(id: string) {
+  findOne(id: string): Promise<Service | null> {
     return this.serviceRepository.findOneBy({ id });
+  }
+
+  findByTenant(tenantId: string): Promise<Service[]> {
+    return this.serviceRepository.find({
+      where: { tenantId },
+      order: { name: 'ASC' },
+    });
   }
 
   async update(id: string, updateServiceDto: UpdateServiceDto) {

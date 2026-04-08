@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 import { TenantsModule } from './tenants/tenants.module';
 import { StaffModule } from './staff/staff.module';
@@ -10,9 +12,11 @@ import { ClientsModule } from './clients/clients.module';
 import { ConversationsModule } from './conversations/conversations.module';
 import { BusinessHoursModule } from './business_hours/business_hours.module';
 import { AIModule } from './ai/ai.module';
+import { AssistantModule } from './assistant/assistant.module';
 import { MessagesModule } from './messages/messages.module';
 import { dbConfig } from './config/data-source';
 import { AuthModule } from './auth/auth.module';
+import { AvailabilityModule } from './availability/availability.module';
 
 @Module({
   imports: [
@@ -27,6 +31,9 @@ import { AuthModule } from './auth/auth.module';
       useFactory: (configService: ConfigService) =>
         configService.getOrThrow('database'),
     }),
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'public'),
+    }),
 
     TenantsModule,
     StaffModule,
@@ -37,7 +44,9 @@ import { AuthModule } from './auth/auth.module';
     MessagesModule,
     BusinessHoursModule,
     AIModule,
+    AssistantModule,
     AuthModule,
+    AvailabilityModule,
   ],
   controllers: [],
   providers: [],
