@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { AvailabilityService } from '../../availability/availability.service';
 import { ServicesService } from '../../services/services.service';
 import { StaffService } from '../../staff/staff.service';
@@ -12,6 +12,12 @@ import { ConversationState } from '../../conversations/entities/conversation.ent
 import type { AssistantPromptContext } from '../prompts/assistant.system';
 import type { Conversation } from '../../conversations/entities/conversation.entity';
 import type { AssistantChatDto } from '../dto/assistant-chat.dto';
+import {
+  buildAvailabilityKey,
+  hasAvailabilityEntities,
+  mapServices,
+  mapStaff,
+} from './availability/availability-helpers';
 
 @Injectable()
 export class AssistantAvailabilityService {
@@ -54,43 +60,71 @@ export class AssistantAvailabilityService {
       action,
     } = params;
 
-    if (!this.hasAvailabilityEntities(entities)) {
+    if (conversation.currentState === ConversationState.BOOKING_COMPLETE) {
       return {
         handled: false,
         finalReply: reply,
-        finalEntities: entities,
-        finalAction: action,
+        finalEntities: entities || {},
+        finalAction: action || undefined,
       };
     }
 
-    const serviceIds = await this.mapServices(
-      entities.services,
+    // Para SHOW_HOURS, no se requiere hora específica
+    if (
+      action === 'SHOW_HOURS' &&
+      entities &&
+      entities.services &&
+      entities.date
+    ) {
+      // Continuar con el flujo normal aunque no haya hora
+    } else if (!hasAvailabilityEntities(entities)) {
+      return {
+        handled: false,
+        finalReply: reply,
+        finalEntities: entities || {},
+        finalAction: action || undefined,
+      };
+    }
+
+    const serviceIds = await mapServices(
+      entities.services || [],
       input.tenantId,
+      this.servicesService,
     );
-    const staffId = await this.mapStaff(entities.staff ?? null, input.tenantId);
+    const staffId = await mapStaff(
+      entities.staff ?? null,
+      input.tenantId,
+      this.staffService,
+    );
 
     if (serviceIds.length === 0) {
       return {
         handled: false,
         finalReply: reply,
-        finalEntities: entities,
-        finalAction: action,
+        finalEntities: entities || {},
+        finalAction: action || undefined,
       };
     }
 
-    const availabilityKey = this.buildAvailabilityKey(
+    const availabilityKey = buildAvailabilityKey(
       serviceIds,
       staffId,
-      entities.date,
-      entities.time,
+      entities.date || '',
+      entities.time || '',
     );
     const currentContext = conversation.contextJson ?? {};
     const lastKey =
       typeof currentContext.lastAvailabilityKey === 'string'
         ? currentContext.lastAvailabilityKey
         : undefined;
+    const lastIsAvailable =
+      typeof currentContext.lastAvailabilityIsAvailable === 'boolean'
+        ? currentContext.lastAvailabilityIsAvailable
+        : undefined;
 
-    if (lastKey === availabilityKey) {
+    if (action === 'SHOW_HOURS') {
+      // Continuar al flujo normal para mostrar horarios
+    } else if (lastKey === availabilityKey) {
       await this.conversationsService.update(conversation.id, {
         contextJson: {
           ...currentContext,
@@ -100,15 +134,15 @@ export class AssistantAvailabilityService {
       return {
         handled: true,
         finalReply: reply,
-        finalEntities: entities,
-        finalAction: action,
+        finalEntities: entities || {},
+        finalAction: action || undefined,
         bookingData: {
           serviceIds,
           staffId,
-          date: entities.date,
-          time: entities.time,
+          date: entities.date || '',
+          time: entities.time || '',
         },
-        isAvailable: undefined,
+        isAvailable: lastIsAvailable,
       };
     }
 
@@ -116,34 +150,107 @@ export class AssistantAvailabilityService {
       const availability = await this.availabilityService.findAvailableSlots({
         tenantId: input.tenantId,
         serviceIds,
-        desiredDate: entities.date,
-        desiredTime: entities.time,
-        staffId,
-      });
-      const friendly = await this.availabilityService.getFriendlySlots({
-        tenantId: input.tenantId,
-        serviceIds,
-        desiredDate: entities.date,
-        desiredTime: entities.time,
+        desiredDate: entities.date || '',
+        desiredTime: entities.time || '',
         staffId,
       });
 
+      const friendly =
+        await this.availabilityService.getFriendlySlotsFromAvailability(
+          availability,
+          input.tenantId,
+        );
+
+      const requestedTimeAvailable = friendly.friendlySlots.includes(
+        entities.time || '',
+      );
+      const hasAvailability =
+        availability.isAvailable && friendly.friendlySlots.length > 0;
+
+      if (
+        action === 'SHOW_HOURS' &&
+        hasAvailability &&
+        requestedTimeAvailable
+      ) {
+        const summary = `Resumen de tu cita:
+          - Servicio: ${entities.services?.join(', ') ?? 'No definido'}
+          - Barbero: ${entities.staff ?? 'Sin preferencia'}
+          - Fecha: ${entities.date || 'No definida'}
+          - Hora: ${entities.time || 'No definida'}
+          ¿Deseas confirmar la cita?`;
+        await this.conversationsService.update(conversation.id, {
+          currentState: ConversationState.CONFIRM_APPOINTMENT,
+          contextJson: {
+            ...currentContext,
+            lastAvailabilityKey: availabilityKey,
+            lastAvailabilityIsAvailable: true,
+          },
+        });
+        return {
+          handled: true,
+          finalReply: summary,
+          finalEntities: entities || {},
+          finalAction: action || undefined,
+          bookingData: {
+            serviceIds,
+            staffId,
+            date: entities.date || '',
+            time: entities.time || '',
+          },
+          isAvailable: true,
+        };
+      }
+
+      if (hasAvailability && requestedTimeAvailable) {
+        await this.conversationsService.update(conversation.id, {
+          currentState: ConversationState.CONFIRM_APPOINTMENT,
+          contextJson: {
+            ...currentContext,
+            lastAvailabilityKey: availabilityKey,
+            lastAvailabilityIsAvailable: true,
+          },
+        });
+        return {
+          handled: true,
+          finalReply: reply,
+          finalEntities: entities,
+          finalAction: action,
+          bookingData: {
+            serviceIds,
+            staffId,
+            date: entities.date || '',
+            time: entities.time || '',
+          },
+          isAvailable: true,
+        };
+      }
+
       const availabilitySystemContent = `
+        NO HAY DISPONIBILIDAD - Ejecutando código IA secundario
+        
         Resultado de disponibilidad:
         ${JSON.stringify({
           isAvailable: availability.isAvailable,
           friendlySlots: friendly.friendlySlots,
+          action,
         })}
         
         Instrucciones:
         
-        - Si isAvailable es true:
-          Responde confirmando disponibilidad y pregunta si desea confirmar la cita.
+        - Si action es SHOW_HOURS:
+          Muestra directamente horarios disponibles usando friendlySlots.
+          Si hay staff específico, menciona el nombre del barbero.
+          Usa este formato:
+          "Estos son algunos horarios disponibles con [nombre del barbero] &#x1f447;
+          - HH:mm
+          - HH:mm
+          ¿Cuál te sirve?"
         
-        - Si isAvailable es false:
-          Usa este formato EXACTO:
-        
-          "No tengo disponibilidad a esa hora, pero te propongo estos horarios disponibles 👇
+        - Para cualquier otro caso:
+          Muestra horarios alternativos usando friendlySlots.
+          Si hay staff específico, menciona el nombre del barbero.
+          Usa este formato:
+          "No tengo disponibilidad a esa hora con [nombre del barbero], pero te propongo estos horarios disponibles:
           - HH:mm
           - HH:mm
           - HH:mm
@@ -151,11 +258,8 @@ export class AssistantAvailabilityService {
         
         - Usa SOLO friendlySlots
         - NO inventes horarios
-        - NO uses frases como "¿Deseas otro horario?"
         - Usa un tono natural tipo WhatsApp
-        - Se claro, corto y amigable
-        - Mantén el formato JSON obligatorio
-        `;
+        `.trim();
 
       const availabilityResponse = await this.aiService.chat([
         { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
@@ -164,19 +268,15 @@ export class AssistantAvailabilityService {
       ]);
 
       const parsedFinal = parseAssistantResponse(availabilityResponse);
-      const mergedEntities = {
-        ...(entities ?? {}),
-        ...(parsedFinal.entities ?? {}),
-      } as AssistantParsedResponse['entities'];
+      const mergedEntities = entities;
       const finalReply = parsedFinal.reply;
 
       await this.conversationsService.update(conversation.id, {
-        currentState: availability.isAvailable
-          ? ConversationState.CONFIRM_APPOINTMENT
-          : ConversationState.SUGGEST_SLOTS,
+        currentState: ConversationState.SUGGEST_SLOTS,
         contextJson: {
           ...currentContext,
           lastAvailabilityKey: availabilityKey,
+          lastAvailabilityIsAvailable: false,
         },
       });
 
@@ -184,14 +284,14 @@ export class AssistantAvailabilityService {
         handled: true,
         finalReply,
         finalEntities: mergedEntities,
-        finalAction: parsedFinal.action ?? action,
+        finalAction: action,
         bookingData: {
           serviceIds,
           staffId,
-          date: entities.date,
-          time: entities.time,
+          date: entities.date || '',
+          time: entities.time || '',
         },
-        isAvailable: availability.isAvailable,
+        isAvailable: false,
       };
     } catch (error) {
       console.error('Error handling availability:', error);
@@ -203,6 +303,37 @@ export class AssistantAvailabilityService {
         finalAction: action,
       };
     }
+  }
+
+  async handleShowHours(params: {
+    input: AssistantChatDto;
+    conversation: Conversation;
+    historyMessages: ChatCompletionMessageParam[];
+    promptContext: AssistantPromptContext;
+    reply: string;
+    entities: AssistantParsedResponse['entities'] | undefined;
+    action: string | undefined;
+  }): Promise<{
+    handled: boolean;
+    finalReply: string;
+    finalEntities?: AssistantParsedResponse['entities'];
+    finalAction?: string | null;
+  }> {
+    const { reply, entities, action } = params;
+
+    if (action !== 'SHOW_HOURS') {
+      return {
+        handled: false,
+        finalReply: reply,
+        finalEntities: entities || {},
+        finalAction: action || undefined,
+      };
+    }
+
+    return this.handleAvailability({
+      ...params,
+      entities,
+    });
   }
 
   async resolveBookingData(params: {
@@ -218,9 +349,17 @@ export class AssistantAvailabilityService {
     | undefined
   > {
     const { tenantId, entities } = params;
-    if (!this.hasAvailabilityEntities(entities)) return undefined;
-    const serviceIds = await this.mapServices(entities.services, tenantId);
-    const staffId = await this.mapStaff(entities.staff ?? null, tenantId);
+    if (!hasAvailabilityEntities(entities)) return undefined;
+    const serviceIds = await mapServices(
+      entities.services,
+      tenantId,
+      this.servicesService,
+    );
+    const staffId = await mapStaff(
+      entities.staff ?? null,
+      tenantId,
+      this.staffService,
+    );
     if (serviceIds.length === 0) return undefined;
     return {
       serviceIds,
@@ -228,68 +367,5 @@ export class AssistantAvailabilityService {
       date: entities.date,
       time: entities.time,
     };
-  }
-
-  private async mapServices(
-    names: string[],
-    tenantId: string,
-  ): Promise<string[]> {
-    if (!names.length) return [];
-    const services = await this.servicesService.findByTenant(tenantId);
-    const normalized = names.map((name) => name.trim().toLowerCase());
-    return services
-      .filter((service) =>
-        normalized.includes(service.name.trim().toLowerCase()),
-      )
-      .map((service) => service.id);
-  }
-
-  private async mapStaff(
-    name: string | null,
-    tenantId: string,
-  ): Promise<string | undefined> {
-    const normalized = name?.trim().toLowerCase();
-    if (!normalized) return undefined;
-    const noPreference = ['sin preferencia'];
-    if (noPreference.includes(normalized)) return undefined;
-    const staffList = await this.staffService.findByTenant(tenantId);
-    const found = staffList.find(
-      (staff) => staff.name.trim().toLowerCase() === normalized,
-    );
-    return found?.id;
-  }
-
-  private hasAvailabilityEntities(
-    entities: AssistantParsedResponse['entities'] | undefined,
-  ): entities is {
-    services: string[];
-    staff: string;
-    date: string;
-    time: string;
-  } {
-    if (!entities) return false;
-    if (!Array.isArray(entities.services) || entities.services.length === 0) {
-      return false;
-    }
-    if (typeof entities.date !== 'string' || entities.date.trim() === '') {
-      return false;
-    }
-    if (typeof entities.time !== 'string' || entities.time.trim() === '') {
-      return false;
-    }
-    if (typeof entities.staff !== 'string' || entities.staff.trim() === '') {
-      return false;
-    }
-    return true;
-  }
-
-  private buildAvailabilityKey(
-    serviceIds: string[],
-    staffId: string | undefined,
-    date: string,
-    time: string,
-  ): string {
-    const sortedServices = [...serviceIds].sort().join('|');
-    return [sortedServices, staffId ?? '', date, time].join('::');
   }
 }

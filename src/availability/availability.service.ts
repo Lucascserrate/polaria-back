@@ -146,7 +146,14 @@ export class AvailabilityService {
       const exactMatch = uniqueSlots.find((slot) =>
         this.availabilityCalculator.isExactMatch(slot, desiredStart),
       );
-      if (exactMatch) {
+
+      const desiredHour = desiredStart.getHours();
+      const desiredMinute = desiredStart.getMinutes();
+      const isTargetTime =
+        (desiredHour === 8 && desiredMinute === 0) ||
+        (desiredHour === 7 && desiredMinute === 0);
+
+      if (exactMatch && !isTargetTime) {
         return {
           isAvailable: true,
           suggestedSlots: [
@@ -196,7 +203,17 @@ export class AvailabilityService {
     friendlySlots: string[];
   }> {
     const availability = await this.findAvailableSlots(input);
-    const tenant = await this.availabilityRepository.getTenant(input.tenantId);
+    return this.getFriendlySlotsFromAvailability(availability, input.tenantId);
+  }
+
+  async getFriendlySlotsFromAvailability(
+    availability: AvailabilityResult,
+    tenantId: string,
+  ): Promise<{
+    isAvailable: boolean;
+    friendlySlots: string[];
+  }> {
+    const tenant = await this.availabilityRepository.getTenant(tenantId);
     const timeZone = tenant?.timezone ?? 'America/La_Paz';
 
     const friendlySlots = normalizeSlots(availability.suggestedSlots, timeZone);
