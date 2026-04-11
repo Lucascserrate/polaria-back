@@ -241,7 +241,7 @@ export class AssistantAvailabilityService {
           Muestra directamente horarios disponibles usando friendlySlots.
           Si hay staff específico, menciona el nombre del barbero.
           Usa este formato:
-          "Estos son algunos horarios disponibles con [nombre del barbero] &#x1f447;
+          "Estos son algunos horarios disponibles con [nombre del barbero]:
           - HH:mm
           - HH:mm
           ¿Cuál te sirve?"
