@@ -9,9 +9,10 @@ import {
 } from 'class-validator';
 
 export class CreateServiceDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  tenantId: string;
+  tenantId?: string;
 
   @ApiProperty()
   @IsString()
