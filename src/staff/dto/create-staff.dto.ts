@@ -8,17 +8,18 @@ import {
 } from 'class-validator';
 
 export class CreateStaffDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  tenantId: string;
+  tenantId!: string;
 
   @ApiProperty()
   @IsString()
-  name: string;
+  name!: string;
 
   @ApiProperty()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
