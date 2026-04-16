@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   Appointment,
   AppointmentStatus,
 } from '../appointments/entities/appointment.entity';
+import { AppointmentService as AppointmentServiceEntity } from '../appointments/entities/appointment_service.entity';
 import { BusinessHour } from '../business_hours/entities/business_hour.entity';
 import { Service } from '../services/entities/service.entity';
 import { Staff } from '../staff/entities/staff.entity';
@@ -24,6 +25,8 @@ export class AvailabilityRepository {
     private readonly staffRepository: Repository<Staff>,
     @InjectRepository(Appointment)
     private readonly appointmentRepository: Repository<Appointment>,
+    @InjectRepository(AppointmentServiceEntity)
+    private readonly appointmentServiceRepository: Repository<AppointmentServiceEntity>,
   ) {}
 
   async getTenant(tenantId: string): Promise<Tenant | null> {
@@ -113,7 +116,7 @@ export class AvailabilityRepository {
     desiredDate: string,
     timeZone: string,
     staffIds: string[],
-  ): Promise<Record<string, Appointment[]>> {
+  ): Promise<Record<string, Array<{ startTime: Date; endTime: Date }>>> {
     const uniqueStaffIds = Array.from(new Set(staffIds)).filter(Boolean);
     if (!uniqueStaffIds.length) return {};
 
@@ -121,21 +124,33 @@ export class AvailabilityRepository {
     const nextDayStart = addMinutes(dayStart, 24 * 60);
     const dayEnd = new Date(nextDayStart.getTime() - 1);
 
-    const appointments = await this.appointmentRepository.find({
-      where: {
-        tenantId,
-        status: In([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
-        staffId: In(uniqueStaffIds),
-        startTime: Between(dayStart, dayEnd),
-      },
-      order: { startTime: 'ASC' },
-    });
+    const segments = await this.appointmentServiceRepository
+      .createQueryBuilder('as')
+      .innerJoin('as.appointment', 'a')
+      .where('a.tenantId = :tenantId', { tenantId })
+      .andWhere('a.status IN (:...statuses)', {
+        statuses: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+      })
+      .andWhere('as.staffId IN (:...staffIds)', { staffIds: uniqueStaffIds })
+      .andWhere('as.startTime BETWEEN :dayStart AND :dayEnd', {
+        dayStart,
+        dayEnd,
+      })
+      .orderBy('as.startTime', 'ASC')
+      .getMany();
 
-    const grouped: Record<string, Appointment[]> = {};
+    const grouped: Record<
+      string,
+      Array<{ startTime: Date; endTime: Date }>
+    > = {};
     for (const id of uniqueStaffIds) grouped[id] = [];
-    for (const appt of appointments) {
-      grouped[appt.staffId] ??= [];
-      grouped[appt.staffId].push(appt);
+    for (const seg of segments) {
+      if (!seg.staffId) continue;
+      grouped[seg.staffId] ??= [];
+      grouped[seg.staffId].push({
+        startTime: seg.startTime,
+        endTime: seg.endTime,
+      });
     }
     return grouped;
   }
@@ -145,24 +160,33 @@ export class AvailabilityRepository {
     desiredDate: string,
     timeZone: string,
     staffId?: string,
-  ): Promise<Appointment[]> {
+  ): Promise<Array<{ startTime: Date; endTime: Date }>> {
     const dayStart = makeDateInTimeZone(desiredDate, '00:00', timeZone);
     const nextDayStart = addMinutes(dayStart, 24 * 60);
     const dayEnd = new Date(nextDayStart.getTime() - 1);
 
-    const whereClause: Record<string, unknown> = {
-      tenantId,
-      status: In([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
-      startTime: Between(dayStart, dayEnd),
-    };
+    const qb = this.appointmentServiceRepository
+      .createQueryBuilder('as')
+      .select(['as.startTime', 'as.endTime', 'as.staffId'])
+      .innerJoin('as.appointment', 'a')
+      .where('a.tenantId = :tenantId', { tenantId })
+      .andWhere('a.status IN (:...statuses)', {
+        statuses: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+      })
+      .andWhere('as.startTime BETWEEN :dayStart AND :dayEnd', {
+        dayStart,
+        dayEnd,
+      })
+      .orderBy('as.startTime', 'ASC');
 
     if (staffId) {
-      whereClause.staffId = staffId;
+      qb.andWhere('as.staffId = :staffId', { staffId });
     }
 
-    return this.appointmentRepository.find({
-      where: whereClause,
-      order: { startTime: 'ASC' },
-    });
+    const segments = await qb.getMany();
+    return segments.map((s) => ({
+      startTime: s.startTime,
+      endTime: s.endTime,
+    }));
   }
 }

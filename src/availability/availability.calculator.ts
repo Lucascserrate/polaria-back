@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
 import type { BusinessHour } from '../business_hours/entities/business_hour.entity';
-import type { Appointment } from '../appointments/entities/appointment.entity';
 import type {
   SlotRange,
   StaffSlot,
@@ -60,7 +59,7 @@ export class AvailabilityCalculator {
 
   filterAvailableSlots(
     candidateSlots: SlotRange[],
-    appointments: Appointment[],
+    appointments: Array<{ startTime: Date; endTime: Date }>,
   ): SlotRange[] {
     if (appointments.length === 0) return candidateSlots;
 

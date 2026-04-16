@@ -1,4 +1,4 @@
-import {
+﻿import {
   BadRequestException,
   ConflictException,
   Injectable,
@@ -28,13 +28,10 @@ export class AppointmentsService {
   ) {}
 
   async create(createAppointmentDto: CreateAppointmentDto) {
-    const { serviceIds, ...appointmentData } = createAppointmentDto;
-
-    if (!appointmentData.staffId) {
-      throw new BadRequestException('Staff requerido');
-    }
+    const { serviceIds, segments, ...appointmentData } = createAppointmentDto;
 
     const startTime = this.parseDate(appointmentData.startTime, 'startTime');
+    const endTimeInput = this.parseDate(appointmentData.endTime, 'endTime');
 
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({
@@ -43,31 +40,10 @@ export class AppointmentsService {
     const timezone = tenant?.timezone ?? 'America/La_Paz';
     const { date, time } = this.getDateTimeParts(startTime, timezone);
 
-    const availability = await this.availabilityService.findAvailableSlots({
-      tenantId: appointmentData.tenantId,
-      serviceIds,
-      desiredDate: date,
-      desiredTime: time,
-      staffId: appointmentData.staffId,
-    });
-
-    if (!availability.isAvailable || availability.suggestedSlots.length === 0) {
-      throw new ConflictException({
-        message: 'Horario no disponible para este staff',
-        suggestedSlots: availability.suggestedSlots,
-      });
-    }
-
-    const appointment = this.appointmentRepository.create({
-      ...appointmentData,
-      startTime,
-    });
-    const saved = await this.appointmentRepository.save(appointment);
-
     const services = await this.serviceRepository.find({
       where: {
         id: In(serviceIds),
-        tenantId: saved.tenantId,
+        tenantId: appointmentData.tenantId,
       },
     });
 
@@ -77,18 +53,88 @@ export class AppointmentsService {
       );
     }
 
-    const appointmentServices = services.map((service, index) =>
-      this.appointmentServiceRepository.create({
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = serviceIds.map((id) => servicesById.get(id)!);
+
+    const expectedTotalMinutes = orderedServices.reduce(
+      (sum, s) => sum + (s.durationMinutes || 0),
+      0,
+    );
+    if (expectedTotalMinutes <= 0) {
+      throw new BadRequestException('Duración total inválida');
+    }
+
+    const expectedEndTime = new Date(
+      startTime.getTime() + expectedTotalMinutes * 60_000,
+    );
+    const diffMs = Math.abs(expectedEndTime.getTime() - endTimeInput.getTime());
+    if (diffMs > 60_000) {
+      throw new BadRequestException(
+        'endTime no coincide con la duración total de los servicios',
+      );
+    }
+
+    const isMultiStaff = Array.isArray(segments) && segments.length > 0;
+    if (!appointmentData.staffId && !isMultiStaff) {
+      throw new BadRequestException('Staff requerido');
+    }
+
+    const availability = await this.availabilityService.findAvailableSlots({
+      tenantId: appointmentData.tenantId,
+      serviceIds,
+      desiredDate: date,
+      desiredTime: time,
+      staffId: isMultiStaff ? undefined : appointmentData.staffId,
+    });
+
+    if (!availability.isAvailable || availability.suggestedSlots.length === 0) {
+      throw new ConflictException({
+        message: isMultiStaff
+          ? 'Horario no disponible para los servicios solicitados'
+          : 'Horario no disponible para este staff',
+        suggestedSlots: availability.suggestedSlots,
+      });
+    }
+
+    const chosen = availability.suggestedSlots[0];
+    const derivedSegments = chosen.segments;
+
+    const appointment = this.appointmentRepository.create({
+      ...appointmentData,
+      startTime,
+      endTime: expectedEndTime,
+    });
+    const saved = await this.appointmentRepository.save(appointment);
+
+    let cursor = saved.startTime;
+    const appointmentServices = orderedServices.map((service, index) => {
+      const segmentStart = cursor;
+      const segmentEnd = new Date(
+        segmentStart.getTime() + service.durationMinutes * 60_000,
+      );
+      cursor = segmentEnd;
+
+      const staffIdForService =
+        derivedSegments?.find((s) => s.serviceId === service.id)?.staffId ??
+        appointmentData.staffId;
+
+      if (!staffIdForService) {
+        throw new BadRequestException(
+          'No se pudo determinar staff para el servicio',
+        );
+      }
+
+      return this.appointmentServiceRepository.create({
         appointmentId: saved.id,
         serviceId: service.id,
-        staffId: saved.staffId,
-        startTime: saved.startTime,
-        endTime: saved.endTime,
+        staffId: staffIdForService,
+        startTime: segmentStart,
+        endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
         sequenceOrder: index,
-      }),
-    );
+      });
+    });
 
     if (appointmentServices.length > 0) {
       await this.appointmentServiceRepository.save(appointmentServices);
@@ -96,7 +142,6 @@ export class AppointmentsService {
 
     return saved;
   }
-
   async findAllByTenant(
     tenantId: string,
     page = 1,
@@ -137,10 +182,10 @@ export class AppointmentsService {
         where: { tenantId },
         relations: {
           client: true,
-          staff: true,
           tenant: true,
           services: {
             service: true,
+            staff: true,
           },
         },
         order: { startTime: 'ASC' },
@@ -205,7 +250,15 @@ export class AppointmentsService {
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
         clientName: a.client?.name,
-        staffName: a.staff?.name,
+        staffName: (() => {
+          const names = (a.services ?? [])
+            .map((s) => s.staff?.name)
+            .filter((n): n is string => !!n);
+          const unique = Array.from(new Set(names));
+          if (unique.length === 0) return undefined;
+          if (unique.length === 1) return unique[0];
+          return 'Varios';
+        })(),
         businessName: a.tenant?.name,
         serviceNames,
         totalDuration,
@@ -234,10 +287,10 @@ export class AppointmentsService {
       where: { id, tenantId },
       relations: {
         client: true,
-        staff: true,
         tenant: true,
         services: {
           service: true,
+          staff: true,
         },
       },
     });
@@ -281,10 +334,10 @@ export class AppointmentsService {
       },
       relations: {
         client: true,
-        staff: true,
         tenant: true,
         services: {
           service: true,
+          staff: true,
         },
       },
       order: { startTime: 'ASC' },
@@ -305,7 +358,15 @@ export class AppointmentsService {
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
         clientName: a.client?.name,
-        staffName: a.staff?.name,
+        staffName: (() => {
+          const names = (a.services ?? [])
+            .map((s) => s.staff?.name)
+            .filter((n): n is string => !!n);
+          const unique = Array.from(new Set(names));
+          if (unique.length === 0) return undefined;
+          if (unique.length === 1) return unique[0];
+          return 'Varios';
+        })(),
         businessName: a.tenant?.name,
         serviceNames,
         totalDuration,
@@ -417,7 +478,6 @@ export class AppointmentsService {
     const slot = availability.suggestedSlots[0];
     const appointment = await this.appointmentRepository.save({
       tenantId: input.tenantId,
-      staffId: slot.staffId,
       clientId: input.clientId,
       startTime: new Date(slot.startTime),
       endTime: new Date(slot.endTime),
@@ -432,18 +492,32 @@ export class AppointmentsService {
       },
     });
 
-    const appointmentServices = services.map((service, index) =>
-      this.appointmentServiceRepository.create({
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = input.serviceIds.map((id) => servicesById.get(id)!);
+
+    let cursor = appointment.startTime;
+    const appointmentServices = orderedServices.map((service, index) => {
+      const segmentStart = cursor;
+      const segmentEnd = new Date(
+        segmentStart.getTime() + service.durationMinutes * 60_000,
+      );
+      cursor = segmentEnd;
+
+      const staffIdForService =
+        slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
+        slot.staffId;
+
+      return this.appointmentServiceRepository.create({
         appointmentId: appointment.id,
         serviceId: service.id,
-        staffId: slot.staffId,
-        startTime: appointment.startTime,
-        endTime: appointment.endTime,
+        staffId: staffIdForService,
+        startTime: segmentStart,
+        endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
         sequenceOrder: index,
-      }),
-    );
+      });
+    });
 
     if (appointmentServices.length > 0) {
       await this.appointmentServiceRepository.save(appointmentServices);
@@ -481,8 +555,6 @@ export class AppointmentsService {
     }
 
     const slot = availability.suggestedSlots[0];
-
-    appointment.staffId = slot.staffId;
     appointment.startTime = new Date(slot.startTime);
     appointment.endTime = new Date(slot.endTime);
 
@@ -499,18 +571,32 @@ export class AppointmentsService {
       },
     });
 
-    const appointmentServices = services.map((service, index) =>
-      this.appointmentServiceRepository.create({
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = input.serviceIds.map((id) => servicesById.get(id)!);
+
+    let cursor = appointment.startTime;
+    const appointmentServices = orderedServices.map((service, index) => {
+      const segmentStart = cursor;
+      const segmentEnd = new Date(
+        segmentStart.getTime() + service.durationMinutes * 60_000,
+      );
+      cursor = segmentEnd;
+
+      const staffIdForService =
+        slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
+        slot.staffId;
+
+      return this.appointmentServiceRepository.create({
         appointmentId: appointment.id,
         serviceId: service.id,
-        staffId: slot.staffId,
-        startTime: appointment.startTime,
-        endTime: appointment.endTime,
+        staffId: staffIdForService,
+        startTime: segmentStart,
+        endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
         sequenceOrder: index,
-      }),
-    );
+      });
+    });
 
     if (appointmentServices.length > 0) {
       await this.appointmentServiceRepository.save(appointmentServices);
@@ -529,34 +615,99 @@ export class AppointmentsService {
     tenantId: string,
     dto: UpdateAppointmentDto,
   ) {
-    await this.appointmentRepository.update({ id, tenantId }, dto);
+    const { serviceIds, staffId, segments, ...appointmentUpdates } = dto as {
+      serviceIds?: string[];
+      staffId?: string;
+      segments?: Array<{ serviceId: string; staffId: string }>;
+      startTime?: Date;
+      endTime?: Date;
+      status?: AppointmentStatus;
+      googleEventId?: string;
+      reminderSent?: boolean;
+      clientId?: string;
+    };
 
-    if (dto.serviceIds && dto.serviceIds.length > 0) {
+    await this.appointmentRepository.update(
+      { id, tenantId },
+      appointmentUpdates,
+    );
+
+    if (serviceIds && serviceIds.length > 0) {
       const appointment = await this.appointmentRepository.findOne({
         where: { id, tenantId },
       });
 
       if (appointment) {
+        const tenantRepo =
+          this.appointmentRepository.manager.getRepository(Tenant);
+        const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+        const timezone = tenant?.timezone ?? 'America/La_Paz';
+        const { date, time } = this.getDateTimeParts(
+          appointment.startTime,
+          timezone,
+        );
+
+        const isMultiStaff = Array.isArray(segments) && segments.length > 0;
+        const availability = await this.availabilityService.findAvailableSlots({
+          tenantId,
+          serviceIds,
+          desiredDate: date,
+          desiredTime: time,
+          staffId: isMultiStaff ? undefined : staffId,
+        });
+
+        if (
+          !availability.isAvailable ||
+          availability.suggestedSlots.length === 0
+        ) {
+          throw new ConflictException({
+            message: 'Nuevo horario no disponible',
+            suggestedSlots: availability.suggestedSlots,
+          });
+        }
+
+        const slot = availability.suggestedSlots[0];
+
         await this.appointmentServiceRepository.delete({ appointmentId: id });
         const services = await this.serviceRepository.find({
           where: {
-            id: In(dto.serviceIds),
+            id: In(serviceIds),
             tenantId,
           },
         });
 
-        const appointmentServices = services.map((service, index) =>
-          this.appointmentServiceRepository.create({
+        const servicesById = new Map(services.map((s) => [s.id, s]));
+        const orderedServices = serviceIds.map((sid) => servicesById.get(sid)!);
+
+        let cursor = appointment.startTime;
+        const appointmentServices = orderedServices.map((service, index) => {
+          const segmentStart = cursor;
+          const segmentEnd = new Date(
+            segmentStart.getTime() + service.durationMinutes * 60_000,
+          );
+          cursor = segmentEnd;
+
+          const staffIdForService =
+            slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
+            staffId;
+
+          if (!staffIdForService) {
+            throw new BadRequestException(
+              'No se pudo determinar staff para el servicio',
+            );
+          }
+
+          return this.appointmentServiceRepository.create({
             appointmentId: appointment.id,
             serviceId: service.id,
-            staffId: appointment.staffId,
-            startTime: appointment.startTime,
-            endTime: appointment.endTime,
+            staffId: staffIdForService,
+            startTime: segmentStart,
+            endTime: segmentEnd,
             priceAtBooking: service.price,
             durationAtBooking: service.durationMinutes,
             sequenceOrder: index,
-          }),
-        );
+          });
+        });
 
         if (appointmentServices.length > 0) {
           await this.appointmentServiceRepository.save(appointmentServices);
@@ -663,7 +814,7 @@ export class AppointmentsService {
   private parseDate(value: Date | string, field: string): Date {
     const parsed = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(parsed.getTime())) {
-      throw new BadRequestException(`${field} inválido`);
+      throw new BadRequestException(`${field} invÃ¡lido`);
     }
     return parsed;
   }

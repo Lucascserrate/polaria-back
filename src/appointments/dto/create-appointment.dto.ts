@@ -19,7 +19,8 @@ export class CreateAppointmentDto {
 
   @ApiProperty()
   @IsUUID()
-  staffId!: string;
+  @IsOptional()
+  staffId?: string;
 
   @ApiProperty()
   @IsUUID()
@@ -30,6 +31,18 @@ export class CreateAppointmentDto {
   @ArrayNotEmpty()
   @IsUUID('all', { each: true })
   serviceIds!: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Optional multi-staff plan. If provided, booking will be validated using availability and segments will be derived from availability response.',
+    type: [Object],
+  })
+  @IsOptional()
+  @IsArray()
+  segments?: Array<{
+    serviceId: string;
+    staffId: string;
+  }>;
 
   @ApiProperty({ type: String, format: 'date-time' })
   @IsDateString()
