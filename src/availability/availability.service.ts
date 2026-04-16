@@ -36,8 +36,26 @@ export class AvailabilityService {
     }
 
     const timeZone = tenant.timezone;
+    if (!timeZone) {
+      return { isAvailable: false, suggestedSlots: [] };
+    }
 
-    const dayOfWeek = getDayOfWeek(input.desiredDate, timeZone);
+    const nowFormatted = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date());
+    const [todayDate, nowTime] = nowFormatted.split(', ');
+
+    const desiredDate = input.desiredDate || todayDate;
+    const desiredTime = input.desiredTime || nowTime;
+    const hasDesiredTime = Boolean(input.desiredTime);
+
+    const dayOfWeek = getDayOfWeek(desiredDate, timeZone);
     const businessHours = await this.availabilityRepository.getBusinessHours(
       input.tenantId,
       dayOfWeek,
@@ -54,15 +72,11 @@ export class AvailabilityService {
       return { isAvailable: false, suggestedSlots: [] };
     }
 
-    const desiredStart = makeDateInTimeZone(
-      input.desiredDate,
-      input.desiredTime,
-      timeZone,
-    );
+    const desiredStart = makeDateInTimeZone(desiredDate, desiredTime, timeZone);
 
     const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
       businessHours,
-      input.desiredDate,
+      desiredDate,
       timeZone,
       totalDuration,
     );
@@ -72,7 +86,7 @@ export class AvailabilityService {
     for (const staff of staffList) {
       const appointments = await this.availabilityRepository.getAppointments(
         input.tenantId,
-        input.desiredDate,
+        desiredDate,
         timeZone,
         staff.id,
       );
@@ -92,30 +106,95 @@ export class AvailabilityService {
       }
     }
 
-    const exactMatch = allAvailableSlots.find((slot) =>
-      this.availabilityCalculator.isExactMatch(slot, desiredStart),
+    const nowInTenantTz = makeDateInTimeZone(todayDate, nowTime, timeZone);
+    const minStartTime = new Date(nowInTenantTz.getTime() + 15 * 60_000);
+
+    const futureSlots = allAvailableSlots.filter(
+      (slot) => slot.startTime >= minStartTime,
     );
 
-    if (exactMatch) {
-      return {
-        isAvailable: true,
-        suggestedSlots: [
-          this.availabilityCalculator.toSuggestedSlot(exactMatch),
-        ],
-      };
+    const uniqueSlots: StaffSlot[] = [];
+    const seen = new Set<number>();
+    for (const slot of futureSlots) {
+      const key = slot.startTime.getTime();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      uniqueSlots.push(slot);
     }
 
-    const closestSlots = this.availabilityCalculator.findClosestSlots(
-      allAvailableSlots,
-      desiredStart,
-      10,
-    );
+    const minGapMs = 30 * 60_000;
+    const pickWithGap = (slots: StaffSlot[], limit: number): StaffSlot[] => {
+      const picked: StaffSlot[] = [];
+      for (const slot of slots) {
+        if (
+          picked.every(
+            (p) =>
+              Math.abs(p.startTime.getTime() - slot.startTime.getTime()) >=
+              minGapMs,
+          )
+        ) {
+          picked.push(slot);
+        }
+        if (picked.length >= limit) break;
+      }
+      return picked;
+    };
+
+    let selected: StaffSlot[] = [];
+
+    if (hasDesiredTime) {
+      const exactMatch = uniqueSlots.find((slot) =>
+        this.availabilityCalculator.isExactMatch(slot, desiredStart),
+      );
+
+      const desiredHour = desiredStart.getHours();
+      const desiredMinute = desiredStart.getMinutes();
+      const isTargetTime =
+        (desiredHour === 8 && desiredMinute === 0) ||
+        (desiredHour === 7 && desiredMinute === 0);
+
+      if (exactMatch && !isTargetTime) {
+        return {
+          isAvailable: true,
+          suggestedSlots: [
+            this.availabilityCalculator.toSuggestedSlot(exactMatch),
+          ],
+        };
+      }
+      const closest = this.availabilityCalculator.findClosestSlots(
+        uniqueSlots,
+        desiredStart,
+        uniqueSlots.length,
+      );
+      selected = pickWithGap(closest, 3);
+    } else {
+      const elegantSlots = uniqueSlots.filter(
+        (slot) => slot.startTime.getMinutes() % 10 === 0,
+      );
+      const sorted = [...elegantSlots].sort(
+        (a, b) => a.startTime.getTime() - b.startTime.getTime(),
+      );
+      const noon = makeDateInTimeZone(desiredDate, '12:00', timeZone);
+      const morning = sorted.filter((s) => s.startTime < noon);
+      const afternoon = sorted.filter((s) => s.startTime >= noon);
+
+      if (morning.length > 0) {
+        selected = pickWithGap(morning, 3);
+      }
+
+      if (selected.length < 3 && afternoon.length > 0) {
+        selected = [
+          ...selected,
+          ...pickWithGap(afternoon, 3 - selected.length),
+        ];
+      }
+    }
 
     return {
-      isAvailable: false,
-      suggestedSlots: closestSlots.map((slot) =>
-        this.availabilityCalculator.toSuggestedSlot(slot),
-      ),
+      isAvailable: selected.length > 0,
+      suggestedSlots: selected
+        .slice(0, 3)
+        .map((slot) => this.availabilityCalculator.toSuggestedSlot(slot)),
     };
   }
 
@@ -124,7 +203,17 @@ export class AvailabilityService {
     friendlySlots: string[];
   }> {
     const availability = await this.findAvailableSlots(input);
-    const tenant = await this.availabilityRepository.getTenant(input.tenantId);
+    return this.getFriendlySlotsFromAvailability(availability, input.tenantId);
+  }
+
+  async getFriendlySlotsFromAvailability(
+    availability: AvailabilityResult,
+    tenantId: string,
+  ): Promise<{
+    isAvailable: boolean;
+    friendlySlots: string[];
+  }> {
+    const tenant = await this.availabilityRepository.getTenant(tenantId);
     const timeZone = tenant?.timezone ?? 'America/La_Paz';
 
     const friendlySlots = normalizeSlots(availability.suggestedSlots, timeZone);

@@ -30,6 +30,7 @@ export class AssistantPromptContextService {
   async build(
     tenantId?: string,
     clientName?: string,
+    conversationState?: string,
   ): Promise<AssistantPromptContext> {
     if (!tenantId) {
       throw new Error('TenantId is required');
@@ -42,6 +43,7 @@ export class AssistantPromptContextService {
         ...cached.context,
         currentDateTime: this.formatNow(cached.context.timezone),
         clientName,
+        conversationState,
       };
     }
 
@@ -80,6 +82,7 @@ export class AssistantPromptContextService {
       ...baseContext,
       currentDateTime: this.formatNow(timezone),
       clientName,
+      conversationState,
     };
   }
 

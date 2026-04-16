@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString, IsUUID } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class AssistantChatDto {
   @ApiProperty()
@@ -13,4 +13,11 @@ export class AssistantChatDto {
   @ApiProperty()
   @IsString()
   messageText!: string;
+
+  @ApiPropertyOptional({
+    description: 'Client action to control assistant flow',
+  })
+  @IsOptional()
+  @IsString()
+  action?: string;
 }
