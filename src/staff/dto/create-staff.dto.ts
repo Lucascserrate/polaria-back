@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsOptional,
@@ -30,4 +31,13 @@ export class CreateStaffDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Service IDs assigned to this staff member',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  serviceIds?: string[];
 }

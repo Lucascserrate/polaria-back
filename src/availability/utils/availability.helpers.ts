@@ -39,6 +39,13 @@ export const toSuggestedSlot = (slot: StaffSlot): SuggestedSlot => {
     endTime: slot.endTime.toISOString(),
     staffId: slot.staffId,
     staffName: slot.staffName,
+    segments: slot.segments?.map((s) => ({
+      serviceId: s.serviceId,
+      staffId: s.staffId,
+      staffName: s.staffName,
+      startTime: s.startTime.toISOString(),
+      endTime: s.endTime.toISOString(),
+    })),
   };
 };
 

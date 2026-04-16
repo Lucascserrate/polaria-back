@@ -56,22 +56,88 @@ export class AvailabilityRepository {
     });
   }
 
-  async getStaffList(tenantId: string, staffId?: string): Promise<Staff[]> {
+  async getStaffList(
+    tenantId: string,
+    serviceIds: string[],
+    staffId?: string,
+  ): Promise<Staff[]> {
+    const uniqueServiceIds = Array.from(new Set(serviceIds)).filter(Boolean);
+
     if (staffId) {
-      const staff = await this.staffRepository.findOneBy({
-        id: staffId,
-        tenantId,
+      const staff = await this.staffRepository.findOne({
+        where: { id: staffId, tenantId, isActive: true },
+        relations: { services: true },
       });
+      if (!staff) return [];
+
+      if (uniqueServiceIds.length) {
+        const staffServiceIds = new Set(staff.services?.map((s) => s.id) ?? []);
+        const canDoAll = uniqueServiceIds.every((id) =>
+          staffServiceIds.has(id),
+        );
+        return canDoAll ? [staff] : [];
+      }
+
       return staff && staff.isActive ? [staff] : [];
     }
 
+    const qb = this.staffRepository
+      .createQueryBuilder('staff')
+      .leftJoin('staff.services', 'service')
+      .where('staff.tenantId = :tenantId', { tenantId })
+      .andWhere('staff.isActive = :isActive', { isActive: true });
+
+    if (uniqueServiceIds.length) {
+      qb.andWhere('service.id IN (:...serviceIds)', {
+        serviceIds: uniqueServiceIds,
+      })
+        .groupBy('staff.id')
+        .having('COUNT(DISTINCT service.id) = :count', {
+          count: uniqueServiceIds.length,
+        });
+    }
+
+    return qb.orderBy('staff.name', 'ASC').getMany();
+  }
+
+  async getActiveStaffWithServices(tenantId: string): Promise<Staff[]> {
     return this.staffRepository.find({
+      where: { tenantId, isActive: true },
+      order: { name: 'ASC' },
+      relations: { services: true },
+    });
+  }
+
+  async getAppointmentsByStaff(
+    tenantId: string,
+    desiredDate: string,
+    timeZone: string,
+    staffIds: string[],
+  ): Promise<Record<string, Appointment[]>> {
+    const uniqueStaffIds = Array.from(new Set(staffIds)).filter(Boolean);
+    if (!uniqueStaffIds.length) return {};
+
+    const dayStart = makeDateInTimeZone(desiredDate, '00:00', timeZone);
+    const nextDayStart = addMinutes(dayStart, 24 * 60);
+    const dayEnd = new Date(nextDayStart.getTime() - 1);
+
+    const appointments = await this.appointmentRepository.find({
       where: {
         tenantId,
-        isActive: true,
+        status: In([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
+        staffId: In(uniqueStaffIds),
+        startTime: Between(dayStart, dayEnd),
       },
-      order: { name: 'ASC' },
+      order: { startTime: 'ASC' },
     });
+
+    const grouped: Record<string, Appointment[]> = {};
+    for (const id of uniqueStaffIds) grouped[id] = [];
+    for (const appt of appointments) {
+      grouped[appt.staffId] ??= [];
+      grouped[appt.staffId].push(appt);
+    }
+    return grouped;
   }
 
   async getAppointments(

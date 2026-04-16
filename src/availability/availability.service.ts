@@ -6,7 +6,12 @@ import type {
   FindAvailableSlotsInput,
   StaffSlot,
 } from './utils/availability.types';
-import { getDayOfWeek, makeDateInTimeZone } from './utils/availability.helpers';
+import {
+  addMinutes,
+  getDayOfWeek,
+  isOverlapping,
+  makeDateInTimeZone,
+} from './utils/availability.helpers';
 import { normalizeSlots } from './utils/availability-formatter';
 
 @Injectable()
@@ -46,14 +51,6 @@ export class AvailabilityService {
       return { isAvailable: false, suggestedSlots: [] };
     }
 
-    const staffList = await this.availabilityRepository.getStaffList(
-      input.tenantId,
-      input.staffId,
-    );
-    if (staffList.length === 0) {
-      return { isAvailable: false, suggestedSlots: [] };
-    }
-
     const desiredStart = makeDateInTimeZone(
       input.desiredDate,
       input.desiredTime,
@@ -69,27 +66,121 @@ export class AvailabilityService {
 
     const allAvailableSlots: StaffSlot[] = [];
 
-    for (const staff of staffList) {
-      const appointments = await this.availabilityRepository.getAppointments(
-        input.tenantId,
-        input.desiredDate,
-        timeZone,
-        staff.id,
+    const staffListSingle = await this.availabilityRepository.getStaffList(
+      input.tenantId,
+      input.serviceIds,
+      input.staffId,
+    );
+
+    if (staffListSingle.length > 0) {
+      for (const staff of staffListSingle) {
+        const appointments = await this.availabilityRepository.getAppointments(
+          input.tenantId,
+          input.desiredDate,
+          timeZone,
+          staff.id,
+        );
+
+        const availableSlots = this.availabilityCalculator.filterAvailableSlots(
+          candidateSlots,
+          appointments,
+        );
+
+        for (const slot of availableSlots) {
+          allAvailableSlots.push({
+            startTime: slot.startTime,
+            endTime: slot.endTime,
+            staffId: staff.id,
+            staffName: staff.name,
+          });
+        }
+      }
+    } else if (!input.staffId && input.serviceIds.length > 1) {
+      const staffCandidates =
+        await this.availabilityRepository.getActiveStaffWithServices(
+          input.tenantId,
+        );
+      if (staffCandidates.length === 0) {
+        return { isAvailable: false, suggestedSlots: [] };
+      }
+
+      const appointmentsByStaff =
+        await this.availabilityRepository.getAppointmentsByStaff(
+          input.tenantId,
+          input.desiredDate,
+          timeZone,
+          staffCandidates.map((s) => s.id),
+        );
+
+      const serviceById = new Map(services.map((s) => [s.id, s]));
+      const orderedServiceIds = input.serviceIds.filter((id) =>
+        serviceById.has(id),
       );
 
-      const availableSlots = this.availabilityCalculator.filterAvailableSlots(
-        candidateSlots,
-        appointments,
-      );
+      const canStaffDoService = (
+        staff: { services?: { id: string }[] },
+        serviceId: string,
+      ) => {
+        const ids = staff.services?.map((s) => s.id) ?? [];
+        return ids.includes(serviceId);
+      };
 
-      for (const slot of availableSlots) {
+      const isStaffFree = (staffId: string, startTime: Date, endTime: Date) => {
+        const appts = appointmentsByStaff[staffId] ?? [];
+        return !appts.some((a) =>
+          isOverlapping(a.startTime, a.endTime, startTime, endTime),
+        );
+      };
+
+      for (const slot of candidateSlots) {
+        let currentStart = slot.startTime;
+        const segments: NonNullable<StaffSlot['segments']> = [];
+
+        let failed = false;
+        for (const serviceId of orderedServiceIds) {
+          const service = serviceById.get(serviceId);
+          const durationMinutes = service?.durationMinutes ?? 0;
+          if (durationMinutes <= 0) {
+            failed = true;
+            break;
+          }
+
+          const segmentEnd = addMinutes(currentStart, durationMinutes);
+
+          const staffForSegment = staffCandidates.find(
+            (s) =>
+              canStaffDoService(s, serviceId) &&
+              isStaffFree(s.id, currentStart, segmentEnd),
+          );
+
+          if (!staffForSegment) {
+            failed = true;
+            break;
+          }
+
+          segments.push({
+            serviceId,
+            staffId: staffForSegment.id,
+            staffName: staffForSegment.name,
+            startTime: currentStart,
+            endTime: segmentEnd,
+          });
+          currentStart = segmentEnd;
+        }
+
+        if (failed || segments.length !== orderedServiceIds.length) continue;
+
+        const primary = segments[0];
         allAvailableSlots.push({
           startTime: slot.startTime,
           endTime: slot.endTime,
-          staffId: staff.id,
-          staffName: staff.name,
+          staffId: primary.staffId,
+          staffName: primary.staffName,
+          segments,
         });
       }
+    } else {
+      return { isAvailable: false, suggestedSlots: [] };
     }
 
     const exactMatch = allAvailableSlots.find((slot) =>

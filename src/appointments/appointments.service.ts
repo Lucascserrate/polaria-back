@@ -71,6 +71,12 @@ export class AppointmentsService {
       },
     });
 
+    if (services.length !== serviceIds.length) {
+      throw new BadRequestException(
+        'Uno o más servicios no existen para este tenant',
+      );
+    }
+
     const appointmentServices = services.map((service, index) =>
       this.appointmentServiceRepository.create({
         appointmentId: saved.id,
