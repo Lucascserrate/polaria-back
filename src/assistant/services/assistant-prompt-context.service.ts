@@ -64,15 +64,22 @@ export class AssistantPromptContextService {
       (item) => `Dia ${item.dayOfWeek}: ${item.startTime}-${item.endTime}`,
     );
     const serviceNames = services.map((item) => item.name);
-    const staffNames = staff
-      .filter((item) => item.isActive)
-      .map((item) => item.name);
+
+    // Construir staffServices con solo barberos activos y sus servicios
+    const staffServices: { [staffName: string]: string[] } = {};
+    const activeStaff = staff.filter((item) => item.isActive);
+
+    for (const staffMember of activeStaff) {
+      staffServices[staffMember.name] = staffMember.services.map(
+        (service) => service.name,
+      );
+    }
 
     const baseContext = {
       timezone,
       businessHours: businessHoursText,
       services: serviceNames,
-      staff: staffNames,
+      staffServices,
     };
 
     this.cache.set(tenantId, {

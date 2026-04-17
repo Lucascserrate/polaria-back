@@ -143,8 +143,9 @@ export class AssistantService {
     }
 
     const normalizedMessage = input.messageText.trim().toLowerCase();
-    if (promptContext.staff.length > 0) {
-      const staffMatch = promptContext.staff.find(
+    const staffNames = Object.keys(promptContext.staffServices);
+    if (staffNames.length > 0) {
+      const staffMatch = staffNames.find(
         (name) => normalizedMessage === name.trim().toLowerCase(),
       );
       if (staffMatch) {
@@ -175,7 +176,7 @@ export class AssistantService {
     const shouldShowHours = bookingContext.shouldShowHours;
 
     let finalReply = reply;
-    if (shouldShowHours) {
+    if (shouldShowHours && action === 'SHOW_HOURS') {
       await this.conversationsService.update(conversation.id, {
         currentState: ConversationState.SUGGEST_SLOTS,
       });
@@ -221,7 +222,7 @@ export class AssistantService {
       isAvailable: undefined,
       bookingData: undefined,
     };
-    if (!shouldShowHours) {
+    if (!shouldShowHours && action !== null) {
       const availabilityResultRaw =
         await this.assistantAvailabilityService.handleAvailability({
           input,
