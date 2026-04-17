@@ -64,7 +64,9 @@ export class AssistantPromptContextService {
       (item) => `Dia ${item.dayOfWeek}: ${item.startTime}-${item.endTime}`,
     );
     const serviceNames = services.map((item) => item.name);
-    const staffNames = staff.map((item) => item.name);
+    const staffNames = staff
+      .filter((item) => item.isActive)
+      .map((item) => item.name);
 
     const baseContext = {
       timezone,
