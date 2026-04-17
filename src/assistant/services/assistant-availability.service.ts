@@ -155,16 +155,18 @@ export class AssistantAvailabilityService {
         staffId,
       });
 
-      const friendly =
-        await this.availabilityService.getFriendlySlotsFromAvailability(
-          availability,
-          input.tenantId,
-        );
+      const friendly: {
+        isAvailable: boolean;
+        friendlySlots: string[];
+      } = await this.availabilityService.getFriendlySlotsFromAvailability(
+        availability,
+        input.tenantId,
+      );
 
-      const requestedTimeAvailable = friendly.friendlySlots.includes(
+      const requestedTimeAvailable: boolean = friendly.friendlySlots.includes(
         entities.time || '',
       );
-      const hasAvailability =
+      const hasAvailability: boolean =
         availability.isAvailable && friendly.friendlySlots.length > 0;
 
       if (
@@ -233,7 +235,7 @@ export class AssistantAvailabilityService {
           isAvailable: availability.isAvailable,
           friendlySlots: friendly.friendlySlots,
           action,
-        })}
+        } as unknown)}
         
         Instrucciones:
         
