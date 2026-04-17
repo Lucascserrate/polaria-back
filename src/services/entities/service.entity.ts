@@ -3,6 +3,7 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  ManyToMany,
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
@@ -10,6 +11,7 @@ import {
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
+import { Staff } from '../../staff/entities/staff.entity';
 
 @Entity('services')
 export class Service {
@@ -43,6 +45,9 @@ export class Service {
 
   @OneToMany(() => AppointmentService, (as) => as.service)
   appointmentServices!: AppointmentService[];
+
+  @ManyToMany(() => Staff, (staff) => staff.services)
+  staff!: Staff[];
 
   @CreateDateColumn()
   createdAt!: Date;

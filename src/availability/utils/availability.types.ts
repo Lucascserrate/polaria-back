@@ -11,6 +11,13 @@ export type SuggestedSlot = {
   endTime: string; // ISO
   staffId: string;
   staffName: string;
+  segments?: Array<{
+    serviceId: string;
+    staffId: string;
+    staffName: string;
+    startTime: string; // ISO
+    endTime: string; // ISO
+  }>;
 };
 
 export type AvailabilityResult = {
@@ -26,4 +33,11 @@ export type SlotRange = {
 export type StaffSlot = SlotRange & {
   staffId: string;
   staffName: string;
+  segments?: Array<{
+    serviceId: string;
+    staffId: string;
+    staffName: string;
+    startTime: Date;
+    endTime: Date;
+  }>;
 };

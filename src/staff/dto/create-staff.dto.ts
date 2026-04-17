@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsArray,
   IsBoolean,
   IsEmail,
   IsOptional,
@@ -8,17 +9,18 @@ import {
 } from 'class-validator';
 
 export class CreateStaffDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  tenantId: string;
+  tenantId!: string;
 
   @ApiProperty()
   @IsString()
-  name: string;
+  name!: string;
 
   @ApiProperty()
   @IsEmail()
-  email: string;
+  email!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -29,4 +31,13 @@ export class CreateStaffDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    type: [String],
+    description: 'Service IDs assigned to this staff member',
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  serviceIds?: string[];
 }
