@@ -146,6 +146,11 @@ export class AppointmentsService {
     tenantId: string,
     page = 1,
     limit = 20,
+    filters?: {
+      search?: string;
+      status?: string;
+      sortBy?: 'date-asc' | 'date-desc';
+    },
   ): Promise<{
     items: Array<{
       id: string;
@@ -164,7 +169,6 @@ export class AppointmentsService {
     total: number;
     counts: {
       pending: number;
-      booked: number;
       confirmed: number;
       completed: number;
       cancelled: number;
@@ -177,22 +181,38 @@ export class AppointmentsService {
     const safeLimit = Math.min(Math.max(1, limit), 100);
     const skip = (safePage - 1) * safeLimit;
 
-    const [appointments, total] = await this.appointmentRepository.findAndCount(
-      {
-        where: { tenantId },
-        relations: {
-          client: true,
-          tenant: true,
-          services: {
-            service: true,
-            staff: true,
-          },
-        },
-        order: { startTime: 'ASC' },
-        skip,
-        take: safeLimit,
-      },
-    );
+    let query = this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .leftJoinAndSelect('appointment.client', 'client')
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.tenantId = :tenantId', { tenantId: tenantId });
+
+    if (filters?.search && filters.search.trim()) {
+      query = query.andWhere(
+        'LOWER(client.name) LIKE LOWER(:search) OR LOWER(staff.name) LIKE LOWER(:search) OR LOWER(service.name) LIKE LOWER(:search)',
+        { search: `%${filters.search.trim()}%` },
+      );
+    }
+
+    if (filters?.status && filters.status !== 'all') {
+      query = query.andWhere('appointment.status = :status', {
+        status: filters.status,
+      });
+    }
+
+    const sortField = filters?.sortBy === 'date-desc' ? 'DESC' : 'ASC';
+    query = query.orderBy('appointment.startTime', sortField);
+
+    const totalQuery = this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.tenantId = :tenantId', { tenantId: tenantId });
+    const total = await totalQuery.getCount();
+
+    query = query.skip(skip).take(safeLimit);
+
+    const appointments = await query.getMany();
 
     const rawCounts = await this.appointmentRepository
       .createQueryBuilder('appointment')
@@ -200,10 +220,6 @@ export class AppointmentsService {
       .addSelect(
         `SUM(CASE WHEN appointment.status = :pending THEN 1 ELSE 0 END)`,
         'pending',
-      )
-      .addSelect(
-        `SUM(CASE WHEN appointment.status = :booked THEN 1 ELSE 0 END)`,
-        'booked',
       )
       .addSelect(
         `SUM(CASE WHEN appointment.status = :confirmed THEN 1 ELSE 0 END)`,
@@ -220,7 +236,6 @@ export class AppointmentsService {
       .where('appointment.tenantId = :tenantId', { tenantId })
       .setParameters({
         pending: AppointmentStatus.PENDING,
-        booked: AppointmentStatus.BOOKED,
         confirmed: AppointmentStatus.CONFIRMED,
         completed: AppointmentStatus.COMPLETED,
         cancelled: AppointmentStatus.CANCELLED,
@@ -228,7 +243,6 @@ export class AppointmentsService {
       .getRawOne<{
         total: string;
         pending: string;
-        booked: string;
         confirmed: string;
         completed: string;
         cancelled: string;
@@ -271,7 +285,6 @@ export class AppointmentsService {
       total,
       counts: {
         pending: Number(rawCounts?.pending ?? 0),
-        booked: Number(rawCounts?.booked ?? 0),
         confirmed: Number(rawCounts?.confirmed ?? 0),
         completed: Number(rawCounts?.completed ?? 0),
         cancelled: Number(rawCounts?.cancelled ?? 0),

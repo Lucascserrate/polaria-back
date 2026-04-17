@@ -43,6 +43,9 @@ export class AppointmentsController {
     @Req() req: Request,
     @Query('page') page?: string,
     @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('sortBy') sortBy?: string,
   ) {
     const tenantId = (req.user as { sub?: string }).sub;
     if (!tenantId) {
@@ -54,6 +57,11 @@ export class AppointmentsController {
       tenantId,
       pageNumber,
       limitNumber,
+      {
+        search: search?.trim() || undefined,
+        status: status?.trim() || undefined,
+        sortBy: sortBy?.trim() as 'date-asc' | 'date-desc' | undefined,
+      },
     );
   }
 
