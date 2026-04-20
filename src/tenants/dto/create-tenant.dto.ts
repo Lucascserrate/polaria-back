@@ -4,7 +4,7 @@ import { IsOptional, IsString } from 'class-validator';
 export class CreateTenantDto {
   @ApiProperty()
   @IsString()
-  name: string;
+  name!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
@@ -13,15 +13,15 @@ export class CreateTenantDto {
 
   @ApiProperty()
   @IsString()
-  whatsappPhoneNumber: string;
+  whatsappPhoneNumber!: string;
 
   @ApiProperty()
   @IsString()
-  whatsappPhoneId: string;
+  whatsappPhoneId!: string;
 
   @ApiProperty()
   @IsString()
-  timezone: string;
+  timezone!: string;
 
   @ApiPropertyOptional()
   @IsOptional()
