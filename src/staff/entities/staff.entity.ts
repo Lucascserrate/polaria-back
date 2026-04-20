@@ -40,8 +40,8 @@ export class Staff {
   @Column()
   name!: string;
 
-  @Column()
-  email!: string;
+  @Column({ nullable: true })
+  email?: string;
 
   @Column({ nullable: true })
   calendarId?: string;

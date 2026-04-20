@@ -19,8 +19,9 @@ export class CreateStaffDto {
   name!: string;
 
   @ApiProperty()
+  @IsOptional()
   @IsEmail()
-  email!: string;
+  email?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
