@@ -20,7 +20,7 @@ export class StaffService {
     const { serviceIds, ...rest } = createStaffDto;
     const staff = this.staffRepository.create(rest);
 
-    if (serviceIds?.length) {
+    if (Array.isArray(serviceIds) && serviceIds.length) {
       const services = await this.serviceRepository.find({
         where: { id: In(serviceIds), tenantId: staff.tenantId },
         order: { name: 'ASC' },
@@ -62,10 +62,10 @@ export class StaffService {
     });
     if (!staff) return null;
 
-    const { serviceIds, ...rest } = updateStaffDto as CreateStaffDto;
+    const { serviceIds, ...rest } = updateStaffDto;
     this.staffRepository.merge(staff, rest);
 
-    if (serviceIds) {
+    if (Array.isArray(serviceIds)) {
       if (!serviceIds.length) {
         staff.services = [];
       } else {
