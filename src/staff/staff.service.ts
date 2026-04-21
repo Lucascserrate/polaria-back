@@ -48,11 +48,12 @@ export class StaffService {
   }
 
   findByTenant(tenantId: string): Promise<Staff[]> {
-    return this.staffRepository.find({
-      where: { tenantId },
-      order: { name: 'ASC' },
-      relations: { services: true },
-    });
+    return this.staffRepository
+      .createQueryBuilder('staff')
+      .leftJoinAndSelect('staff.services', 'service')
+      .where('staff.tenantId = :tenantId', { tenantId })
+      .orderBy('staff.name', 'ASC')
+      .getMany();
   }
 
   async update(id: string, updateStaffDto: UpdateStaffDto) {
