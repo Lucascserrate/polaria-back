@@ -154,8 +154,6 @@ export class AppointmentsService {
   ): Promise<{
     items: Array<{
       id: string;
-      startTime: Date;
-      endTime: Date;
       startTimeFormatted: string;
       endTimeFormatted: string;
       status: AppointmentStatus;
@@ -183,6 +181,7 @@ export class AppointmentsService {
 
     let query = this.appointmentRepository
       .createQueryBuilder('appointment')
+      .leftJoinAndSelect('appointment.tenant', 'tenant')
       .leftJoinAndSelect('appointment.client', 'client')
       .leftJoinAndSelect('appointment.services', 'appointmentServices')
       .leftJoinAndSelect('appointmentServices.service', 'service')
@@ -258,8 +257,6 @@ export class AppointmentsService {
       }, 0);
       return {
         id: a.id,
-        startTime: a.startTime,
-        endTime: a.endTime,
         startTimeFormatted: this.formatDateTime(a.startTime, timezone),
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
@@ -312,8 +309,6 @@ export class AppointmentsService {
   async findTodayByTenant(tenantId: string): Promise<{
     items: Array<{
       id: string;
-      startTime: Date;
-      endTime: Date;
       startTimeFormatted: string;
       endTimeFormatted: string;
       status: AppointmentStatus;
@@ -365,8 +360,6 @@ export class AppointmentsService {
       }, 0);
       return {
         id: a.id,
-        startTime: a.startTime,
-        endTime: a.endTime,
         startTimeFormatted: this.formatDateTime(a.startTime, timezone),
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
