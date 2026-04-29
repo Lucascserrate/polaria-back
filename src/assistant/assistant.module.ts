@@ -12,7 +12,11 @@ import { AppointmentsModule } from '../appointments/appointments.module';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
 import { AssistantAvailabilityService } from './services/assistant-availability.service';
+import { AssistantAIService } from './services/assistant-ai.service';
+import { AssistantContextService } from './services/assistant-context.service';
+import { AssistantMessagingService } from './services/assistant-messaging.service';
 import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
+import { AssistantSessionService } from './services/assistant-session.service';
 
 @Module({
   imports: [
@@ -32,6 +36,10 @@ import { AssistantPromptContextService } from './services/assistant-prompt-conte
     AssistantService,
     AssistantPromptContextService,
     AssistantAvailabilityService,
+    AssistantAIService,
+    AssistantMessagingService,
+    AssistantSessionService,
+    AssistantContextService,
   ],
 })
 export class AssistantModule {}

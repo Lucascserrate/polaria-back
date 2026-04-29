@@ -31,6 +31,7 @@ export class AssistantPromptContextService {
     tenantId?: string,
     clientName?: string,
     conversationState?: string,
+    storedEntitiesJson?: string,
   ): Promise<AssistantPromptContext> {
     if (!tenantId) {
       throw new Error('TenantId is required');
@@ -44,6 +45,7 @@ export class AssistantPromptContextService {
         currentDateTime: this.formatNow(cached.context.timezone),
         clientName,
         conversationState,
+        storedEntitiesJson,
       };
     }
 
@@ -92,6 +94,7 @@ export class AssistantPromptContextService {
       currentDateTime: this.formatNow(timezone),
       clientName,
       conversationState,
+      storedEntitiesJson,
     };
   }
 
