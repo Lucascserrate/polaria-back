@@ -44,6 +44,7 @@ export class AppointmentsService {
       where: {
         id: In(serviceIds),
         tenantId: appointmentData.tenantId,
+        isActive: true,
       },
     });
 
@@ -495,6 +496,7 @@ export class AppointmentsService {
       where: {
         id: In(input.serviceIds),
         tenantId: input.tenantId,
+        isActive: true,
       },
     });
 
@@ -574,6 +576,7 @@ export class AppointmentsService {
       where: {
         id: In(input.serviceIds),
         tenantId: input.tenantId,
+        isActive: true,
       },
     });
 
@@ -679,6 +682,7 @@ export class AppointmentsService {
           where: {
             id: In(serviceIds),
             tenantId,
+            isActive: true,
           },
         });
 

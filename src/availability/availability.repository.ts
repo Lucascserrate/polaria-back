@@ -42,6 +42,7 @@ export class AvailabilityRepository {
       where: {
         id: In(serviceIds),
         tenantId,
+        isActive: true,
       },
     });
   }

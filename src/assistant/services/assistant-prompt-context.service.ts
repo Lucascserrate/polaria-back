@@ -58,7 +58,7 @@ export class AssistantPromptContextService {
       Staff[],
     ] = await Promise.all([
       this.businessHoursService.findByTenant(tenantId),
-      this.servicesService.findByTenant(tenantId),
+      this.servicesService.findActiveByTenant(tenantId),
       this.staffService.findByTenant(tenantId),
     ]);
 
@@ -72,9 +72,9 @@ export class AssistantPromptContextService {
     const activeStaff = staff.filter((item) => item.isActive);
 
     for (const staffMember of activeStaff) {
-      staffServices[staffMember.name] = staffMember.services.map(
-        (service) => service.name,
-      );
+      staffServices[staffMember.name] = staffMember.services
+        .filter((service) => service.isActive)
+        .map((service) => service.name);
     }
 
     const baseContext = {

@@ -39,7 +39,7 @@ export const mapServices = async (
   servicesService: ServicesService,
 ): Promise<string[]> => {
   if (!names.length) return [];
-  const services = await servicesService.findByTenant(tenantId);
+  const services = await servicesService.findActiveByTenant(tenantId);
   const normalized = names.map((name) => name.trim().toLowerCase());
   return services
     .filter((service) => normalized.includes(service.name.trim().toLowerCase()))
