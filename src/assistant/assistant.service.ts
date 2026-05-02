@@ -8,6 +8,11 @@ import { AssistantContextService } from './services/assistant-context.service';
 import { AssistantMessagingService } from './services/assistant-messaging.service';
 import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
 import { AssistantSessionService } from './services/assistant-session.service';
+import { normalizeAssistantEntities } from './core/assistant-normalizer';
+import { decideNextAction } from './core/assistant-orchestrator';
+import { AssistantAction } from './core/assistant-actions';
+import { AssistantReplyEnricherService } from './services/assistant-reply-enricher.service';
+import type { AssistantEntities } from './types/assistant-entities.type';
 
 @Injectable()
 export class AssistantService {
@@ -18,6 +23,7 @@ export class AssistantService {
     private readonly promptContextService: AssistantPromptContextService,
     private readonly assistantAvailabilityService: AssistantAvailabilityService,
     private readonly assistantContextService: AssistantContextService,
+    private readonly assistantReplyEnricherService: AssistantReplyEnricherService,
   ) {}
 
   async chat(
@@ -88,6 +94,83 @@ export class AssistantService {
       parsed = retry.parsed;
     }
 
+    if (conversation.currentState === ConversationState.BOOKING_COMPLETE) {
+      if (parsed.action === 'CONFIRM_BOOKING') {
+        await this.assistantMessagingService.saveAssistantMessage({
+          tenantId: input.tenantId,
+          conversationId: conversation.id,
+          clientId: client.id,
+          content: parsed.reply,
+          rawJson: response,
+        });
+        await this.assistantMessagingService.touchConversationLastMessageAt(
+          conversation.id,
+        );
+        return {
+          reply: parsed.reply,
+          conversationId: conversation.id,
+          clientId: client.id,
+        };
+      }
+
+      const hasNewService = Boolean(
+        Array.isArray(parsed.entities?.services) &&
+        parsed.entities.services.length > 0,
+      );
+
+      if (!hasNewService) {
+        if (
+          parsed.action === 'RESUMEN' &&
+          typeof conversation.contextJson?.appointmentId === 'string' &&
+          conversation.contextJson.appointmentId.length > 0
+        ) {
+          const summary =
+            await this.assistantContextService.buildLastAppointmentSummary({
+              tenantId: input.tenantId,
+              appointmentId: conversation.contextJson.appointmentId,
+              timezone: promptContext.timezone,
+            });
+          if (summary) {
+            await this.assistantMessagingService.saveAssistantMessage({
+              tenantId: input.tenantId,
+              conversationId: conversation.id,
+              clientId: client.id,
+              content: summary,
+              rawJson: response,
+            });
+            await this.assistantMessagingService.touchConversationLastMessageAt(
+              conversation.id,
+            );
+            return {
+              reply: summary,
+              conversationId: conversation.id,
+              clientId: client.id,
+            };
+          }
+        }
+
+        await this.assistantMessagingService.saveAssistantMessage({
+          tenantId: input.tenantId,
+          conversationId: conversation.id,
+          clientId: client.id,
+          content: parsed.reply,
+          rawJson: response,
+        });
+        await this.assistantMessagingService.touchConversationLastMessageAt(
+          conversation.id,
+        );
+        return {
+          reply: parsed.reply,
+          conversationId: conversation.id,
+          clientId: client.id,
+        };
+      }
+
+      await this.assistantContextService.resetAfterBookingComplete(
+        conversation,
+      );
+    }
+
     const mergedEntities =
       await this.assistantContextService.mergeEntitiesForStore({
         conversation,
@@ -95,25 +178,58 @@ export class AssistantService {
         entities: parsed.entities,
       });
 
-    const availabilityResult =
-      await this.assistantAvailabilityService.handleAvailability({
-        input,
-        conversation,
-        historyMessages,
-        promptContext,
-        reply: parsed.reply,
-        entities: mergedEntities,
-        action: parsed.action,
-      });
+    const normalizedEntities = normalizeAssistantEntities({
+      incoming: parsed.entities,
+      stored: (conversation.contextJson?.entities ??
+        mergedEntities) as Partial<AssistantEntities>,
+      timezone: promptContext.timezone,
+    });
+
+    const finalAction: AssistantAction | undefined = decideNextAction({
+      entities: normalizedEntities,
+      proposedAction: parsed.action,
+      conversationState: conversation.currentState,
+    });
+
+    await this.assistantContextService.mergeEntitiesForStore({
+      conversation,
+      finalEntities: normalizedEntities,
+      entities: normalizedEntities,
+    });
+
+    const availabilityResult = finalAction
+      ? await this.assistantAvailabilityService.handleAvailability({
+          input,
+          conversation,
+          historyMessages,
+          promptContext,
+          reply: parsed.reply,
+          entities: normalizedEntities,
+          action: finalAction,
+        })
+      : {
+          handled: false,
+          finalReply: parsed.reply,
+          finalEntities: normalizedEntities,
+          finalAction: finalAction,
+        };
 
     const finalReplyFromAvailability = availabilityResult.handled
       ? availabilityResult.finalReply
       : parsed.reply;
 
+    const enrichedReply = await this.assistantReplyEnricherService.enrich({
+      tenantId: input.tenantId,
+      promptContext,
+      historyMessages,
+      baseReply: finalReplyFromAvailability,
+      action: finalAction,
+    });
+
     const entitiesToStore =
       availabilityResult.handled && availabilityResult.finalEntities
         ? availabilityResult.finalEntities
-        : parsed.entities;
+        : normalizedEntities;
 
     const mergedAfterAvailability =
       await this.assistantContextService.mergeEntitiesForStore({
@@ -137,7 +253,7 @@ export class AssistantService {
         finalAction: availabilityResult.finalAction,
         mergedEntities: mergedAfterAvailability,
         bookingData,
-        finalReply: finalReplyFromAvailability,
+        finalReply: enrichedReply,
       });
 
     await this.assistantMessagingService.saveAssistantMessage({

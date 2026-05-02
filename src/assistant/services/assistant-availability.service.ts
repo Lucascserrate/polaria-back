@@ -2,8 +2,7 @@
 import { AvailabilityService } from '../../availability/availability.service';
 import { ServicesService } from '../../services/services.service';
 import { StaffService } from '../../staff/staff.service';
-import { buildAssistantSystemPrompt } from '../prompts/assistant.system';
-import { parseAssistantResponse } from '../utils/assistant-response-parser';
+import { buildSlotsPrompt } from '../prompts/assistant.slots.prompt';
 import type { AssistantParsedResponse } from '../utils/assistant-response-parser';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import { AIService } from '../../ai/ai.service';
@@ -29,6 +28,42 @@ export class AssistantAvailabilityService {
     private readonly conversationsService: ConversationsService,
   ) {}
 
+  private formatSlotsMessage(params: {
+    friendlySlots: string[];
+    mode: 'SHOW_HOURS' | 'ALTERNATIVES';
+  }): string {
+    const { friendlySlots, mode } = params;
+    const lines = friendlySlots.map((s) => `- ${s}`).join('\n');
+
+    if (mode === 'SHOW_HOURS') {
+      return `Estos son algunos horarios disponibles:\n${lines}\n¿Cuál te sirve?`;
+    }
+
+    return `No tengo disponibilidad a esa hora, pero te propongo estos horarios disponibles:\n${lines}\n¿Cuál te queda mejor o quieres intentar otra hora?`;
+  }
+
+  private async generateSlotsReply(params: {
+    historyMessages: ChatCompletionMessageParam[];
+    friendlySlots: string[];
+    mode: 'SHOW_HOURS' | 'ALTERNATIVES';
+  }): Promise<string> {
+    const { historyMessages, friendlySlots, mode } = params;
+
+    try {
+      const response = await this.aiService.chat([
+        { role: 'system', content: buildSlotsPrompt({ friendlySlots }) },
+        ...historyMessages,
+      ]);
+
+      const text = (response.content ?? '').trim();
+      return text.length > 0
+        ? text
+        : this.formatSlotsMessage({ friendlySlots, mode });
+    } catch {
+      return this.formatSlotsMessage({ friendlySlots, mode });
+    }
+  }
+
   async handleAvailability(params: {
     input: AssistantChatDto;
     conversation: Conversation;
@@ -50,15 +85,8 @@ export class AssistantAvailabilityService {
     };
     isAvailable?: boolean;
   }> {
-    const {
-      input,
-      conversation,
-      historyMessages,
-      promptContext,
-      reply,
-      entities,
-      action,
-    } = params;
+    const { input, conversation, historyMessages, reply, entities, action } =
+      params;
 
     if (conversation.currentState === ConversationState.BOOKING_COMPLETE) {
       return {
@@ -69,14 +97,31 @@ export class AssistantAvailabilityService {
       };
     }
 
-    // Para SHOW_HOURS, no se requiere hora específica
-    if (
-      action === 'SHOW_HOURS' &&
-      entities &&
-      entities.services &&
-      entities.date
-    ) {
-      // Continuar con el flujo normal aunque no haya hora
+    const isShowHours = action === 'SHOW_HOURS';
+
+    if (!entities) {
+      return {
+        handled: false,
+        finalReply: reply,
+        finalEntities: {},
+        finalAction: action || undefined,
+      };
+    }
+
+    // Para SHOW_HOURS, no se requiere hora específica (solo servicio + fecha)
+    if (isShowHours) {
+      const hasServices =
+        Array.isArray(entities.services) && entities.services.length > 0;
+      const hasDate =
+        typeof entities.date === 'string' && entities.date.length > 0;
+      if (!hasServices || !hasDate) {
+        return {
+          handled: false,
+          finalReply: reply,
+          finalEntities: entities || {},
+          finalAction: action || undefined,
+        };
+      }
     } else if (!hasAvailabilityEntities(entities)) {
       return {
         handled: false,
@@ -122,9 +167,7 @@ export class AssistantAvailabilityService {
         ? currentContext.lastAvailabilityIsAvailable
         : undefined;
 
-    if (action === 'SHOW_HOURS') {
-      // Continuar al flujo normal para mostrar horarios
-    } else if (lastKey === availabilityKey) {
+    if (!isShowHours && lastKey === availabilityKey) {
       await this.conversationsService.update(conversation.id, {
         contextJson: {
           ...currentContext,
@@ -169,40 +212,6 @@ export class AssistantAvailabilityService {
       const hasAvailability: boolean =
         availability.isAvailable && friendly.friendlySlots.length > 0;
 
-      if (
-        action === 'SHOW_HOURS' &&
-        hasAvailability &&
-        requestedTimeAvailable
-      ) {
-        const summary = `Resumen de tu cita:
-          - Servicio: ${entities.services?.join(', ') ?? 'No definido'}
-          - Barbero: ${entities.staff ?? 'Sin preferencia'}
-          - Fecha: ${entities.date || 'No definida'}
-          - Hora: ${entities.time || 'No definida'}
-          ¿Deseas confirmar la cita?`;
-        await this.conversationsService.update(conversation.id, {
-          currentState: ConversationState.CONFIRM_APPOINTMENT,
-          contextJson: {
-            ...currentContext,
-            lastAvailabilityKey: availabilityKey,
-            lastAvailabilityIsAvailable: true,
-          },
-        });
-        return {
-          handled: true,
-          finalReply: summary,
-          finalEntities: entities || {},
-          finalAction: action || undefined,
-          bookingData: {
-            serviceIds,
-            staffId,
-            date: entities.date || '',
-            time: entities.time || '',
-          },
-          isAvailable: true,
-        };
-      }
-
       if (hasAvailability && requestedTimeAvailable) {
         await this.conversationsService.update(conversation.id, {
           currentState: ConversationState.CONFIRM_APPOINTMENT,
@@ -227,51 +236,43 @@ export class AssistantAvailabilityService {
         };
       }
 
-      const availabilitySystemContent = `
-        NO HAY DISPONIBILIDAD - Ejecutando código IA secundario
-        
-        Resultado de disponibilidad:
-        ${JSON.stringify({
-          isAvailable: availability.isAvailable,
+      if (action === 'SHOW_HOURS' && hasAvailability) {
+        const showReply = await this.generateSlotsReply({
+          historyMessages,
           friendlySlots: friendly.friendlySlots,
-          action,
-        } as unknown)}
-        
-        Instrucciones:
-        
-        - Si action es SHOW_HOURS:
-          Muestra directamente horarios disponibles usando friendlySlots.
-          Si hay staff específico, menciona el nombre del barbero.
-          Usa este formato:
-          "Estos son algunos horarios disponibles con [nombre del barbero]:
-          - HH:mm
-          - HH:mm
-          ¿Cuál te sirve?"
-        
-        - Para cualquier otro caso:
-          Muestra horarios alternativos usando friendlySlots.
-          Si hay staff específico, menciona el nombre del barbero.
-          Usa este formato:
-          "No tengo disponibilidad a esa hora con [nombre del barbero], pero te propongo estos horarios disponibles:
-          - HH:mm
-          - HH:mm
-          - HH:mm
-          ¿Cuál te queda mejor o quieres intentar otra hora?"
-        
-        - Usa SOLO friendlySlots
-        - NO inventes horarios
-        - Usa un tono natural tipo WhatsApp
-        `.trim();
+          mode: 'SHOW_HOURS',
+        });
 
-      const availabilityResponse = await this.aiService.chat([
-        { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
-        ...historyMessages,
-        { role: 'system', content: availabilitySystemContent },
-      ]);
+        await this.conversationsService.update(conversation.id, {
+          currentState: ConversationState.SUGGEST_SLOTS,
+          contextJson: {
+            ...currentContext,
+            lastAvailabilityKey: availabilityKey,
+            lastAvailabilityIsAvailable: true,
+          },
+        });
 
-      const parsedFinal = parseAssistantResponse(availabilityResponse);
+        return {
+          handled: true,
+          finalReply: showReply,
+          finalEntities: entities || {},
+          finalAction: action || undefined,
+          bookingData: {
+            serviceIds,
+            staffId,
+            date: entities.date || '',
+            time: entities.time || '',
+          },
+          isAvailable: true,
+        };
+      }
+
       const mergedEntities = entities;
-      const finalReply = parsedFinal.reply;
+      const finalReply = await this.generateSlotsReply({
+        historyMessages,
+        friendlySlots: friendly.friendlySlots,
+        mode: 'ALTERNATIVES',
+      });
 
       await this.conversationsService.update(conversation.id, {
         currentState: ConversationState.SUGGEST_SLOTS,

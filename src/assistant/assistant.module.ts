@@ -17,6 +17,8 @@ import { AssistantContextService } from './services/assistant-context.service';
 import { AssistantMessagingService } from './services/assistant-messaging.service';
 import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
 import { AssistantSessionService } from './services/assistant-session.service';
+import { SettingsService } from '../settings/settings.service';
+import { AssistantReplyEnricherService } from './services/assistant-reply-enricher.service';
 
 @Module({
   imports: [
@@ -38,8 +40,10 @@ import { AssistantSessionService } from './services/assistant-session.service';
     AssistantAvailabilityService,
     AssistantAIService,
     AssistantMessagingService,
+    SettingsService,
     AssistantSessionService,
     AssistantContextService,
+    AssistantReplyEnricherService,
   ],
 })
 export class AssistantModule {}

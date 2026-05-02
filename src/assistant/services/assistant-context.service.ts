@@ -5,7 +5,11 @@ import { ConversationState } from '../../conversations/entities/conversation.ent
 import type { Client } from '../../clients/entities/client.entity';
 import type { Conversation } from '../../conversations/entities/conversation.entity';
 import type { AssistantEntities } from '../types/assistant-entities.type';
-import { clearEntities, mergeEntitiesForStore } from '../utils/assistant-flow';
+import {
+  buildResetContext,
+  clearEntities,
+  mergeEntitiesForStore,
+} from '../utils/assistant-flow';
 import type { AssistantParsedResponse } from '../utils/assistant-response-parser';
 import { AssistantAvailabilityService } from './assistant-availability.service';
 
@@ -23,6 +27,65 @@ export class AssistantContextService {
   }): Promise<void> {
     const { conversationId, currentState } = params;
     await this.conversationsService.update(conversationId, { currentState });
+  }
+
+  async resetAfterBookingComplete(conversation: Conversation): Promise<void> {
+    const resetContext = buildResetContext(conversation);
+    await this.conversationsService.update(conversation.id, {
+      currentState: ConversationState.IDLE,
+      contextJson: resetContext,
+    });
+    conversation.currentState = ConversationState.IDLE;
+    conversation.contextJson = resetContext;
+  }
+
+  async buildLastAppointmentSummary(params: {
+    tenantId: string;
+    appointmentId: string;
+    timezone: string;
+  }): Promise<string | undefined> {
+    const { tenantId, appointmentId, timezone } = params;
+    const appointment = await this.appointmentsService.findOneByTenant(
+      appointmentId,
+      tenantId,
+    );
+    if (!appointment) return undefined;
+
+    const serviceNames = Array.isArray(appointment.services)
+      ? appointment.services
+          .map((s) => s.service?.name)
+          .filter((name): name is string => typeof name === 'string')
+      : [];
+
+    const staffNames = Array.isArray(appointment.services)
+      ? appointment.services
+          .map((s) => s.staff?.name)
+          .filter((name): name is string => typeof name === 'string')
+      : [];
+
+    const staffLabel =
+      staffNames.length > 0
+        ? Array.from(new Set(staffNames)).join(', ')
+        : 'sin preferencia';
+
+    const startTime =
+      appointment.startTime instanceof Date
+        ? appointment.startTime
+        : new Date(appointment.startTime as unknown as string);
+
+    const formatted = startTime.toLocaleString('es-CO', {
+      timeZone: timezone,
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+
+    return `Resumen de tu cita:\n- Servicio: ${
+      serviceNames.length > 0 ? serviceNames.join(', ') : 'No definido'
+    }\n- Barbero: ${staffLabel}\n- Fecha y hora: ${formatted}`;
   }
 
   async mergeEntitiesForStore(params: {

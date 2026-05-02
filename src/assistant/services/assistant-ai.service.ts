@@ -35,6 +35,30 @@ export class AssistantAIService {
     return { response, parsed };
   }
 
+  async executeChatWithSystemAddon(params: {
+    promptContext: AssistantPromptContext;
+    historyMessages: ChatCompletionMessageParam[];
+    systemAddon: string;
+  }): Promise<{
+    response: unknown;
+    parsed: {
+      reply: string;
+      entities?: AssistantParsedResponse['entities'];
+      action?: string;
+    };
+  }> {
+    const { promptContext, historyMessages, systemAddon } = params;
+    const messages: ChatCompletionMessageParam[] = [
+      { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
+      ...historyMessages,
+      { role: 'system', content: systemAddon },
+      { role: 'system', content: this.jsonOnlyReminder },
+    ];
+    const response = await this.aiService.chat(messages);
+    const parsed = parseAssistantResponse(response);
+    return { response, parsed };
+  }
+
   async retryWhenEntitiesMissing(params: {
     promptContext: AssistantPromptContext;
     historyMessages: ChatCompletionMessageParam[];
