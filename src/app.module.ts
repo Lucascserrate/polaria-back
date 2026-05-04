@@ -18,6 +18,9 @@ import { dbConfig } from './config/data-source';
 import { AuthModule } from './auth/auth.module';
 import { AvailabilityModule } from './availability/availability.module';
 import { SettingsModule } from './settings/settings.module';
+import { WebhookController } from './webhook/webhook.controller';
+import { WebhookService } from './webhook/webhook.service';
+import { WebhookModule } from './webhook/webhook.module';
 
 @Module({
   imports: [
@@ -49,8 +52,9 @@ import { SettingsModule } from './settings/settings.module';
     AuthModule,
     AvailabilityModule,
     SettingsModule,
+    WebhookModule,
   ],
-  controllers: [],
-  providers: [],
+  controllers: [WebhookController],
+  providers: [WebhookService],
 })
 export class AppModule {}
