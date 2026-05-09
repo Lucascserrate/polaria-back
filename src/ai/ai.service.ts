@@ -21,6 +21,8 @@ export class AIService {
     const response = await this.openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
+      max_tokens: 150, // Reducir tokens para respuestas más rápidas
+      temperature: 0.7, // Más consistente, menos aleatorio
     });
 
     return response.choices[0].message;
