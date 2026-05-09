@@ -32,6 +32,9 @@ export class Tenant {
   @Column()
   whatsappPhoneId!: string;
 
+  @Column({ type: 'text', nullable: true })
+  whatsappAccessToken?: string;
+
   @Column()
   timezone!: string;
 
