@@ -33,6 +33,7 @@ export class AssistantService {
       await this.assistantSessionService.getOrCreateSession({
         tenantId: input.tenantId,
         phone: input.phone,
+        clientName: input.clientName,
       });
 
     await this.assistantMessagingService.saveUserMessage({

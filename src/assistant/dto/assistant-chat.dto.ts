@@ -10,6 +10,13 @@ export class AssistantChatDto {
   @IsString()
   phone!: string;
 
+  @ApiPropertyOptional({
+    description: 'Client display name (e.g., from WhatsApp profile)',
+  })
+  @IsOptional()
+  @IsString()
+  clientName?: string;
+
   @ApiProperty()
   @IsString()
   messageText!: string;

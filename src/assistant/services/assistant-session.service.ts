@@ -16,16 +16,31 @@ export class AssistantSessionService {
   async getOrCreateClient(params: {
     tenantId: string;
     phone: string;
+    clientName?: string;
   }): Promise<Client> {
-    const { tenantId, phone } = params;
+    const { tenantId, phone, clientName } = params;
 
     let client = await this.clientsService.findByTenantAndPhone(
       tenantId,
       phone,
     );
-    if (client) return client;
+    if (client) {
+      const trimmedIncomingName = clientName?.trim();
+      if (trimmedIncomingName) {
+        const existingName = (client.name ?? '').trim();
+        const looksTemporary = existingName.startsWith('Usuario ');
+        if (looksTemporary && existingName !== trimmedIncomingName) {
+          const updated = await this.clientsService.update(client.id, {
+            name: trimmedIncomingName,
+          });
+          if (updated) client = updated;
+        }
+      }
+      return client;
+    }
 
-    const tempName = buildTempName(phone);
+    const trimmedIncomingName = clientName?.trim();
+    const tempName = trimmedIncomingName || buildTempName(phone);
     client = await this.clientsService.create({
       tenantId,
       phone,
@@ -58,6 +73,7 @@ export class AssistantSessionService {
   async getOrCreateSession(params: {
     tenantId: string;
     phone: string;
+    clientName?: string;
   }): Promise<{ client: Client; conversation: Conversation }> {
     const client = await this.getOrCreateClient(params);
     const conversation = await this.getOrCreateConversation({
