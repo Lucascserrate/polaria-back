@@ -1,27 +1,42 @@
-import { Body, Controller, Get, Post, Query, Res } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { WebhookService } from './webhook.service';
 
 @Controller('webhook')
 export class WebhookController {
+  constructor(
+    private readonly webhookService: WebhookService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  private get verifyToken(): string {
+    return (
+      this.configService.get<string>('WHATSAPP_VERIFY_TOKEN') ?? 'polaria123'
+    );
+  }
+
   @Get()
   verifyWebhook(
     @Query('hub.mode') mode: string,
     @Query('hub.challenge') challenge: string,
     @Query('hub.verify_token') token: string,
-    @Res() res,
-  ) {
-    const VERIFY_TOKEN = 'polaria123';
-
-    if (mode === 'subscribe' && token === VERIFY_TOKEN) {
-      return res.status(200).send(challenge);
+  ): string {
+    if (mode === 'subscribe' && token === this.verifyToken) {
+      return challenge;
     }
 
-    return res.sendStatus(403);
+    throw new ForbiddenException();
   }
 
   @Post()
-  receiveMessage(@Body() body: any, @Res() res) {
-    console.log(JSON.stringify(body, null, 2));
-
-    return res.sendStatus(200);
+  receiveMessage(@Body() body: unknown): Promise<void> {
+    return this.webhookService.handleIncomingWhatsAppWebhook(body);
   }
 }

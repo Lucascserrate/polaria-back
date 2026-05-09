@@ -34,6 +34,16 @@ export class TenantsService {
     return this.tenantRepository.findOneBy({ email });
   }
 
+  findByWhatsappPhoneId(whatsappPhoneId: string): Promise<Tenant | null> {
+    return this.tenantRepository.findOneBy({ whatsappPhoneId });
+  }
+
+  findByWhatsappPhoneNumber(
+    whatsappPhoneNumber: string,
+  ): Promise<Tenant | null> {
+    return this.tenantRepository.findOneBy({ whatsappPhoneNumber });
+  }
+
   async setGoogleId(id: string, googleId: string) {
     await this.tenantRepository.update(id, { googleId });
     return this.findOne(id);

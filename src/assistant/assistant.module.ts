@@ -45,5 +45,6 @@ import { AssistantReplyEnricherService } from './services/assistant-reply-enrich
     AssistantContextService,
     AssistantReplyEnricherService,
   ],
+  exports: [AssistantService],
 })
 export class AssistantModule {}
