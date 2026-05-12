@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import OpenAI from 'openai';
 import type {
+  ChatCompletion,
   ChatCompletionMessage,
   ChatCompletionMessageParam,
 } from 'openai/resources/chat/completions';
@@ -18,13 +19,26 @@ export class AIService {
   async chat(
     messages: ChatCompletionMessageParam[],
   ): Promise<ChatCompletionMessage> {
-    const response = await this.openai.chat.completions.create({
+    const response = await this.chatRaw(messages);
+    const message = response.choices[0]?.message;
+    if (!message) {
+      throw new Error('OpenAI response had no message in choices[0]');
+    }
+
+    return message;
+  }
+
+  async chatRaw(
+    messages: ChatCompletionMessageParam[],
+  ): Promise<ChatCompletion> {
+    const response: ChatCompletion = await this.openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
-      max_tokens: 150, // Reducir tokens para respuestas más rápidas
-      temperature: 0.7, // Más consistente, menos aleatorio
+      max_tokens: 300,
+      temperature: 0.6,
+      n: 1,
     });
 
-    return response.choices[0].message;
+    return response;
   }
 }
