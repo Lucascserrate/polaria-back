@@ -22,40 +22,48 @@ export class AssistantReplyEnricherService {
     private readonly settingsService: SettingsService,
   ) {}
 
-  private async detectNeeds(params: {
-    promptContext: AssistantPromptContext;
+  private detectNeedsHeuristic(params: {
     historyMessages: ChatCompletionMessageParam[];
     baseReply: string;
-  }): Promise<EnrichmentNeeds> {
-    const { promptContext, historyMessages, baseReply } = params;
-    const systemAddon = `
-      Tarea: Decide si el reply del asistente necesita ser enriquecido con datos REALES del negocio (precios, servicios, horario, descuentos, ubicación).
-        
-      Reglas:
-      - No cambies la intención del mensaje, solo detecta necesidades de datos.
-      - Responde SOLO con JSON válido con este formato:
-      {
-        "prices": boolean,
-        "services": boolean,
-        "hours": boolean,
-        "discounts": boolean,
-        "location": boolean
-      }
-      `.trim();
+  }): EnrichmentNeeds {
+    const { historyMessages, baseReply } = params;
 
-    const resp = await this.aiService.chat([
-      { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
-      ...historyMessages,
-      { role: 'system', content: `Reply actual:\n${baseReply}` },
-      { role: 'system', content: systemAddon },
-    ]);
+    const lastUserMessage = [...historyMessages]
+      .reverse()
+      .find((m) => m.role === 'user');
+    const lastUserText =
+      lastUserMessage && typeof lastUserMessage.content === 'string'
+        ? lastUserMessage.content
+        : '';
 
-    try {
-      const parsed = JSON.parse(resp.content ?? '{}') as EnrichmentNeeds;
-      return parsed ?? {};
-    } catch {
-      return {};
-    }
+    const haystack = `${lastUserText}\n${baseReply}`.toLowerCase();
+    const hasAny = (patterns: RegExp[]) =>
+      patterns.some((p) => p.test(haystack));
+
+    return {
+      prices: hasAny([
+        /\bprecio(s)?\b/i,
+        /\bcuesta\b/i,
+        /\bvalor\b/i,
+        /\bcu[aá]nto\b/i,
+      ]),
+      hours: hasAny([
+        /\bhorario(s)?\b/i,
+        /\bhoras\b/i,
+        /\babren\b/i,
+        /\bcierran\b/i,
+      ]),
+      discounts: hasAny([
+        /\bdescuento(s)?\b/i,
+        /\bpromo(ciones)?\b/i,
+        /\boferta(s)?\b/i,
+      ]),
+      location: hasAny([
+        /\bubicaci[oó]n\b/i,
+        /\bdirecci[oó]n\b/i,
+        /\bd[oó]nde\b/i,
+      ]),
+    };
   }
 
   private async loadFacts(params: {
@@ -65,7 +73,7 @@ export class AssistantReplyEnricherService {
     const { tenantId, needs } = params;
     const facts: Record<string, unknown> = {};
 
-    if (needs.services || needs.prices) {
+    if (needs.prices) {
       const services = await this.servicesService.findActiveByTenant(tenantId);
       facts.services = services.map((s) => ({
         name: s.name,
@@ -99,11 +107,7 @@ export class AssistantReplyEnricherService {
 
     if (action) return baseReply;
 
-    const needs = await this.detectNeeds({
-      promptContext,
-      historyMessages,
-      baseReply,
-    });
+    const needs = this.detectNeedsHeuristic({ historyMessages, baseReply });
 
     const hasAnyNeed = Boolean(
       needs.prices ||

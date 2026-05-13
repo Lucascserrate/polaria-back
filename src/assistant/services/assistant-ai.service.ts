@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
+import type {
+  ChatCompletion,
+  ChatCompletionMessage,
+  ChatCompletionMessageParam,
+} from 'openai/resources/chat/completions';
 import { AIService } from '../../ai/ai.service';
 import { buildAssistantSystemPrompt } from '../prompts/assistant.system';
 import type { AssistantPromptContext } from '../prompts/assistant.system';
@@ -17,7 +21,7 @@ export class AssistantAIService {
     promptContext: AssistantPromptContext;
     historyMessages: ChatCompletionMessageParam[];
   }): Promise<{
-    response: unknown;
+    response: ChatCompletion;
     parsed: {
       reply: string;
       entities?: AssistantParsedResponse['entities'];
@@ -30,9 +34,11 @@ export class AssistantAIService {
       ...historyMessages,
       { role: 'system', content: this.jsonOnlyReminder },
     ];
-    const response = await this.aiService.chat(messages);
-    const parsed = parseAssistantResponse(response);
-    return { response, parsed };
+    const rawResponse: ChatCompletion = await this.aiService.chatRaw(messages);
+    const message: Pick<ChatCompletionMessage, 'content'> = rawResponse
+      .choices[0]?.message ?? { content: '' };
+    const parsed = parseAssistantResponse(message);
+    return { response: rawResponse, parsed };
   }
 
   async executeChatWithSystemAddon(params: {
@@ -40,7 +46,7 @@ export class AssistantAIService {
     historyMessages: ChatCompletionMessageParam[];
     systemAddon: string;
   }): Promise<{
-    response: unknown;
+    response: ChatCompletion;
     parsed: {
       reply: string;
       entities?: AssistantParsedResponse['entities'];
@@ -54,16 +60,18 @@ export class AssistantAIService {
       { role: 'system', content: systemAddon },
       { role: 'system', content: this.jsonOnlyReminder },
     ];
-    const response = await this.aiService.chat(messages);
-    const parsed = parseAssistantResponse(response);
-    return { response, parsed };
+    const rawResponse: ChatCompletion = await this.aiService.chatRaw(messages);
+    const message: Pick<ChatCompletionMessage, 'content'> = rawResponse
+      .choices[0]?.message ?? { content: '' };
+    const parsed = parseAssistantResponse(message);
+    return { response: rawResponse, parsed };
   }
 
   async retryWhenEntitiesMissing(params: {
     promptContext: AssistantPromptContext;
     historyMessages: ChatCompletionMessageParam[];
   }): Promise<{
-    correctionResponse: unknown;
+    correctionResponse: ChatCompletionMessage;
     parsed: {
       reply: string;
       entities?: AssistantParsedResponse['entities'];
