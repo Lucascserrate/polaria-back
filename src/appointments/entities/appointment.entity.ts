@@ -2,15 +2,14 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
-  ManyToOne,
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
   Index,
   JoinColumn,
+  ManyToOne,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
-import { Staff } from '../../staff/entities/staff.entity';
 import { Client } from '../../clients/entities/client.entity';
 import { AppointmentService } from './appointment_service.entity';
 
@@ -21,7 +20,6 @@ export enum AppointmentStatus {
   CANCELLED = 'cancelled',
   COMPLETED = 'completed',
 }
-@Index(['staffId', 'startTime'])
 @Index(['tenantId', 'startTime'])
 @Entity('appointments')
 export class Appointment {
@@ -33,12 +31,6 @@ export class Appointment {
   @ManyToOne(() => Tenant, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tenantId' })
   tenant!: Tenant;
-
-  @Column()
-  staffId!: string;
-  @ManyToOne(() => Staff, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'staffId' })
-  staff!: Staff;
 
   @Column()
   clientId!: string;

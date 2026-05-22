@@ -22,6 +22,13 @@ export class ClientsService {
     return this.clientRepository.find();
   }
 
+  findByTenant(tenantId: string): Promise<Client[]> {
+    return this.clientRepository.find({
+      where: { tenantId },
+      order: { name: 'ASC' },
+    });
+  }
+
   findOne(id: string): Promise<Client | null> {
     return this.clientRepository.findOneBy({ id });
   }
@@ -36,6 +43,29 @@ export class ClientsService {
   async update(id: string, updateClientDto: UpdateClientDto) {
     await this.clientRepository.update(id, updateClientDto);
     return this.findOne(id);
+  }
+
+  async findOrCreateByPhone(
+    tenantId: string,
+    name: string,
+    phone?: string,
+  ): Promise<Client> {
+    if (phone) {
+      // Buscar cliente por teléfono
+      const existingClient = await this.clientRepository.findOne({
+        where: { tenantId, phone },
+      });
+      if (existingClient) {
+        return existingClient;
+      }
+    }
+    // Crear nuevo cliente
+    const newClient = this.clientRepository.create({
+      name,
+      phone,
+      tenantId,
+    });
+    return this.clientRepository.save(newClient);
   }
 
   async remove(id: string) {

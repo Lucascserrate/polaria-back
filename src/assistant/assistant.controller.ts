@@ -15,7 +15,7 @@ export class AssistantController {
   }
 
   @Post('chat-simple')
-  async chatSimple(@Body() body: AssistantSimpleDto) {
+  chatSimple(@Body() body: AssistantSimpleDto) {
     return this.assistantService.simpleChat(body);
   }
 }

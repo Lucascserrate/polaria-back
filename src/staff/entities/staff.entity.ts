@@ -3,13 +3,16 @@ import {
   PrimaryGeneratedColumn,
   Column,
   ManyToOne,
+  ManyToMany,
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
   JoinColumn,
+  JoinTable,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
+import { Service } from '../../services/entities/service.entity';
 
 @Entity('staff')
 export class Staff {
@@ -26,11 +29,19 @@ export class Staff {
   @OneToMany(() => AppointmentService, (as) => as.staff)
   appointmentServices!: AppointmentService[];
 
+  @ManyToMany(() => Service, (service) => service.staff, { cascade: false })
+  @JoinTable({
+    name: 'staff_services',
+    joinColumn: { name: 'staffId', referencedColumnName: 'id' },
+    inverseJoinColumn: { name: 'serviceId', referencedColumnName: 'id' },
+  })
+  services!: Service[];
+
   @Column()
   name!: string;
 
-  @Column()
-  email!: string;
+  @Column({ nullable: true })
+  email?: string;
 
   @Column({ nullable: true })
   calendarId?: string;

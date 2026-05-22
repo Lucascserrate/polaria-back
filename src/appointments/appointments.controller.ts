@@ -6,8 +6,14 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
+  Req,
+  UnauthorizedException,
+  Query,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { AuthGuard } from '@nestjs/passport';
+import type { Request } from 'express';
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
@@ -17,31 +23,93 @@ import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 export class AppointmentsController {
   constructor(private readonly appointmentsService: AppointmentsService) {}
 
+  @UseGuards(AuthGuard('jwt'))
   @Post()
-  create(@Body() createAppointmentDto: CreateAppointmentDto) {
+  create(
+    @Req() req: Request,
+    @Body() createAppointmentDto: CreateAppointmentDto,
+  ) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    createAppointmentDto.tenantId = tenantId;
     return this.appointmentsService.create(createAppointmentDto);
   }
 
+  @UseGuards(AuthGuard('jwt'))
   @Get()
-  findAll() {
-    return this.appointmentsService.findAll();
+  findAll(
+    @Req() req: Request,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('search') search?: string,
+    @Query('status') status?: string,
+    @Query('sortBy') sortBy?: string,
+  ) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    const pageNumber = page ? Number(page) : 1;
+    const limitNumber = limit ? Number(limit) : 20;
+    return this.appointmentsService.findAllByTenant(
+      tenantId,
+      pageNumber,
+      limitNumber,
+      {
+        search: search?.trim() || undefined,
+        status: status?.trim() || undefined,
+        sortBy: sortBy?.trim() as 'date-asc' | 'date-desc' | undefined,
+      },
+    );
   }
 
+  @UseGuards(AuthGuard('jwt'))
+  @Get('today')
+  findToday(@Req() req: Request) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.appointmentsService.findTodayByTenant(tenantId);
+  }
+
+  @UseGuards(AuthGuard('jwt'))
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.appointmentsService.findOne(id);
+  findOne(@Req() req: Request, @Param('id') id: string) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.appointmentsService.findOneByTenant(id, tenantId);
   }
 
+  @UseGuards(AuthGuard('jwt'))
   @Patch(':id')
   update(
+    @Req() req: Request,
     @Param('id') id: string,
     @Body() updateAppointmentDto: UpdateAppointmentDto,
   ) {
-    return this.appointmentsService.update(id, updateAppointmentDto);
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.appointmentsService.updateByTenant(
+      id,
+      tenantId,
+      updateAppointmentDto,
+    );
   }
 
+  @UseGuards(AuthGuard('jwt'))
   @Delete(':id')
-  remove(@Param('id') id: string) {
-    return this.appointmentsService.remove(id);
+  remove(@Req() req: Request, @Param('id') id: string) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.appointmentsService.removeByTenant(id, tenantId);
   }
 }

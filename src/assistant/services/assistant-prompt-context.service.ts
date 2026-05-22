@@ -30,6 +30,8 @@ export class AssistantPromptContextService {
   async build(
     tenantId?: string,
     clientName?: string,
+    conversationState?: string,
+    storedEntitiesJson?: string,
   ): Promise<AssistantPromptContext> {
     if (!tenantId) {
       throw new Error('TenantId is required');
@@ -42,6 +44,8 @@ export class AssistantPromptContextService {
         ...cached.context,
         currentDateTime: this.formatNow(cached.context.timezone),
         clientName,
+        conversationState,
+        storedEntitiesJson,
       };
     }
 
@@ -54,7 +58,7 @@ export class AssistantPromptContextService {
       Staff[],
     ] = await Promise.all([
       this.businessHoursService.findByTenant(tenantId),
-      this.servicesService.findByTenant(tenantId),
+      this.servicesService.findActiveByTenant(tenantId),
       this.staffService.findByTenant(tenantId),
     ]);
 
@@ -62,13 +66,22 @@ export class AssistantPromptContextService {
       (item) => `Dia ${item.dayOfWeek}: ${item.startTime}-${item.endTime}`,
     );
     const serviceNames = services.map((item) => item.name);
-    const staffNames = staff.map((item) => item.name);
+
+    // Construir staffServices con solo barberos activos y sus servicios
+    const staffServices: { [staffName: string]: string[] } = {};
+    const activeStaff = staff.filter((item) => item.isActive);
+
+    for (const staffMember of activeStaff) {
+      staffServices[staffMember.name] = staffMember.services
+        .filter((service) => service.isActive)
+        .map((service) => service.name);
+    }
 
     const baseContext = {
       timezone,
       businessHours: businessHoursText,
       services: serviceNames,
-      staff: staffNames,
+      staffServices,
     };
 
     this.cache.set(tenantId, {
@@ -80,6 +93,8 @@ export class AssistantPromptContextService {
       ...baseContext,
       currentDateTime: this.formatNow(timezone),
       clientName,
+      conversationState,
+      storedEntitiesJson,
     };
   }
 

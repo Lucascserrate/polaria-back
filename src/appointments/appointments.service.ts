@@ -1,6 +1,10 @@
-import { Injectable } from '@nestjs/common';
+﻿import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { Between, In, Repository } from 'typeorm';
 
 import { Appointment } from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -9,6 +13,7 @@ import { AvailabilityService } from '../availability/availability.service';
 import { AppointmentService as AppointmentServiceEntity } from './entities/appointment_service.entity';
 import { Service } from '../services/entities/service.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
+import { Tenant } from '../tenants/entities/tenant.entity';
 
 @Injectable()
 export class AppointmentsService {
@@ -22,45 +27,427 @@ export class AppointmentsService {
     private readonly availabilityService: AvailabilityService,
   ) {}
 
-  create(createAppointmentDto: CreateAppointmentDto) {
-    const appointment = this.appointmentRepository.create(createAppointmentDto);
-    return this.appointmentRepository.save(appointment);
-  }
+  async create(createAppointmentDto: CreateAppointmentDto) {
+    const { serviceIds, segments, ...appointmentData } = createAppointmentDto;
 
-  async update(id: string, updateAppointmentDto: UpdateAppointmentDto) {
-    await this.appointmentRepository.update(id, updateAppointmentDto);
-    return this.findOne(id);
-  }
+    const startTime = this.parseDate(appointmentData.startTime, 'startTime');
+    const endTimeInput = this.parseDate(appointmentData.endTime, 'endTime');
 
-  async findAll() {
-    const appointments = await this.appointmentRepository.find({
-      relations: {
-        client: true,
-        staff: true,
-        tenant: true,
+    const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({
+      where: { id: appointmentData.tenantId },
+    });
+    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const { date, time } = this.getDateTimeParts(startTime, timezone);
+
+    const services = await this.serviceRepository.find({
+      where: {
+        id: In(serviceIds),
+        tenantId: appointmentData.tenantId,
+        isActive: true,
       },
-      order: { startTime: 'ASC' },
     });
 
-    return appointments.map((a) => {
+    if (services.length !== serviceIds.length) {
+      throw new BadRequestException(
+        'Uno o más servicios no existen para este tenant',
+      );
+    }
+
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = serviceIds.map((id) => servicesById.get(id)!);
+
+    const expectedTotalMinutes = orderedServices.reduce(
+      (sum, s) => sum + (s.durationMinutes || 0),
+      0,
+    );
+    if (expectedTotalMinutes <= 0) {
+      throw new BadRequestException('Duración total inválida');
+    }
+
+    const expectedEndTime = new Date(
+      startTime.getTime() + expectedTotalMinutes * 60_000,
+    );
+    const diffMs = Math.abs(expectedEndTime.getTime() - endTimeInput.getTime());
+    if (diffMs > 60_000) {
+      throw new BadRequestException(
+        'endTime no coincide con la duración total de los servicios',
+      );
+    }
+
+    const isMultiStaff = Array.isArray(segments) && segments.length > 0;
+    if (!appointmentData.staffId && !isMultiStaff) {
+      throw new BadRequestException('Staff requerido');
+    }
+
+    const availability = await this.availabilityService.findAvailableSlots({
+      tenantId: appointmentData.tenantId,
+      serviceIds,
+      desiredDate: date,
+      desiredTime: time,
+      staffId: isMultiStaff ? undefined : appointmentData.staffId,
+    });
+
+    if (!availability.isAvailable || availability.suggestedSlots.length === 0) {
+      throw new ConflictException({
+        message: isMultiStaff
+          ? 'Horario no disponible para los servicios solicitados'
+          : 'Horario no disponible para este staff',
+        suggestedSlots: availability.suggestedSlots,
+      });
+    }
+
+    const chosen = availability.suggestedSlots[0];
+    const derivedSegments = chosen.segments;
+
+    const appointment = this.appointmentRepository.create({
+      ...appointmentData,
+      startTime,
+      endTime: expectedEndTime,
+    });
+    const saved = await this.appointmentRepository.save(appointment);
+
+    let cursor = saved.startTime;
+    const appointmentServices = orderedServices.map((service, index) => {
+      const segmentStart = cursor;
+      const segmentEnd = new Date(
+        segmentStart.getTime() + service.durationMinutes * 60_000,
+      );
+      cursor = segmentEnd;
+
+      const staffIdForService =
+        derivedSegments?.find((s) => s.serviceId === service.id)?.staffId ??
+        appointmentData.staffId;
+
+      if (!staffIdForService) {
+        throw new BadRequestException(
+          'No se pudo determinar staff para el servicio',
+        );
+      }
+
+      return this.appointmentServiceRepository.create({
+        appointmentId: saved.id,
+        serviceId: service.id,
+        staffId: staffIdForService,
+        startTime: segmentStart,
+        endTime: segmentEnd,
+        priceAtBooking: service.price,
+        durationAtBooking: service.durationMinutes,
+        sequenceOrder: index,
+      });
+    });
+
+    if (appointmentServices.length > 0) {
+      await this.appointmentServiceRepository.save(appointmentServices);
+    }
+
+    return saved;
+  }
+  async findAllByTenant(
+    tenantId: string,
+    page = 1,
+    limit = 20,
+    filters?: {
+      search?: string;
+      status?: string;
+      sortBy?: 'date-asc' | 'date-desc';
+    },
+  ): Promise<{
+    items: Array<{
+      id: string;
+      startTimeFormatted: string;
+      endTimeFormatted: string;
+      status: AppointmentStatus;
+      clientName?: string;
+      staffName?: string;
+      businessName?: string;
+      serviceNames: string[];
+      totalDuration: number;
+      timezone: string;
+    }>;
+    total: number;
+    counts: {
+      pending: number;
+      confirmed: number;
+      completed: number;
+      cancelled: number;
+    };
+    page: number;
+    limit: number;
+    hasMore: boolean;
+  }> {
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const skip = (safePage - 1) * safeLimit;
+
+    let query = this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .leftJoinAndSelect('appointment.tenant', 'tenant')
+      .leftJoinAndSelect('appointment.client', 'client')
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.tenantId = :tenantId', { tenantId: tenantId });
+
+    if (filters?.search && filters.search.trim()) {
+      query = query.andWhere(
+        'LOWER(client.name) LIKE LOWER(:search) OR LOWER(staff.name) LIKE LOWER(:search) OR LOWER(service.name) LIKE LOWER(:search)',
+        { search: `%${filters.search.trim()}%` },
+      );
+    }
+
+    if (filters?.status && filters.status !== 'all') {
+      query = query.andWhere('appointment.status = :status', {
+        status: filters.status,
+      });
+    }
+
+    const sortField = filters?.sortBy === 'date-desc' ? 'DESC' : 'ASC';
+    query = query.orderBy('appointment.startTime', sortField);
+
+    const totalQuery = this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .where('appointment.tenantId = :tenantId', { tenantId: tenantId });
+    const total = await totalQuery.getCount();
+
+    query = query.skip(skip).take(safeLimit);
+
+    const appointments = await query.getMany();
+
+    const rawCounts = await this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .select('COUNT(*)', 'total')
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :pending THEN 1 ELSE 0 END)`,
+        'pending',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :confirmed THEN 1 ELSE 0 END)`,
+        'confirmed',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :completed THEN 1 ELSE 0 END)`,
+        'completed',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :cancelled THEN 1 ELSE 0 END)`,
+        'cancelled',
+      )
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .setParameters({
+        pending: AppointmentStatus.PENDING,
+        confirmed: AppointmentStatus.CONFIRMED,
+        completed: AppointmentStatus.COMPLETED,
+        cancelled: AppointmentStatus.CANCELLED,
+      })
+      .getRawOne<{
+        total: string;
+        pending: string;
+        confirmed: string;
+        completed: string;
+        cancelled: string;
+      }>();
+
+    const items = appointments.map((a) => {
       const timezone = a.tenant?.timezone ?? 'America/La_Paz';
+      const serviceNames = (a.services ?? [])
+        .map((s) => s.service?.name)
+        .filter((name): name is string => !!name);
+      const totalDuration = (a.services ?? []).reduce((sum, s) => {
+        return sum + (s.durationAtBooking ?? 0);
+      }, 0);
       return {
         id: a.id,
-        startTime: a.startTime,
-        endTime: a.endTime,
         startTimeFormatted: this.formatDateTime(a.startTime, timezone),
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
         clientName: a.client?.name,
-        staffName: a.staff?.name,
+        staffName: (() => {
+          const names = (a.services ?? [])
+            .map((s) => s.staff?.name)
+            .filter((n): n is string => !!n);
+          const unique = Array.from(new Set(names));
+          if (unique.length === 0) return undefined;
+          if (unique.length === 1) return unique[0];
+          return 'Varios';
+        })(),
         businessName: a.tenant?.name,
+        serviceNames,
+        totalDuration,
         timezone,
       };
     });
+
+    return {
+      items,
+      total,
+      counts: {
+        pending: Number(rawCounts?.pending ?? 0),
+        confirmed: Number(rawCounts?.confirmed ?? 0),
+        completed: Number(rawCounts?.completed ?? 0),
+        cancelled: Number(rawCounts?.cancelled ?? 0),
+      },
+      page: safePage,
+      limit: safeLimit,
+      hasMore: skip + items.length < total,
+    };
   }
 
-  findOne(id: string) {
-    return this.appointmentRepository.findOneBy({ id });
+  findOneByTenant(id: string, tenantId: string) {
+    return this.appointmentRepository.findOne({
+      where: { id, tenantId },
+      relations: {
+        client: true,
+        tenant: true,
+        services: {
+          service: true,
+          staff: true,
+        },
+      },
+    });
+  }
+
+  async findTodayByTenant(tenantId: string): Promise<{
+    items: Array<{
+      id: string;
+      startTimeFormatted: string;
+      endTimeFormatted: string;
+      status: AppointmentStatus;
+      clientName?: string;
+      staffName?: string;
+      businessName?: string;
+      serviceNames: string[];
+      totalDuration: number;
+      timezone: string;
+    }>;
+    total: number;
+    counts: {
+      pending: number;
+      booked: number;
+      confirmed: number;
+      completed: number;
+      cancelled: number;
+    };
+    revenueTotal: number;
+  }> {
+    const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const { startUtc, endUtc } = this.getDayRange(timezone, new Date());
+
+    const endInclusive = new Date(endUtc.getTime() - 1);
+    const appointments = await this.appointmentRepository.find({
+      where: {
+        tenantId,
+        startTime: Between(startUtc, endInclusive),
+      },
+      relations: {
+        client: true,
+        tenant: true,
+        services: {
+          service: true,
+          staff: true,
+        },
+      },
+      order: { startTime: 'ASC' },
+    });
+
+    const items = appointments.map((a) => {
+      const serviceNames = (a.services ?? [])
+        .map((s) => s.service?.name)
+        .filter((name): name is string => !!name);
+      const totalDuration = (a.services ?? []).reduce((sum, s) => {
+        return sum + (s.durationAtBooking ?? 0);
+      }, 0);
+      return {
+        id: a.id,
+        startTimeFormatted: this.formatDateTime(a.startTime, timezone),
+        endTimeFormatted: this.formatDateTime(a.endTime, timezone),
+        status: a.status,
+        clientName: a.client?.name,
+        staffName: (() => {
+          const names = (a.services ?? [])
+            .map((s) => s.staff?.name)
+            .filter((n): n is string => !!n);
+          const unique = Array.from(new Set(names));
+          if (unique.length === 0) return undefined;
+          if (unique.length === 1) return unique[0];
+          return 'Varios';
+        })(),
+        businessName: a.tenant?.name,
+        serviceNames,
+        totalDuration,
+        timezone,
+      };
+    });
+
+    const rawCounts = await this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .select('COUNT(*)', 'total')
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :pending THEN 1 ELSE 0 END)`,
+        'pending',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :booked THEN 1 ELSE 0 END)`,
+        'booked',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :confirmed THEN 1 ELSE 0 END)`,
+        'confirmed',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :completed THEN 1 ELSE 0 END)`,
+        'completed',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :cancelled THEN 1 ELSE 0 END)`,
+        'cancelled',
+      )
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.startTime >= :startUtc', { startUtc })
+      .andWhere('appointment.startTime < :endUtc', { endUtc })
+      .setParameters({
+        pending: AppointmentStatus.PENDING,
+        booked: AppointmentStatus.BOOKED,
+        confirmed: AppointmentStatus.CONFIRMED,
+        completed: AppointmentStatus.COMPLETED,
+        cancelled: AppointmentStatus.CANCELLED,
+      })
+      .getRawOne<{
+        total: string;
+        pending: string;
+        booked: string;
+        confirmed: string;
+        completed: string;
+        cancelled: string;
+      }>();
+
+    const rawRevenue = await this.appointmentServiceRepository
+      .createQueryBuilder('appointmentService')
+      .select('SUM(appointmentService.priceAtBooking)', 'revenue')
+      .innerJoin(
+        Appointment,
+        'appointment',
+        'appointment.id = appointmentService.appointmentId',
+      )
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.startTime >= :startUtc', { startUtc })
+      .andWhere('appointment.startTime < :endUtc', { endUtc })
+      .getRawOne<{ revenue: string | null }>();
+
+    return {
+      items,
+      total: Number(rawCounts?.total ?? items.length),
+      counts: {
+        pending: Number(rawCounts?.pending ?? 0),
+        booked: Number(rawCounts?.booked ?? 0),
+        confirmed: Number(rawCounts?.confirmed ?? 0),
+        completed: Number(rawCounts?.completed ?? 0),
+        cancelled: Number(rawCounts?.cancelled ?? 0),
+      },
+      revenueTotal: Number(rawRevenue?.revenue ?? 0),
+    };
   }
 
   async findLastByClient(tenantId: string, clientId: string) {
@@ -98,7 +485,6 @@ export class AppointmentsService {
     const slot = availability.suggestedSlots[0];
     const appointment = await this.appointmentRepository.save({
       tenantId: input.tenantId,
-      staffId: slot.staffId,
       clientId: input.clientId,
       startTime: new Date(slot.startTime),
       endTime: new Date(slot.endTime),
@@ -110,21 +496,36 @@ export class AppointmentsService {
       where: {
         id: In(input.serviceIds),
         tenantId: input.tenantId,
+        isActive: true,
       },
     });
 
-    const appointmentServices = services.map((service, index) =>
-      this.appointmentServiceRepository.create({
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = input.serviceIds.map((id) => servicesById.get(id)!);
+
+    let cursor = appointment.startTime;
+    const appointmentServices = orderedServices.map((service, index) => {
+      const segmentStart = cursor;
+      const segmentEnd = new Date(
+        segmentStart.getTime() + service.durationMinutes * 60_000,
+      );
+      cursor = segmentEnd;
+
+      const staffIdForService =
+        slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
+        slot.staffId;
+
+      return this.appointmentServiceRepository.create({
         appointmentId: appointment.id,
         serviceId: service.id,
-        staffId: slot.staffId,
-        startTime: appointment.startTime,
-        endTime: appointment.endTime,
+        staffId: staffIdForService,
+        startTime: segmentStart,
+        endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
         sequenceOrder: index,
-      }),
-    );
+      });
+    });
 
     if (appointmentServices.length > 0) {
       await this.appointmentServiceRepository.save(appointmentServices);
@@ -162,8 +563,6 @@ export class AppointmentsService {
     }
 
     const slot = availability.suggestedSlots[0];
-
-    appointment.staffId = slot.staffId;
     appointment.startTime = new Date(slot.startTime);
     appointment.endTime = new Date(slot.endTime);
 
@@ -177,21 +576,36 @@ export class AppointmentsService {
       where: {
         id: In(input.serviceIds),
         tenantId: input.tenantId,
+        isActive: true,
       },
     });
 
-    const appointmentServices = services.map((service, index) =>
-      this.appointmentServiceRepository.create({
+    const servicesById = new Map(services.map((s) => [s.id, s]));
+    const orderedServices = input.serviceIds.map((id) => servicesById.get(id)!);
+
+    let cursor = appointment.startTime;
+    const appointmentServices = orderedServices.map((service, index) => {
+      const segmentStart = cursor;
+      const segmentEnd = new Date(
+        segmentStart.getTime() + service.durationMinutes * 60_000,
+      );
+      cursor = segmentEnd;
+
+      const staffIdForService =
+        slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
+        slot.staffId;
+
+      return this.appointmentServiceRepository.create({
         appointmentId: appointment.id,
         serviceId: service.id,
-        staffId: slot.staffId,
-        startTime: appointment.startTime,
-        endTime: appointment.endTime,
+        staffId: staffIdForService,
+        startTime: segmentStart,
+        endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
         sequenceOrder: index,
-      }),
-    );
+      });
+    });
 
     if (appointmentServices.length > 0) {
       await this.appointmentServiceRepository.save(appointmentServices);
@@ -202,6 +616,120 @@ export class AppointmentsService {
 
   async remove(id: string) {
     await this.appointmentRepository.delete(id);
+    return { deleted: true };
+  }
+
+  async updateByTenant(
+    id: string,
+    tenantId: string,
+    dto: UpdateAppointmentDto,
+  ) {
+    const { serviceIds, staffId, segments, ...appointmentUpdates } = dto as {
+      serviceIds?: string[];
+      staffId?: string;
+      segments?: Array<{ serviceId: string; staffId: string }>;
+      startTime?: Date;
+      endTime?: Date;
+      status?: AppointmentStatus;
+      googleEventId?: string;
+      reminderSent?: boolean;
+      clientId?: string;
+    };
+
+    await this.appointmentRepository.update(
+      { id, tenantId },
+      appointmentUpdates,
+    );
+
+    if (serviceIds && serviceIds.length > 0) {
+      const appointment = await this.appointmentRepository.findOne({
+        where: { id, tenantId },
+      });
+
+      if (appointment) {
+        const tenantRepo =
+          this.appointmentRepository.manager.getRepository(Tenant);
+        const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+        const timezone = tenant?.timezone ?? 'America/La_Paz';
+        const { date, time } = this.getDateTimeParts(
+          appointment.startTime,
+          timezone,
+        );
+
+        const isMultiStaff = Array.isArray(segments) && segments.length > 0;
+        const availability = await this.availabilityService.findAvailableSlots({
+          tenantId,
+          serviceIds,
+          desiredDate: date,
+          desiredTime: time,
+          staffId: isMultiStaff ? undefined : staffId,
+        });
+
+        if (
+          !availability.isAvailable ||
+          availability.suggestedSlots.length === 0
+        ) {
+          throw new ConflictException({
+            message: 'Nuevo horario no disponible',
+            suggestedSlots: availability.suggestedSlots,
+          });
+        }
+
+        const slot = availability.suggestedSlots[0];
+
+        await this.appointmentServiceRepository.delete({ appointmentId: id });
+        const services = await this.serviceRepository.find({
+          where: {
+            id: In(serviceIds),
+            tenantId,
+            isActive: true,
+          },
+        });
+
+        const servicesById = new Map(services.map((s) => [s.id, s]));
+        const orderedServices = serviceIds.map((sid) => servicesById.get(sid)!);
+
+        let cursor = appointment.startTime;
+        const appointmentServices = orderedServices.map((service, index) => {
+          const segmentStart = cursor;
+          const segmentEnd = new Date(
+            segmentStart.getTime() + service.durationMinutes * 60_000,
+          );
+          cursor = segmentEnd;
+
+          const staffIdForService =
+            slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
+            staffId;
+
+          if (!staffIdForService) {
+            throw new BadRequestException(
+              'No se pudo determinar staff para el servicio',
+            );
+          }
+
+          return this.appointmentServiceRepository.create({
+            appointmentId: appointment.id,
+            serviceId: service.id,
+            staffId: staffIdForService,
+            startTime: segmentStart,
+            endTime: segmentEnd,
+            priceAtBooking: service.price,
+            durationAtBooking: service.durationMinutes,
+            sequenceOrder: index,
+          });
+        });
+
+        if (appointmentServices.length > 0) {
+          await this.appointmentServiceRepository.save(appointmentServices);
+        }
+      }
+    }
+
+    return this.findOneByTenant(id, tenantId);
+  }
+
+  async removeByTenant(id: string, tenantId: string) {
+    await this.appointmentRepository.delete({ id, tenantId });
     return { deleted: true };
   }
 
@@ -216,5 +744,88 @@ export class AppointmentsService {
       hour12: false,
     });
     return formatter.format(date);
+  }
+
+  private getDayRange(timezone: string, now: Date) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(now);
+    const year = Number(parts.find((p) => p.type === 'year')?.value ?? '0');
+    const month = Number(parts.find((p) => p.type === 'month')?.value ?? '1');
+    const day = Number(parts.find((p) => p.type === 'day')?.value ?? '1');
+
+    const startLocalUtcGuess = new Date(
+      Date.UTC(year, month - 1, day, 0, 0, 0),
+    );
+    const startOffset = this.getTimeZoneOffsetMinutes(
+      timezone,
+      startLocalUtcGuess,
+    );
+    const startUtc = new Date(
+      Date.UTC(year, month - 1, day, 0, 0, 0) - startOffset * 60000,
+    );
+
+    const nextDay = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0));
+    const endOffset = this.getTimeZoneOffsetMinutes(timezone, nextDay);
+    const endUtc = new Date(
+      Date.UTC(year, month - 1, day + 1, 0, 0, 0) - endOffset * 60000,
+    );
+
+    return { startUtc, endUtc };
+  }
+
+  private getTimeZoneOffsetMinutes(timezone: string, date: Date): number {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone,
+      timeZoneName: 'shortOffset',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date);
+    const tz = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0';
+    const match = tz.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
+    if (!match) return 0;
+    const sign = match[1] === '-' ? -1 : 1;
+    const hours = Number(match[2] ?? '0');
+    const minutes = Number(match[3] ?? '0');
+    return sign * (hours * 60 + minutes);
+  }
+
+  private getDateTimeParts(date: Date, timezone: string) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: timezone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(date);
+
+    const year = parts.find((p) => p.type === 'year')?.value ?? '0000';
+    const month = parts.find((p) => p.type === 'month')?.value ?? '01';
+    const day = parts.find((p) => p.type === 'day')?.value ?? '01';
+    const hour = parts.find((p) => p.type === 'hour')?.value ?? '00';
+    const minute = parts.find((p) => p.type === 'minute')?.value ?? '00';
+
+    return {
+      date: `${year}-${month}-${day}`,
+      time: `${hour}:${minute}`,
+    };
+  }
+
+  private parseDate(value: Date | string, field: string): Date {
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new BadRequestException(`${field} invÃ¡lido`);
+    }
+    return parsed;
   }
 }

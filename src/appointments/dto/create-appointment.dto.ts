@@ -1,5 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  ArrayNotEmpty,
+  IsArray,
   IsBoolean,
   IsDateString,
   IsEnum,
@@ -10,29 +12,45 @@ import {
 import { AppointmentStatus } from '../entities/appointment.entity';
 
 export class CreateAppointmentDto {
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsUUID()
-  tenantId: string;
+  tenantId!: string;
 
   @ApiProperty()
   @IsUUID()
-  staffId: string;
+  @IsOptional()
+  staffId?: string;
 
   @ApiProperty()
   @IsUUID()
-  clientId: string;
+  clientId!: string;
 
-  @ApiProperty()
-  @IsUUID()
-  serviceId: string;
+  @ApiProperty({ type: [String] })
+  @IsArray()
+  @ArrayNotEmpty()
+  @IsUUID('all', { each: true })
+  serviceIds!: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Optional multi-staff plan. If provided, booking will be validated using availability and segments will be derived from availability response.',
+    type: [Object],
+  })
+  @IsOptional()
+  @IsArray()
+  segments?: Array<{
+    serviceId: string;
+    staffId: string;
+  }>;
 
   @ApiProperty({ type: String, format: 'date-time' })
   @IsDateString()
-  startTime: Date;
+  startTime!: Date;
 
   @ApiProperty({ type: String, format: 'date-time' })
   @IsDateString()
-  endTime: Date;
+  endTime!: Date;
 
   @ApiPropertyOptional({ enum: AppointmentStatus })
   @IsOptional()

@@ -1,244 +1,284 @@
 import { Injectable } from '@nestjs/common';
-import { AIService } from '../ai/ai.service';
-import { ConversationsService } from '../conversations/conversations.service';
-import { MessagesService } from '../messages/messages.service';
-import { MessageRole } from '../messages/entities/message.entity';
+import { ConversationState } from '../conversations/entities/conversation.entity';
 import { AssistantChatDto } from './dto/assistant-chat.dto';
 import { AssistantSimpleDto } from './dto/assistant-simple.dto';
-import { ClientsService } from '../clients/clients.service';
-import { ConversationState } from '../conversations/entities/conversation.entity';
-import type { Client } from '../clients/entities/client.entity';
-import type { Conversation } from '../conversations/entities/conversation.entity';
-import { buildAssistantSystemPrompt } from './prompts/assistant.system';
-import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
-import { buildTempName } from './utils/assistant-utils';
-import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
-import { parseAssistantResponse } from './utils/assistant-response-parser';
+import { AssistantAIService } from './services/assistant-ai.service';
 import { AssistantAvailabilityService } from './services/assistant-availability.service';
-import { AppointmentsService } from '../appointments/appointments.service';
-import { AssistantEntities } from './types/assistant-entities.type';
+import { AssistantContextService } from './services/assistant-context.service';
+import { AssistantMessagingService } from './services/assistant-messaging.service';
+import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
+import { AssistantSessionService } from './services/assistant-session.service';
+import { normalizeAssistantEntities } from './core/assistant-normalizer';
+import { decideNextAction } from './core/assistant-orchestrator';
+import { AssistantAction } from './core/assistant-actions';
+import { AssistantReplyEnricherService } from './services/assistant-reply-enricher.service';
+import type { AssistantEntities } from './types/assistant-entities.type';
 
 @Injectable()
 export class AssistantService {
   constructor(
-    private readonly aiService: AIService,
-    private readonly conversationsService: ConversationsService,
-    private readonly messagesService: MessagesService,
-    private readonly clientsService: ClientsService,
+    private readonly assistantSessionService: AssistantSessionService,
+    private readonly assistantMessagingService: AssistantMessagingService,
+    private readonly assistantAIService: AssistantAIService,
     private readonly promptContextService: AssistantPromptContextService,
     private readonly assistantAvailabilityService: AssistantAvailabilityService,
-    private readonly appointmentsService: AppointmentsService,
+    private readonly assistantContextService: AssistantContextService,
+    private readonly assistantReplyEnricherService: AssistantReplyEnricherService,
   ) {}
 
   async chat(
     input: AssistantChatDto,
   ): Promise<{ reply: string; conversationId: string; clientId: string }> {
-    let client: Client | null = await this.clientsService.findByTenantAndPhone(
-      input.tenantId,
-      input.phone,
-    );
-    if (!client) {
-      const tempName = buildTempName(input.phone);
-      client = await this.clientsService.create({
+    const { client, conversation } =
+      await this.assistantSessionService.getOrCreateSession({
         tenantId: input.tenantId,
         phone: input.phone,
-        name: tempName,
+        clientName: input.clientName,
       });
-    }
 
-    let conversation: Conversation | null =
-      await this.conversationsService.findByTenantAndClient(
-        input.tenantId,
-        client.id,
-      );
-    if (!conversation) {
-      conversation = await this.conversationsService.create({
-        tenantId: input.tenantId,
-        clientId: client.id,
-        currentState: ConversationState.IDLE,
-        contextJson: {},
-      });
-    }
-    await this.messagesService.create({
+    await this.assistantMessagingService.saveUserMessage({
       tenantId: input.tenantId,
       conversationId: conversation.id,
       clientId: client.id,
-      role: MessageRole.USER,
       content: input.messageText,
     });
+    await this.assistantMessagingService.touchConversationLastMessageAt(
+      conversation.id,
+    );
 
+    const storedEntitiesJson = JSON.stringify(
+      conversation.contextJson?.entities ?? null,
+    );
     const promptContext = await this.promptContextService.build(
       input.tenantId,
       client.name ?? undefined,
+      conversation.currentState,
+      storedEntitiesJson,
     );
-    const history = await this.messagesService.findRecentByConversation(
-      conversation.id,
-      6,
-    );
-    const historyMessages: ChatCompletionMessageParam[] = history
-      .slice()
-      .reverse()
-      .map((message) => ({
-        role: message.role,
-        content: message.content,
-      }));
-
-    const response = await this.aiService.chat([
-      { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
-      ...historyMessages,
-    ]);
-
-    let parsed = parseAssistantResponse(response);
-    let reply = parsed.reply;
-    let entities = parsed.entities;
-    let action = parsed.action;
-
-    if (!entities) {
-      const correctionResponse = await this.aiService.chat([
-        { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
-        ...historyMessages,
-        {
-          role: 'system',
-          content:
-            'Responde SOLO con JSON válido en el formato indicado. No incluyas texto adicional.',
-        },
-      ]);
-      parsed = parseAssistantResponse(correctionResponse);
-      reply = parsed.reply;
-      entities = parsed.entities;
-      action = parsed.action;
-    }
-    let finalReply = reply;
-    const availabilityResult =
-      await this.assistantAvailabilityService.handleAvailability({
-        input,
-        conversation,
-        historyMessages,
-        promptContext,
-        reply,
-        entities,
-        action,
+    const historyMessages =
+      await this.assistantMessagingService.getConversationHistory({
+        conversationId: conversation.id,
+        limit: 6,
       });
-    if (availabilityResult.handled) {
-      finalReply = availabilityResult.finalReply;
+
+    const { response, parsed: firstParsed } =
+      await this.assistantAIService.executeChat({
+        promptContext,
+        historyMessages,
+      });
+
+    let parsed = firstParsed;
+
+    if (!parsed.entities) {
+      if (conversation.currentState === ConversationState.BOOKING_COMPLETE) {
+        await this.assistantMessagingService.saveAssistantMessage({
+          tenantId: input.tenantId,
+          conversationId: conversation.id,
+          clientId: client.id,
+          content: parsed.reply,
+          rawJson: response,
+        });
+        await this.assistantMessagingService.touchConversationLastMessageAt(
+          conversation.id,
+        );
+        return {
+          reply: parsed.reply,
+          conversationId: conversation.id,
+          clientId: client.id,
+        };
+      }
+
+      const retry = await this.assistantAIService.retryWhenEntitiesMissing({
+        promptContext,
+        historyMessages,
+      });
+      parsed = retry.parsed;
     }
 
-    const finalAction = availabilityResult.finalAction ?? action;
-    const finalEntities = availabilityResult.finalEntities ?? entities;
-    const stored = (conversation.contextJson?.entities ??
-      {}) as Partial<AssistantEntities>;
-    const prev = entities ?? {};
-    const next = finalEntities ?? {};
+    if (conversation.currentState === ConversationState.BOOKING_COMPLETE) {
+      if (parsed.action === 'CONFIRM_BOOKING') {
+        await this.assistantMessagingService.saveAssistantMessage({
+          tenantId: input.tenantId,
+          conversationId: conversation.id,
+          clientId: client.id,
+          content: parsed.reply,
+          rawJson: response,
+        });
+        await this.assistantMessagingService.touchConversationLastMessageAt(
+          conversation.id,
+        );
+        return {
+          reply: parsed.reply,
+          conversationId: conversation.id,
+          clientId: client.id,
+        };
+      }
 
-    const mergedEntities: AssistantEntities = {
-      services: next.services ?? prev.services ?? stored.services ?? null,
-      staff: next.staff ?? prev.staff ?? stored.staff ?? null,
-      date: next.date ?? prev.date ?? stored.date ?? null,
-      time: next.time ?? prev.time ?? stored.time ?? null,
-    };
+      const hasNewService = Boolean(
+        Array.isArray(parsed.entities?.services) &&
+        parsed.entities.services.length > 0,
+      );
 
-    await this.conversationsService.update(conversation.id, {
-      contextJson: {
-        ...conversation.contextJson,
-        entities: mergedEntities,
-      },
+      if (!hasNewService) {
+        if (
+          parsed.action === 'RESUMEN' &&
+          typeof conversation.contextJson?.appointmentId === 'string' &&
+          conversation.contextJson.appointmentId.length > 0
+        ) {
+          const summary =
+            await this.assistantContextService.buildLastAppointmentSummary({
+              tenantId: input.tenantId,
+              appointmentId: conversation.contextJson.appointmentId,
+              timezone: promptContext.timezone,
+            });
+          if (summary) {
+            await this.assistantMessagingService.saveAssistantMessage({
+              tenantId: input.tenantId,
+              conversationId: conversation.id,
+              clientId: client.id,
+              content: summary,
+              rawJson: response,
+            });
+            await this.assistantMessagingService.touchConversationLastMessageAt(
+              conversation.id,
+            );
+            return {
+              reply: summary,
+              conversationId: conversation.id,
+              clientId: client.id,
+            };
+          }
+        }
+
+        await this.assistantMessagingService.saveAssistantMessage({
+          tenantId: input.tenantId,
+          conversationId: conversation.id,
+          clientId: client.id,
+          content: parsed.reply,
+          rawJson: response,
+        });
+        await this.assistantMessagingService.touchConversationLastMessageAt(
+          conversation.id,
+        );
+        return {
+          reply: parsed.reply,
+          conversationId: conversation.id,
+          clientId: client.id,
+        };
+      }
+
+      await this.assistantContextService.resetAfterBookingComplete(
+        conversation,
+      );
+    }
+
+    const mergedEntities =
+      await this.assistantContextService.mergeEntitiesForStore({
+        conversation,
+        finalEntities: parsed.entities,
+        entities: parsed.entities,
+      });
+
+    const normalizedEntities = normalizeAssistantEntities({
+      incoming: parsed.entities,
+      stored: (conversation.contextJson?.entities ??
+        mergedEntities) as Partial<AssistantEntities>,
+      timezone: promptContext.timezone,
     });
 
-    if (
-      finalAction === 'CONFIRM_BOOKING' &&
-      availabilityResult.isAvailable !== false
-    ) {
-      if (!conversation.contextJson?.appointmentCreated) {
-        const bookingData =
-          availabilityResult.bookingData ??
-          (await this.assistantAvailabilityService.resolveBookingData({
-            tenantId: input.tenantId,
-            entities: mergedEntities,
-          }));
+    const finalAction: AssistantAction | undefined = decideNextAction({
+      entities: normalizedEntities,
+      proposedAction: parsed.action,
+      conversationState: conversation.currentState,
+    });
 
-        if (bookingData) {
-          await this.appointmentsService.createFromAssistant({
-            tenantId: input.tenantId,
-            clientId: client.id,
-            serviceIds: bookingData.serviceIds,
-            staffId: bookingData.staffId,
-            date: bookingData.date,
-            time: bookingData.time,
-          });
+    await this.assistantContextService.mergeEntitiesForStore({
+      conversation,
+      finalEntities: normalizedEntities,
+      entities: normalizedEntities,
+    });
 
-          await this.conversationsService.update(conversation.id, {
-            currentState: ConversationState.IDLE,
-            contextJson: {
-              ...(conversation.contextJson ?? {}), // si es undefined, usamos un objeto vacío
-              appointmentCreated: true,
-              entities: {
-                ...(conversation.contextJson?.entities ?? {}), // si entities es undefined, usamos vacío
-                date: null,
-                time: null,
-              },
-            },
-          });
+    const availabilityResult = finalAction
+      ? await this.assistantAvailabilityService.handleAvailability({
+          input,
+          conversation,
+          historyMessages,
+          promptContext,
+          reply: parsed.reply,
+          entities: normalizedEntities,
+          action: finalAction,
+        })
+      : {
+          handled: false,
+          finalReply: parsed.reply,
+          finalEntities: normalizedEntities,
+          finalAction: finalAction,
+        };
 
-          // Suponiendo bookingData.date = '2026-04-07', bookingData.time = '09:00'
-          const dateTime = new Date(`${bookingData.date}T${bookingData.time}`);
+    const finalReplyFromAvailability = availabilityResult.handled
+      ? availabilityResult.finalReply
+      : parsed.reply;
 
-          // Formateo legible en español
-          const formatted = dateTime.toLocaleString('es-CO', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            hour: 'numeric',
-            minute: '2-digit',
-            hour12: true,
-          });
+    const enrichedReply = await this.assistantReplyEnricherService.enrich({
+      tenantId: input.tenantId,
+      promptContext,
+      historyMessages,
+      baseReply: finalReplyFromAvailability,
+      action: finalAction,
+    });
 
-          // Mensaje final
-          finalReply = `¡Listo! Tu cita quedó agendada para el ${formatted}.`;
+    const entitiesToStore =
+      availabilityResult.handled && availabilityResult.finalEntities
+        ? availabilityResult.finalEntities
+        : normalizedEntities;
 
-          setTimeout(() => {
-            void (async () => {
-              await this.conversationsService.update(conversation.id, {
-                contextJson: {
-                  ...conversation.contextJson,
-                  appointmentCreated: false,
-                },
-              });
-            })();
-          }, 5000);
-        }
-      } else {
-        finalReply = 'La cita ya ha sido creada.';
-      }
-    }
+    const mergedAfterAvailability =
+      await this.assistantContextService.mergeEntitiesForStore({
+        conversation,
+        finalEntities: entitiesToStore,
+        entities: entitiesToStore,
+      });
 
-    await this.messagesService.create({
+    const bookingData = await this.assistantContextService.resolveBookingData({
+      tenantId: input.tenantId,
+      availabilityResult,
+      mergedEntities: mergedAfterAvailability,
+    });
+
+    const postFlow =
+      await this.assistantContextService.applyPostAvailabilityFlow({
+        tenantId: input.tenantId,
+        conversation,
+        client,
+        availabilityResult,
+        finalAction: availabilityResult.finalAction,
+        mergedEntities: mergedAfterAvailability,
+        bookingData,
+        finalReply: enrichedReply,
+      });
+
+    await this.assistantMessagingService.saveAssistantMessage({
       tenantId: input.tenantId,
       conversationId: conversation.id,
       clientId: client.id,
-      role: MessageRole.ASSISTANT,
-      content: finalReply,
+      content: postFlow.finalReply,
       rawJson: response,
     });
-
-    await this.conversationsService.update(conversation.id, {
-      lastMessageAt: new Date(),
-    });
+    await this.assistantMessagingService.touchConversationLastMessageAt(
+      conversation.id,
+    );
 
     return {
-      reply: finalReply,
+      reply: postFlow.finalReply,
       conversationId: conversation.id,
       clientId: client.id,
     };
   }
 
-  async simpleChat(input: AssistantSimpleDto): Promise<{ reply: string }> {
-    const promptContext = await this.promptContextService.build();
-    const response = await this.aiService.chat([
-      { role: 'system', content: buildAssistantSystemPrompt(promptContext) },
-      { role: 'user', content: input.messageText },
-    ]);
-
-    const { reply } = parseAssistantResponse(response);
-    return { reply };
+  simpleChat(input: AssistantSimpleDto) {
+    void input;
+    throw new Error(
+      'simpleChat no está soportado: se requiere tenantId para construir el prompt.',
+    );
   }
 }

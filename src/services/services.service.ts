@@ -18,14 +18,6 @@ export class ServicesService {
     return this.serviceRepository.save(service);
   }
 
-  findAll(): Promise<Service[]> {
-    return this.serviceRepository.find();
-  }
-
-  findOne(id: string): Promise<Service | null> {
-    return this.serviceRepository.findOneBy({ id });
-  }
-
   findByTenant(tenantId: string): Promise<Service[]> {
     return this.serviceRepository.find({
       where: { tenantId },
@@ -33,13 +25,30 @@ export class ServicesService {
     });
   }
 
-  async update(id: string, updateServiceDto: UpdateServiceDto) {
-    await this.serviceRepository.update(id, updateServiceDto);
-    return this.findOne(id);
+  findActiveByTenant(tenantId: string): Promise<Service[]> {
+    return this.serviceRepository.find({
+      where: { tenantId, isActive: true },
+      order: { name: 'ASC' },
+    });
   }
 
-  async remove(id: string) {
-    await this.serviceRepository.delete(id);
-    return { deleted: true };
+  findOneByTenant(id: string, tenantId: string): Promise<Service | null> {
+    return this.serviceRepository.findOne({
+      where: { id, tenantId },
+    });
+  }
+
+  async updateByTenant(
+    id: string,
+    tenantId: string,
+    updateServiceDto: UpdateServiceDto,
+  ) {
+    await this.serviceRepository.update({ id, tenantId }, updateServiceDto);
+    return this.findOneByTenant(id, tenantId);
+  }
+
+  async removeByTenant(id: string, tenantId: string) {
+    await this.serviceRepository.update({ id, tenantId }, { isActive: false });
+    return this.findOneByTenant(id, tenantId);
   }
 }
