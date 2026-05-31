@@ -6,6 +6,7 @@ export type NormalizeAssistantEntitiesParams = {
   incoming: AssistantParsedResponse['entities'] | undefined;
   stored: Partial<AssistantEntities> | undefined;
   timezone: string;
+  isClosedNow?: boolean;
   now?: Date;
 };
 
@@ -26,16 +27,22 @@ const getTodayISODateInTimeZone = (timeZone: string, now: Date): string => {
 export const normalizeAssistantEntities = (
   params: NormalizeAssistantEntitiesParams,
 ): AssistantEntities => {
-  const { incoming, stored, timezone, now = new Date() } = params;
+  const {
+    incoming,
+    stored,
+    timezone,
+    isClosedNow = false,
+    now = new Date(),
+  } = params;
 
   const merged: AssistantEntities = mergeEntities(stored, incoming);
 
-  if (!merged.staff || merged.staff.trim().length === 0) {
-    merged.staff = 'sin preferencia';
-  }
-
   if (!merged.date || merged.date.trim().length === 0) {
-    merged.date = getTodayISODateInTimeZone(timezone, now);
+    const date = new Date(now);
+    if (isClosedNow) {
+      date.setUTCDate(date.getUTCDate() + 1);
+    }
+    merged.date = getTodayISODateInTimeZone(timezone, date);
   }
 
   return merged;

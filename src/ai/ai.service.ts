@@ -31,14 +31,12 @@ export class AIService {
   async chatRaw(
     messages: ChatCompletionMessageParam[],
   ): Promise<ChatCompletion> {
-    const response: ChatCompletion = await this.openai.chat.completions.create({
+    return this.openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages,
       max_tokens: 300,
       temperature: 0.6,
       n: 1,
     });
-
-    return response;
   }
 }

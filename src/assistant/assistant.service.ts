@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { ConversationState } from '../conversations/entities/conversation.entity';
 import { AssistantChatDto } from './dto/assistant-chat.dto';
 import { AssistantSimpleDto } from './dto/assistant-simple.dto';
@@ -13,6 +13,13 @@ import { decideNextAction } from './core/assistant-orchestrator';
 import { AssistantAction } from './core/assistant-actions';
 import { AssistantReplyEnricherService } from './services/assistant-reply-enricher.service';
 import type { AssistantEntities } from './types/assistant-entities.type';
+import type { Conversation } from '../conversations/entities/conversation.entity';
+import type { Client } from '../clients/entities/client.entity';
+import { AssistantIntent } from './intents/assistant-intent';
+import { AssistantIntentRouterService } from './services/assistant-intent-router.service';
+import { resolvePromptForIntent } from './helpers/assistant-prompt-resolver';
+import { mergeParsedWithRouter } from './helpers/assistant-router-merge';
+import { buildBackendSummaryReply } from './helpers/assistant-summary-builder';
 
 @Injectable()
 export class AssistantService {
@@ -21,6 +28,7 @@ export class AssistantService {
     private readonly assistantMessagingService: AssistantMessagingService,
     private readonly assistantAIService: AssistantAIService,
     private readonly promptContextService: AssistantPromptContextService,
+    private readonly assistantIntentRouterService: AssistantIntentRouterService,
     private readonly assistantAvailabilityService: AssistantAvailabilityService,
     private readonly assistantContextService: AssistantContextService,
     private readonly assistantReplyEnricherService: AssistantReplyEnricherService,
@@ -29,7 +37,10 @@ export class AssistantService {
   async chat(
     input: AssistantChatDto,
   ): Promise<{ reply: string; conversationId: string; clientId: string }> {
-    const { client, conversation } =
+    const {
+      client,
+      conversation,
+    }: { client: Client; conversation: Conversation } =
       await this.assistantSessionService.getOrCreateSession({
         tenantId: input.tenantId,
         phone: input.phone,
@@ -61,38 +72,85 @@ export class AssistantService {
         limit: 6,
       });
 
+    const routerResult = await this.assistantIntentRouterService.routeIntent({
+      messageText: input.messageText,
+      services: promptContext.services,
+      businessHours: promptContext.businessHours,
+      staffNames: Object.keys(promptContext.staffServices),
+      conversationState: conversation.currentState,
+      currentDate: promptContext.currentDate,
+    });
+
+    if (routerResult.intent === AssistantIntent.SUMMARY) {
+      const summaryReply = await buildBackendSummaryReply({
+        tenantId: input.tenantId,
+        conversation,
+        timezone: promptContext.timezone,
+        assistantContextService: this.assistantContextService,
+      });
+
+      await this.assistantMessagingService.saveAssistantMessage({
+        tenantId: input.tenantId,
+        conversationId: conversation.id,
+        clientId: client.id,
+        content: summaryReply,
+        rawJson: JSON.stringify({
+          reply: summaryReply,
+          action: 'RESUMEN',
+        }),
+      });
+      await this.assistantMessagingService.touchConversationLastMessageAt(
+        conversation.id,
+      );
+
+      return {
+        reply: summaryReply,
+        conversationId: conversation.id,
+        clientId: client.id,
+      };
+    }
+
+    const wantsShowHoursNow =
+      /horarios?\s+disponibles|ver\s+horarios?|qu[eé]\s+horas?\s+(tienes|tienen)/i.test(
+        input.messageText,
+      );
+    if (wantsShowHoursNow) {
+      await this.assistantContextService.markWantsShowHours(conversation);
+    }
+
+    const wantsShowStaffNow =
+      /barberos?\s+disponibles|qu[eé]?\s+barberos?\s+(tienes|tienen)|ver\s+qu[eé]?\s+barberos?/i.test(
+        input.messageText,
+      );
+    if (wantsShowStaffNow) {
+      await this.assistantContextService.markWantsShowStaff(conversation);
+    }
+
+    const systemAddon = resolvePromptForIntent({
+      routerResult,
+      promptContext,
+      conversation,
+      messageText: input.messageText,
+    });
+
     const { response, parsed: firstParsed } =
-      await this.assistantAIService.executeChat({
+      await this.assistantAIService.executeChatWithSystemAddon({
         promptContext,
         historyMessages,
+        systemAddon,
       });
 
-    let parsed = firstParsed;
+    const parsed = mergeParsedWithRouter({
+      parsed: firstParsed,
+      routerEntities: routerResult.entities,
+      intent: routerResult.intent,
+    });
 
-    if (!parsed.entities) {
-      if (conversation.currentState === ConversationState.BOOKING_COMPLETE) {
-        await this.assistantMessagingService.saveAssistantMessage({
-          tenantId: input.tenantId,
-          conversationId: conversation.id,
-          clientId: client.id,
-          content: parsed.reply,
-          rawJson: response,
-        });
-        await this.assistantMessagingService.touchConversationLastMessageAt(
-          conversation.id,
-        );
-        return {
-          reply: parsed.reply,
-          conversationId: conversation.id,
-          clientId: client.id,
-        };
-      }
-
-      const retry = await this.assistantAIService.retryWhenEntitiesMissing({
-        promptContext,
-        historyMessages,
-      });
-      parsed = retry.parsed;
+    const shouldMarkIntroduced =
+      routerResult.intent === AssistantIntent.GREETING &&
+      conversation.contextJson?.hasAssistantIntroduced !== true;
+    if (shouldMarkIntroduced) {
+      await this.assistantContextService.markAssistantIntroduced(conversation);
     }
 
     if (conversation.currentState === ConversationState.BOOKING_COMPLETE) {
@@ -120,48 +178,26 @@ export class AssistantService {
       );
 
       if (!hasNewService) {
-        if (
-          parsed.action === 'RESUMEN' &&
-          typeof conversation.contextJson?.appointmentId === 'string' &&
-          conversation.contextJson.appointmentId.length > 0
-        ) {
-          const summary =
-            await this.assistantContextService.buildLastAppointmentSummary({
-              tenantId: input.tenantId,
-              appointmentId: conversation.contextJson.appointmentId,
-              timezone: promptContext.timezone,
-            });
-          if (summary) {
-            await this.assistantMessagingService.saveAssistantMessage({
-              tenantId: input.tenantId,
-              conversationId: conversation.id,
-              clientId: client.id,
-              content: summary,
-              rawJson: response,
-            });
-            await this.assistantMessagingService.touchConversationLastMessageAt(
-              conversation.id,
-            );
-            return {
-              reply: summary,
-              conversationId: conversation.id,
-              clientId: client.id,
-            };
-          }
-        }
-
+        const postBookingReply =
+          'Con gusto. Si quieres agendar otra cita, aquí estoy para ayudarte.';
         await this.assistantMessagingService.saveAssistantMessage({
           tenantId: input.tenantId,
           conversationId: conversation.id,
           clientId: client.id,
-          content: parsed.reply,
-          rawJson: response,
+          content: postBookingReply,
+          rawJson: JSON.stringify({
+            reply: postBookingReply,
+            action: parsed.action,
+          }),
         });
         await this.assistantMessagingService.touchConversationLastMessageAt(
           conversation.id,
         );
+        await this.assistantContextService.resetAfterBookingComplete(
+          conversation,
+        );
         return {
-          reply: parsed.reply,
+          reply: postBookingReply,
           conversationId: conversation.id,
           clientId: client.id,
         };
@@ -184,6 +220,7 @@ export class AssistantService {
       stored: (conversation.contextJson?.entities ??
         mergedEntities) as Partial<AssistantEntities>,
       timezone: promptContext.timezone,
+      isClosedNow: promptContext.isClosedNow,
     });
 
     const finalAction: AssistantAction | undefined = decideNextAction({
@@ -191,6 +228,13 @@ export class AssistantService {
       proposedAction: parsed.action,
       conversationState: conversation.currentState,
     });
+
+    if (finalAction === AssistantAction.SHOW_HOURS) {
+      await this.assistantContextService.clearWantsShowHours(conversation);
+    }
+    if (finalAction === AssistantAction.ASK_STAFF) {
+      await this.assistantContextService.clearWantsShowStaff(conversation);
+    }
 
     await this.assistantContextService.mergeEntitiesForStore({
       conversation,
