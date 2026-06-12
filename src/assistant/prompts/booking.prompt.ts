@@ -88,11 +88,12 @@ const buildAskDatePrompt = (params: { entities: AssistantIntentEntities }) =>
   `
 INTENCION: BOOKING
 Falta: fecha.
-Tarea: preguntar que dia desea agendar (YYYY-MM-DD).
+Tarea: preguntar que dia desea agendar de forma natural.
 
 IMPORTANTE:
-- No declares falta de disponibilidad sin verificación (no inventes "para hoy no hay").
-- Si el usuario quiere "hoy" o "mañana", pide confirmación y normaliza a YYYY-MM-DD.
+- No declares falta de disponibilidad sin verificacion.
+- Si el usuario quiere "hoy" o "manana", pide confirmacion y normaliza la fecha internamente.
+- Si necesitas mostrar ayuda de formato, hazlo breve y natural, sin sonar a formulario.
 
 Formato de salida obligatorio:
 ${buildOutputFormat({
@@ -218,3 +219,4 @@ ${buildOutputFormat({
 `.trim();
   }
 };
+
