@@ -11,7 +11,6 @@ export interface AssistantParsedResponse {
 
 export function parseAssistantResponse(
   response: { content?: string | null },
-  logger: Pick<Console, 'log'> = console,
 ): {
   reply: string;
   entities?: AssistantParsedResponse['entities'];
@@ -19,16 +18,27 @@ export function parseAssistantResponse(
 } {
   const responseText = response.content ?? '';
   const parsed = tryParseAssistantJson(responseText);
+  const normalizedForLog = parsed
+    ? {
+        ...parsed,
+        entities: {
+          services: parsed.entities?.services ?? null,
+          staff: parsed.entities?.staff ?? null,
+          date: parsed.entities?.date ?? null,
+          time: parsed.entities?.time ?? null,
+        },
+      }
+    : null;
 
   if (parsed) {
-    logger.log('[assistant] parsed json:', parsed);
+    console.log('[assistant] parsed json:', normalizedForLog);
     return {
       reply: parsed.reply ?? 'Sin respuesta',
       entities: parsed.entities,
       action: parsed.action,
     };
   } else {
-    logger.log('[assistant] raw response:', responseText);
+    console.log('[assistant] raw response:', responseText);
     return {
       reply: responseText.trim().length > 0 ? responseText : 'Sin respuesta',
       entities: undefined,

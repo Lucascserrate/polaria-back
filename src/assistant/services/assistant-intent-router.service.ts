@@ -38,10 +38,30 @@ export class AssistantIntentRouterService {
         .trim();
     };
 
+    const normalizedMessage = normalizeComparable(params.messageText);
+
+    if (
+      params.conversationState === 'CONFIRM_APPOINTMENT' &&
+      /(^|\s)(quien|qu[eé]n|que barbero|qu[eé]\s+barbero|barbero)\b/.test(
+        normalizedMessage,
+      ) &&
+      /atender|atiende|atendera|va a atender|me atiende/.test(normalizedMessage)
+    ) {
+      return {
+        intent: AssistantIntent.SUMMARY,
+        entities: {
+          services: null,
+          staff: null,
+          date: null,
+          time: null,
+        },
+      };
+    }
+
     // Shortcut: si estamos preguntando por servicio y el usuario responde con un servicio real,
     // tratamos esto como continuación de BOOKING (evita repetir el catálogo).
     if (params.conversationState === 'ASK_SERVICE' && params.services.length) {
-      const normalizedUser = normalizeComparable(params.messageText);
+      const normalizedUser = normalizedMessage;
       const matchedService = params.services.find((serviceName) => {
         const normalizedService = normalizeComparable(serviceName);
         if (!normalizedService) return false;
@@ -72,7 +92,7 @@ export class AssistantIntentRouterService {
         params.conversationState === 'ASK_SLOT') &&
       typeof params.messageText === 'string'
     ) {
-      const normalizedUser = normalizeComparable(params.messageText);
+      const normalizedUser = normalizedMessage;
 
       const parseTime = (text: string): string | null => {
         // HH:mm (9:30, 09:30)
@@ -133,7 +153,7 @@ export class AssistantIntentRouterService {
     // que coincide con staffNames, tratamos esto como continuación de BOOKING.
     // Evita que el router confunda el nombre con ASK_SERVICES / OFF_TOPIC y ahorra tokens.
     if (params.conversationState === 'ASK_STAFF' && params.staffNames.length) {
-      const normalizedUser = normalizeComparable(params.messageText);
+      const normalizedUser = normalizedMessage;
       const noPreferencePatterns = [
         'no',
         'sin preferencia',

@@ -33,6 +33,7 @@ export const buildBackendSummaryReply = async (params: {
     | {
         date?: string;
         time?: string;
+        staffId?: string;
       }
     | undefined;
   const entities = conversation.contextJson?.entities as
@@ -41,12 +42,24 @@ export const buildBackendSummaryReply = async (params: {
         staff?: string | null;
       }
     | undefined;
+  const lastBookedEntities = conversation.contextJson?.lastBookedEntities as
+    | {
+        staff?: string | null;
+      }
+    | undefined;
 
   if (pending?.date && pending?.time) {
     const services = Array.isArray(entities?.services)
       ? entities?.services
       : [];
-    const staff = typeof entities?.staff === 'string' ? entities.staff : null;
+    const staff =
+      typeof pending.staffId === 'string' && pending.staffId.trim().length > 0
+        ? pending.staffId
+        : typeof entities?.staff === 'string'
+          ? entities.staff
+          : typeof lastBookedEntities?.staff === 'string'
+            ? lastBookedEntities.staff
+            : null;
     return buildPendingBookingSummary({
       services,
       staff,
