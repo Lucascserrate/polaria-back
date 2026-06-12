@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 export class CreateTenantDto {
   @ApiProperty()
@@ -47,4 +47,9 @@ export class CreateTenantDto {
   @IsOptional()
   @IsString()
   googleRefreshToken?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  aiEnabled?: boolean;
 }

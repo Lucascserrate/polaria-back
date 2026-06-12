@@ -20,6 +20,10 @@ import { AssistantIntentRouterService } from './services/assistant-intent-router
 import { resolvePromptForIntent } from './helpers/assistant-prompt-resolver';
 import { mergeParsedWithRouter } from './helpers/assistant-router-merge';
 import { buildBackendSummaryReply } from './helpers/assistant-summary-builder';
+import { TenantsService } from '../tenants/tenants.service';
+
+const AI_DISABLED_REPLY =
+  'Hola, gracias por escribirnos. En este momento no tenemos atención al cliente disponible, pero te responderemos apenas estemos de vuelta.';
 
 @Injectable()
 export class AssistantService {
@@ -32,6 +36,7 @@ export class AssistantService {
     private readonly assistantAvailabilityService: AssistantAvailabilityService,
     private readonly assistantContextService: AssistantContextService,
     private readonly assistantReplyEnricherService: AssistantReplyEnricherService,
+    private readonly tenantsService: TenantsService,
   ) {}
 
   async chat(
@@ -46,6 +51,31 @@ export class AssistantService {
         phone: input.phone,
         clientName: input.clientName,
       });
+
+    const tenant = await this.tenantsService.findOne(input.tenantId);
+    if (tenant && !tenant.aiEnabled) {
+      await this.assistantMessagingService.saveUserMessage({
+        tenantId: input.tenantId,
+        conversationId: conversation.id,
+        clientId: client.id,
+        content: input.messageText,
+      });
+      await this.assistantMessagingService.saveAssistantMessage({
+        tenantId: input.tenantId,
+        conversationId: conversation.id,
+        clientId: client.id,
+        content: AI_DISABLED_REPLY,
+        rawJson: { disabled: true },
+      });
+      await this.assistantMessagingService.touchConversationLastMessageAt(
+        conversation.id,
+      );
+      return {
+        reply: AI_DISABLED_REPLY,
+        conversationId: conversation.id,
+        clientId: client.id,
+      };
+    }
 
     await this.assistantMessagingService.saveUserMessage({
       tenantId: input.tenantId,
