@@ -6,6 +6,7 @@ export const buildIntentRouterPrompt = (params: {
   businessHours: string[];
   conversationState: string;
   currentDate: string;
+  tomorrowDate: string;
 }) => {
   const {
     services,
@@ -13,6 +14,7 @@ export const buildIntentRouterPrompt = (params: {
     businessHours,
     conversationState,
     currentDate,
+    tomorrowDate,
   } = params;
   console.log('Building intent router prompt with context:');
   return `
@@ -41,7 +43,7 @@ REGLAS:
 
 FECHAS:
 Hoy = ${currentDate}
-Manana = +1 dia
+Manana = ${tomorrowDate}
 
 CONTEXTO:
 Servicios: ${services.length > 0 ? services.join(', ') : 'ninguno'}

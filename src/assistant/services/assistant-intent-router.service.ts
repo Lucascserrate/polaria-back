@@ -267,6 +267,12 @@ export class AssistantIntentRouterService {
       businessHours: params.businessHours,
       conversationState: params.conversationState,
       currentDate: params.currentDate,
+      tomorrowDate: (() => {
+        const parsed = new Date(`${params.currentDate}T00:00:00Z`);
+        if (Number.isNaN(parsed.getTime())) return params.currentDate;
+        parsed.setUTCDate(parsed.getUTCDate() + 1);
+        return parsed.toISOString().slice(0, 10);
+      })(),
     });
 
     const messages: ChatCompletionMessageParam[] = [
