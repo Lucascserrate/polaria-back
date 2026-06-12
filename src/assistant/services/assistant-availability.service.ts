@@ -1,4 +1,5 @@
 ﻿import { Injectable } from '@nestjs/common';
+import { AIService } from '../../ai/ai.service';
 import { AvailabilityService } from '../../availability/availability.service';
 import { ServicesService } from '../../services/services.service';
 import { StaffService } from '../../staff/staff.service';
@@ -7,6 +8,7 @@ import type { ChatCompletionMessageParam } from 'openai/resources/chat/completio
 import { ConversationsService } from '../../conversations/conversations.service';
 import { ConversationState } from '../../conversations/entities/conversation.entity';
 import type { AssistantPromptContext } from '../prompts/assistant.system';
+import { buildAvailabilityReplyPrompt } from '../prompts/business-hours.prompt';
 import type { Conversation } from '../../conversations/entities/conversation.entity';
 import type { AssistantChatDto } from '../dto/assistant-chat.dto';
 import {
@@ -112,20 +114,33 @@ export class AssistantAvailabilityService {
     private readonly servicesService: ServicesService,
     private readonly staffService: StaffService,
     private readonly conversationsService: ConversationsService,
+    private readonly aiService: AIService,
   ) {}
 
-  private formatSlotsMessage(params: {
-    friendlySlots: string[];
-    mode: 'SHOW_HOURS' | 'ALTERNATIVES';
-  }): string {
-    const { friendlySlots, mode } = params;
-    const lines = friendlySlots.map((s) => `- ${s}`).join('\n');
+  private async buildAvailabilityReply(params: {
+    mode: 'SHOW_HOURS' | 'ALTERNATIVES' | 'CLOSED_TODAY' | 'OUT_OF_HOURS';
+    friendlySlots?: string[];
+    businessHours?: string;
+    dateHint?: string;
+    staffHint?: string;
+    startText?: string;
+    endText?: string;
+  }): Promise<string> {
+    const prompt = buildAvailabilityReplyPrompt(params);
+    const response = await this.aiService.chat([
+      { role: 'system', content: prompt },
+    ]);
+    const text = (response.content ?? '').trim();
+    if (text.length > 0) return text;
 
-    if (mode === 'SHOW_HOURS') {
-      return `Estos son algunos horarios disponibles:\n${lines}\n¿Alguna de estas te funciona o prefieres otra hora?`;
+    if (params.mode === 'SHOW_HOURS') {
+      const lines = (params.friendlySlots ?? [])
+        .map((s) => `- ${s}`)
+        .join('\n');
+      return `Estos son algunos horarios disponibles:\n${lines}\n¿Cuál te queda mejor?`;
     }
 
-    return `No tengo disponibilidad a esa hora, pero te propongo estos horarios disponibles:\n${lines}\n¿Cuál te queda mejor o quieres intentar otra hora?`;
+    return 'No tengo disponibilidad en ese horario. ¿Quieres que te proponga otras opciones?';
   }
 
   async handleAvailability(params: {
@@ -242,9 +257,14 @@ export class AssistantAvailabilityService {
             currentMinutes !== null &&
             currentMinutes >= schedule.endMinutes
           ) {
+            const finalReply = await this.buildAvailabilityReply({
+              mode: 'CLOSED_TODAY',
+              dateHint: entities.date,
+              endText,
+            });
             return {
               handled: true,
-              finalReply: `Hoy ya cerramos (atendemos hasta las ${endText}). Si quieres, te ayudo a dejarla para mañana: dime el servicio, el barbero y la hora que prefieres.`,
+              finalReply,
               finalEntities: entities,
               finalAction: action,
               isAvailable: false,
@@ -252,9 +272,14 @@ export class AssistantAvailabilityService {
           }
 
           if (requestedMinutes > schedule.endMinutes) {
+            const finalReply = await this.buildAvailabilityReply({
+              mode: 'OUT_OF_HOURS',
+              dateHint: entities.date,
+              endText,
+            });
             return {
               handled: true,
-              finalReply: `A esa hora ya cerramos hoy (atendemos hasta ${endText}). Si quieres, te ayudo a agendar para mañana: dime el servicio, el barbero y la hora que prefieres.`,
+              finalReply,
               finalEntities: entities,
               finalAction: action,
               isAvailable: false,
@@ -262,9 +287,14 @@ export class AssistantAvailabilityService {
           }
 
           if (requestedMinutes < schedule.startMinutes) {
+            const finalReply = await this.buildAvailabilityReply({
+              mode: 'OUT_OF_HOURS',
+              dateHint: entities.date,
+              startText,
+            });
             return {
               handled: true,
-              finalReply: `A esa hora aún no estamos atendiendo (hoy abrimos a las ${startText}). Si quieres, te ayudo a dejarla para más tarde o para mañana: dime el servicio, el barbero y la hora que prefieres.`,
+              finalReply,
               finalEntities: entities,
               finalAction: action,
               isAvailable: false,
@@ -335,6 +365,40 @@ export class AssistantAvailabilityService {
       const hasAvailability: boolean =
         availability.isAvailable && friendly.friendlySlots.length > 0;
 
+      // Si ya tenemos horarios amigables para mostrar, nunca devolvemos un
+      // mensaje de "no hay cupos" en esta misma verificación.
+      // Esto evita que una bandera de disponibilidad quede desalineada con los
+      // slots reales calculados por el motor de disponibilidad.
+      if (action === 'SHOW_HOURS' && friendly.friendlySlots.length > 0) {
+        const showReply = await this.buildAvailabilityReply({
+          mode: 'SHOW_HOURS',
+          friendlySlots: friendly.friendlySlots,
+        });
+
+        await this.conversationsService.update(conversation.id, {
+          currentState: ConversationState.SUGGEST_SLOTS,
+          contextJson: {
+            ...currentContext,
+            lastAvailabilityKey: availabilityKey,
+            lastAvailabilityIsAvailable: true,
+          },
+        });
+
+        return {
+          handled: true,
+          finalReply: showReply,
+          finalEntities: entities || {},
+          finalAction: action || undefined,
+          bookingData: {
+            serviceIds,
+            staffId,
+            date: entities.date || '',
+            time: entities.time || '',
+          },
+          isAvailable: true,
+        };
+      }
+
       // Nunca pidas al modelo "mostrar horarios" si la lista está vacía:
       // aunque el prompt diga "no inventes", terminan saliendo horas inventadas.
       if (friendly.friendlySlots.length === 0) {
@@ -375,11 +439,18 @@ export class AssistantAvailabilityService {
           },
         });
 
-        const reply = isClosedToday
-          ? `Hoy ya cerramos${dateHint}. Si quieres, te ayudo a dejarla para mañana: dime el servicio, el barbero y la hora que prefieres.`
-          : staffId
-            ? `Uy, hoy ya no tengo cupos${staffHint}${dateHint}. ¿Quieres que te busque con otro barbero o sin preferencia, o prefieres agendar para mañana?`
-            : `Uy, hoy ya no tengo cupos${dateHint}. ¿Prefieres agendar para mañana o te sirve otra hora/fecha?`;
+        const reply = await this.buildAvailabilityReply({
+          mode: isClosedToday ? 'CLOSED_TODAY' : 'ALTERNATIVES',
+          friendlySlots: friendly.friendlySlots,
+          dateHint,
+          staffHint,
+          startText: schedule
+            ? formatMinutesToTime(schedule.startMinutes)
+            : undefined,
+          endText: schedule
+            ? formatMinutesToTime(schedule.endMinutes)
+            : undefined,
+        });
 
         return {
           handled: true,
@@ -422,46 +493,12 @@ export class AssistantAvailabilityService {
         };
       }
 
-      if (action === 'SHOW_HOURS' && hasAvailability) {
-        const showReply = this.formatSlotsMessage({
-          friendlySlots: friendly.friendlySlots,
-          mode: 'SHOW_HOURS',
-        });
-
-        await this.conversationsService.update(conversation.id, {
-          currentState: ConversationState.SUGGEST_SLOTS,
-          contextJson: {
-            ...currentContext,
-            lastAvailabilityKey: availabilityKey,
-            lastAvailabilityIsAvailable: true,
-          },
-        });
-
-        return {
-          handled: true,
-          finalReply: showReply,
-          finalEntities: entities || {},
-          finalAction: action || undefined,
-          bookingData: {
-            serviceIds,
-            staffId,
-            date: entities.date || '',
-            time: entities.time || '',
-          },
-          isAvailable: true,
-        };
-      }
-
-      // Si el usuario pidió un barbero específico pero no hay disponibilidad,
-      // y vamos a proponer horarios alternativos, debemos limpiar la preferencia
-      // para no terminar agendando/mostrando el mismo barbero en el resumen.
-      const shouldDropStaffPreference = Boolean(staffId);
-      const mergedEntities = shouldDropStaffPreference
-        ? { ...entities, staff: 'sin preferencia' }
-        : entities;
-      const finalReply = this.formatSlotsMessage({
-        friendlySlots: friendly.friendlySlots,
+      // Si no hay disponibilidad, conservamos las entidades para que el usuario
+      // pueda mover solo la hora sin perder el servicio o el barbero elegido.
+      const mergedEntities = entities;
+      const finalReply = await this.buildAvailabilityReply({
         mode: 'ALTERNATIVES',
+        friendlySlots: friendly.friendlySlots,
       });
 
       await this.conversationsService.update(conversation.id, {
@@ -480,7 +517,7 @@ export class AssistantAvailabilityService {
         finalAction: action,
         bookingData: {
           serviceIds,
-          staffId: shouldDropStaffPreference ? undefined : staffId,
+          staffId,
           date: entities.date || '',
           time: entities.time || '',
         },
