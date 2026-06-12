@@ -2,6 +2,7 @@ export interface GreetingPromptParams {
   businessName: string;
   services: string[];
   businessHours: string[];
+  hasBusinessHours?: boolean;
   currentDate: string;
   currentTime: string;
   businessStatus: 'OPEN' | 'CLOSED';
@@ -13,6 +14,7 @@ export const buildGreetingPromptAddon = (params: GreetingPromptParams) => {
     businessName,
     services,
     businessHours,
+    hasBusinessHours = true,
     currentDate,
     currentTime,
     businessStatus,
@@ -48,6 +50,7 @@ REGLAS:
 - Responde corto y natural
 - Haz una pregunta util para continuar el flujo
 - Si businessStatus = CLOSED, no digas que hay cupos hoy
+- Si businessStatus = CLOSED y no hay horarios cargados, no ofrezcas manana; indica que no hay atencion en este momento
 
 EJEMPLOS DE TONO:
 - "Hola, ¿qué servicio te gustaría agendar?"
@@ -105,13 +108,14 @@ REGLAS:
 - Invita naturalmente a continuar la conversacion
 - Los servicios deben sentirse parte de la conversacion, NO un flyer
 - Si businessStatus = CLOSED, no digas que estan abiertos ni que hay cupos hoy
-- Si businessStatus = CLOSED, ofrece agendar para manana
+- Si businessStatus = CLOSED y hay horarios cargados, ofrece agendar para manana
+- Si businessStatus = CLOSED y no hay horarios cargados, indica que no hay atencion en este momento
 
 HORARIOS:
 - Si businessStatus = OPEN:
   menciona hasta que hora atienden hoy
 - Si businessStatus = CLOSED:
-  indica que ya cerraron y ofrece agendar para manana
+  ${hasBusinessHours ? 'indica que ya cerraron y ofrece agendar para manana' : 'indica que no hay atencion en este momento'}
 - No digas que estan abiertos si currentTime ya paso el cierre del dia
 
 IMPORTANTE:

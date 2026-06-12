@@ -2,13 +2,21 @@ import { AssistantAction } from '../core/assistant-actions';
 
 export const buildBusinessHoursPromptAddon = (params: {
   businessHours: string[];
+  businessHoursHuman?: string[];
+  businessDaysOpen?: string[];
 }) => {
   const schedule = params.businessHours.length
     ? params.businessHours.join(' | ')
     : 'Horario no disponible';
+  const humanSchedule = params.businessHoursHuman?.length
+    ? params.businessHoursHuman.join(' | ')
+    : schedule;
+  const daysOpen = params.businessDaysOpen?.length
+    ? params.businessDaysOpen.join(', ')
+    : 'no disponible';
 
   return `
-INTENCIÓN: ASK_HOURS
+INTENCION: ASK_HOURS
 
 El usuario pregunta por horarios generales del negocio.
 
@@ -16,9 +24,16 @@ OBJETIVO:
 - Responder con el horario real
 - Ser breve y natural
 - Invitar a agendar
+- Si no hay horarios cargados, indica que no hay atencion en este momento
+- Si hay dias abiertos, mencionalos de forma natural y completa
+- No te quedes con un solo dia cuando existan varios
 
 Horario:
 ${schedule}
+Horario humano:
+${humanSchedule}
+Dias abiertos:
+${daysOpen}
 
 Formato de salida obligatorio:
 {
@@ -49,6 +64,8 @@ Tarea:
 - No inventar horarios ni cupos.
 - Mantener un tono cercano, corto y humano.
 - Si hay horarios sugeridos, mostrarlos en lista vertical.
+- Si no hay horarios del negocio, responde que no hay atencion en este momento.
+- No inventes dias como martes, sabados o promociones.
 
 Modo: ${params.mode}
 ${params.dateHint ? `Contexto fecha: ${params.dateHint}` : ''}

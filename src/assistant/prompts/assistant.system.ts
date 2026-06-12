@@ -4,7 +4,10 @@ export interface AssistantPromptContext {
   currentDate: string;
   currentTime: string;
   isClosedNow: boolean;
+  hasBusinessHours?: boolean;
   businessHours: string[];
+  businessHoursHuman?: string[];
+  businessDaysOpen?: string[];
   services: string[];
   servicesCatalog: Array<{
     name: string;
@@ -22,6 +25,8 @@ export interface AssistantPromptContext {
 
 export const buildAssistantSystemPrompt = (context: AssistantPromptContext) => {
   const businessHours = context.businessHours.join(' | ');
+  const businessHoursHuman = context.businessHoursHuman?.join(' | ') ?? '';
+  const businessDaysOpen = context.businessDaysOpen?.join(', ') ?? '';
   const services = context.services.join(', ');
   const staffNames = Object.keys(context.staffServices).join(', ');
 
@@ -57,9 +62,18 @@ CONTEXTO DEL NEGOCIO:
 Servicios disponibles: ${services}
 Barberos: ${staffNames}
 Horario: ${businessHours}
+Horario humano: ${businessHoursHuman || 'no disponible'}
+Dias abiertos: ${businessDaysOpen || 'no disponible'}
 Fecha actual: ${context.currentDateTime}
 Hora actual: ${context.currentTime}
 Estado actual: ${context.isClosedNow ? 'CLOSED' : 'OPEN'}
 Entities actuales: ${context.storedEntitiesJson ?? 'null'}
+
+REGLA DE CIERRE:
+- Si no hay horarios cargados o no hay dias abiertos, responde que no hay atencion en este momento.
+- Si hay horarios cargados, solo usa los dias realmente abiertos.
+HORA/HORARIO:
+- Si el usuario pregunta por dias u horarios, no inventes un solo dia.
+- Usa la informacion de dias abiertos y horario humano cuando exista.
 `.trim();
 };

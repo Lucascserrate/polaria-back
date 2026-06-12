@@ -6,6 +6,8 @@ export interface BookingPromptParams {
   entities: AssistantIntentEntities;
   services: string[];
   businessHours: string[];
+  businessHoursHuman?: string[];
+  hasBusinessHours?: boolean;
   staffNames?: string[];
 }
 
@@ -66,7 +68,7 @@ IMPORTANTE:
 - No uses comas para enumerar.
 - NO afirmes "no hay disponibilidad" (ni para hoy/mañana) sin haber verificado con horarios reales.
 - Si el usuario pide "para hoy" o pregunta "a qué hora puedo ir", responde pidiendo el servicio y la hora aproximada que prefiere.
-- Evita inventar restricciones como "solo martes" o "solo promo" a menos que el usuario lo haya dicho explícitamente.
+- Evita inventar restricciones de días, promociones o reglas especiales a menos que el usuario o los datos reales las indiquen.
 
 Servicios (max 6):
 ${formatVerticalList(params.services, {
@@ -154,13 +156,15 @@ ${buildOutputFormat({
 
 const buildShowHoursPrompt = (params: {
   businessHours: string[];
+  businessHoursHuman?: string[];
   entities: AssistantIntentEntities;
 }) =>
   `
 INTENCION: BOOKING
 Falta: hora.
 Tarea: pedir/mostrar horarios reales (NO inventar).
-Horario negocio: ${params.businessHours.join(' | ')}.
+Horario negocio: ${(params.businessHoursHuman ?? params.businessHours).join(' | ')}.
+${params.businessHours.length === 0 ? 'No hay horarios cargados: indica que no hay atencion en este momento.' : ''}
 
 Formato de salida obligatorio:
 ${buildOutputFormat({
@@ -190,7 +194,14 @@ ${buildOutputFormat({
 `.trim();
 
 export const buildBookingPromptAddon = (params: BookingPromptParams) => {
-  const { action, entities, services, businessHours, staffNames } = params;
+  const {
+    action,
+    entities,
+    services,
+    businessHours,
+    businessHoursHuman,
+    staffNames,
+  } = params;
 
   switch (action) {
     case AssistantAction.ASK_SERVICE:
@@ -200,7 +211,11 @@ export const buildBookingPromptAddon = (params: BookingPromptParams) => {
     case AssistantAction.ASK_STAFF:
       return buildAskStaffPrompt({ staffNames, entities });
     case AssistantAction.SHOW_HOURS:
-      return buildShowHoursPrompt({ businessHours, entities });
+      return buildShowHoursPrompt({
+        businessHours,
+        businessHoursHuman,
+        entities,
+      });
     case AssistantAction.CONFIRM_BOOKING:
       return buildConfirmBookingPrompt({ entities });
     default:
@@ -219,4 +234,3 @@ ${buildOutputFormat({
 `.trim();
   }
 };
-
