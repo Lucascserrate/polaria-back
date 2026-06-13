@@ -82,7 +82,9 @@ export class AuthService {
   async OAuthCallback(user: GoogleUserDto, res: Response) {
     try {
       const { data, notFound, notActive } = await this.oauthLogin(user);
-      const isProd = process.env.NODE_ENV === 'prod';
+      const isProd =
+        process.env.NODE_ENV === 'prod' ||
+        process.env.NODE_ENV === 'production';
       if (notFound) {
         res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
@@ -95,6 +97,7 @@ export class AuthService {
       const cookieOptions: CookieOptions = {
         secure: true,
         sameSite: 'none',
+        path: '/',
       };
 
       if (isProd) {
