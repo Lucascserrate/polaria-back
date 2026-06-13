@@ -17,6 +17,9 @@ type JwtAuthRequest = Request & {
   user: { sub: string; email?: string | null };
 };
 type RefreshRequest = Request & { cookies?: { refreshToken?: string } };
+type ValidateRequest = Request & {
+  cookies?: { accessToken?: string; refreshToken?: string };
+};
 
 const headerValue = (value: string | string[] | undefined) =>
   Array.isArray(value) ? (value[0] ?? 'undefined') : (value ?? 'undefined');
@@ -54,7 +57,10 @@ export class AuthController {
 
   @Get('validateToken')
   @UseGuards(AuthGuard('jwt'))
-  validateToken(@Req() req: JwtAuthRequest) {
+  validateToken(@Req() req: ValidateRequest & JwtAuthRequest) {
+    this.logger.log(
+      `validateToken called accessCookiePresent=${Boolean(req.cookies?.accessToken)} refreshCookiePresent=${Boolean(req.cookies?.refreshToken)} origin=${headerValue(req.headers.origin)} host=${headerValue(req.headers.host)}`,
+    );
     return this.authService.validateTenant(req.user);
   }
 

@@ -117,6 +117,10 @@ export class AuthService {
       res.cookie('refreshToken', data.tokens.refreshToken, cookieOptions);
 
       this.logger.log(
+        `Set-Cookie header=${JSON.stringify(res.getHeader('Set-Cookie'))}`,
+      );
+
+      this.logger.log(
         `Auth cookies set. redirectingTo=${CLIENT_BASE_URL ?? 'undefined'}`,
       );
 
