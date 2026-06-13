@@ -82,9 +82,6 @@ export class AuthService {
   async OAuthCallback(user: GoogleUserDto, res: Response) {
     try {
       const { data, notFound, notActive } = await this.oauthLogin(user);
-      const isProd =
-        process.env.NODE_ENV === 'prod' ||
-        process.env.NODE_ENV === 'production';
       if (notFound) {
         res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
@@ -99,10 +96,6 @@ export class AuthService {
         sameSite: 'none',
         path: '/',
       };
-
-      if (isProd) {
-        cookieOptions.domain = '.polaria.io';
-      }
 
       res.cookie('accessToken', data.tokens.accessToken, cookieOptions);
       res.cookie('refreshToken', data.tokens.refreshToken, cookieOptions);

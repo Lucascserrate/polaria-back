@@ -46,13 +46,6 @@ export class AuthController {
       sameSite: 'none',
       path: '/',
     };
-
-    if (
-      process.env.NODE_ENV === 'prod' ||
-      process.env.NODE_ENV === 'production'
-    ) {
-      cookieOptions.domain = '.polaria.io';
-    }
     res.clearCookie('accessToken', cookieOptions);
     res.clearCookie('refreshToken', cookieOptions);
 
