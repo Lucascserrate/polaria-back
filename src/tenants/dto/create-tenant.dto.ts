@@ -15,9 +15,10 @@ export class CreateTenantDto {
   @IsString()
   whatsappPhoneNumber!: string;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  whatsappPhoneId!: string;
+  whatsappPhoneId?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

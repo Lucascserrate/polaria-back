@@ -29,8 +29,8 @@ export class Tenant {
   @Column()
   whatsappPhoneNumber!: string;
 
-  @Column()
-  whatsappPhoneId!: string;
+  @Column({ type: 'text', nullable: true })
+  whatsappPhoneId?: string;
 
   @Column({ type: 'text', nullable: true })
   whatsappAccessToken?: string;
