@@ -44,7 +44,6 @@ export class AuthController {
     const cookieOptions: CookieOptions = {
       secure: true,
       sameSite: 'none',
-      path: '/',
     };
     res.clearCookie('accessToken', cookieOptions);
     res.clearCookie('refreshToken', cookieOptions);
