@@ -47,6 +47,9 @@ export class Tenant {
   @Column({ default: 'active' })
   status!: string;
 
+  @Column({ default: true })
+  aiEnabled!: boolean;
+
   @Column({ nullable: true })
   googleRefreshToken?: string;
 
