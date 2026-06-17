@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { AppointmentsService } from '../../appointments/appointments.service';
 import { ConversationsService } from '../../conversations/conversations.service';
 import { ConversationState } from '../../conversations/entities/conversation.entity';
@@ -12,6 +12,7 @@ import {
 } from '../utils/assistant-flow';
 import type { AssistantParsedResponse } from '../utils/assistant-response-parser';
 import { AssistantAvailabilityService } from './assistant-availability.service';
+import { buildPendingBookingSummary } from '../helpers/assistant-summary-builder';
 
 @Injectable()
 export class AssistantContextService {
@@ -108,6 +109,64 @@ export class AssistantContextService {
       },
     });
     return mergedEntities;
+  }
+
+  async markAssistantIntroduced(conversation: Conversation): Promise<void> {
+    if (conversation.contextJson?.hasAssistantIntroduced === true) return;
+    const nextContext = {
+      ...(conversation.contextJson ?? {}),
+      hasAssistantIntroduced: true,
+    };
+    await this.conversationsService.update(conversation.id, {
+      contextJson: nextContext,
+    });
+    conversation.contextJson = nextContext;
+  }
+
+  async markWantsShowHours(conversation: Conversation): Promise<void> {
+    const nextContext = {
+      ...(conversation.contextJson ?? {}),
+      wantsShowHours: true,
+    };
+    await this.conversationsService.update(conversation.id, {
+      contextJson: nextContext,
+    });
+    conversation.contextJson = nextContext;
+  }
+
+  async clearWantsShowHours(conversation: Conversation): Promise<void> {
+    if (conversation.contextJson?.wantsShowHours !== true) return;
+    const nextContext = {
+      ...(conversation.contextJson ?? {}),
+      wantsShowHours: false,
+    };
+    await this.conversationsService.update(conversation.id, {
+      contextJson: nextContext,
+    });
+    conversation.contextJson = nextContext;
+  }
+
+  async markWantsShowStaff(conversation: Conversation): Promise<void> {
+    const nextContext = {
+      ...(conversation.contextJson ?? {}),
+      wantsShowStaff: true,
+    };
+    await this.conversationsService.update(conversation.id, {
+      contextJson: nextContext,
+    });
+    conversation.contextJson = nextContext;
+  }
+
+  async clearWantsShowStaff(conversation: Conversation): Promise<void> {
+    if (conversation.contextJson?.wantsShowStaff !== true) return;
+    const nextContext = {
+      ...(conversation.contextJson ?? {}),
+      wantsShowStaff: false,
+    };
+    await this.conversationsService.update(conversation.id, {
+      contextJson: nextContext,
+    });
+    conversation.contextJson = nextContext;
   }
 
   async resolveBookingData(params: {
@@ -258,13 +317,12 @@ export class AssistantContextService {
             },
           },
         });
-        const summary = `Resumen de tu cita:\n- Servicio: ${
-          mergedEntities.services?.join(', ') ?? 'No definido'
-        }\n- Barbero: ${mergedEntities.staff ?? 'sin preferencia'}\n- Fecha: ${
-          bookingData.date
-        }\n- Hora: ${bookingData.time}\n¿Deseas confirmar la cita?`;
-
-        nextFinalReply = summary;
+        nextFinalReply = buildPendingBookingSummary({
+          services: mergedEntities.services ?? [],
+          staff: mergedEntities.staff ?? null,
+          date: bookingData.date,
+          time: bookingData.time,
+        });
         nextAction = undefined;
       }
     } else if (availabilityResult.isAvailable === false) {
@@ -313,6 +371,12 @@ export class AssistantContextService {
             appointmentCreated: true,
             appointmentId: createdAppointment.id,
             lastAppointmentKey: appointmentKey,
+            lastBookedEntities: {
+              services: mergedEntities.services ?? null,
+              staff: mergedEntities.staff ?? null,
+              date: bookingData.date,
+              time: bookingData.time,
+            },
             entities: clearedEntities,
             pendingBooking: undefined, // Limpiar también pendingBooking
           };
@@ -344,6 +408,30 @@ export class AssistantContextService {
         nextFinalReply =
           'Tu cita ya está confirmada. Si necesitas otra, inicia un nuevo agendamiento.';
       }
+    }
+
+    // Mantener el estado de conversación sincronizado con la próxima acción
+    // para que el router pueda usar shortcuts (p.ej. detectar selección de servicio/barbero).
+    if (nextAction === 'ASK_SERVICE') {
+      await this.conversationsService.update(conversation.id, {
+        currentState: ConversationState.ASK_SERVICE,
+        contextJson: {
+          ...(conversation.contextJson ?? {}),
+          entities: mergedEntities,
+        },
+      });
+      conversation.currentState = ConversationState.ASK_SERVICE;
+    }
+
+    if (nextAction === 'ASK_STAFF') {
+      await this.conversationsService.update(conversation.id, {
+        currentState: ConversationState.ASK_STAFF,
+        contextJson: {
+          ...(conversation.contextJson ?? {}),
+          entities: mergedEntities,
+        },
+      });
+      conversation.currentState = ConversationState.ASK_STAFF;
     }
 
     return {

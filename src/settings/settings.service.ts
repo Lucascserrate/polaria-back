@@ -7,6 +7,7 @@ type SettingsResponse = {
   polariaName: string;
   workingDays: boolean[];
   openingHours: { from: string; to: string } | null;
+  aiEnabled: boolean;
 };
 
 @Injectable()
@@ -29,6 +30,7 @@ export class SettingsService {
       polariaName: tenant.name,
       workingDays,
       openingHours,
+      aiEnabled: tenant.aiEnabled,
     };
   }
 
@@ -44,6 +46,15 @@ export class SettingsService {
     if (dto.polariaName && dto.polariaName !== tenant.name) {
       await this.tenantsService.update(tenantId, {
         name: dto.polariaName,
+      });
+    }
+
+    if (
+      typeof dto.aiEnabled === 'boolean' &&
+      dto.aiEnabled !== tenant.aiEnabled
+    ) {
+      await this.tenantsService.update(tenantId, {
+        aiEnabled: dto.aiEnabled,
       });
     }
 

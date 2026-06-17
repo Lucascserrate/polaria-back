@@ -67,6 +67,8 @@ export const buildResetContext = (conversation: Conversation) => ({
   // Mantener solo metadata no relacionada con entidades
   appointmentCreated: false,
   lastAppointmentKey: undefined,
+  hasAssistantIntroduced:
+    conversation.contextJson?.hasAssistantIntroduced === true,
   // Limpiar completamente las entidades y contexto de booking
   entities: clearEntities(
     conversation.contextJson?.entities as

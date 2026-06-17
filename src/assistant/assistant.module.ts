@@ -16,6 +16,7 @@ import { AssistantAIService } from './services/assistant-ai.service';
 import { AssistantContextService } from './services/assistant-context.service';
 import { AssistantMessagingService } from './services/assistant-messaging.service';
 import { AssistantPromptContextService } from './services/assistant-prompt-context.service';
+import { AssistantIntentRouterService } from './services/assistant-intent-router.service';
 import { AssistantSessionService } from './services/assistant-session.service';
 import { SettingsService } from '../settings/settings.service';
 import { AssistantReplyEnricherService } from './services/assistant-reply-enricher.service';
@@ -37,6 +38,7 @@ import { AssistantReplyEnricherService } from './services/assistant-reply-enrich
   providers: [
     AssistantService,
     AssistantPromptContextService,
+    AssistantIntentRouterService,
     AssistantAvailabilityService,
     AssistantAIService,
     AssistantMessagingService,

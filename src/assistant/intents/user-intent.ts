@@ -1,0 +1,5 @@
+export enum UserIntent {
+  GREETING = 'GREETING',
+  BOOKING_INTENT = 'BOOKING_INTENT',
+  UNKNOWN = 'UNKNOWN',
+}

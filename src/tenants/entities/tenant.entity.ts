@@ -29,8 +29,8 @@ export class Tenant {
   @Column()
   whatsappPhoneNumber!: string;
 
-  @Column()
-  whatsappPhoneId!: string;
+  @Column({ type: 'text', nullable: true })
+  whatsappPhoneId?: string;
 
   @Column({ type: 'text', nullable: true })
   whatsappAccessToken?: string;
@@ -45,7 +45,10 @@ export class Tenant {
   googleId?: string;
 
   @Column({ default: 'active' })
-  status!: string;
+  status?: string;
+
+  @Column({ default: true })
+  aiEnabled!: boolean;
 
   @Column({ nullable: true })
   googleRefreshToken?: string;
@@ -57,22 +60,22 @@ export class Tenant {
   calendarId?: string;
 
   @OneToMany(() => Staff, (staff) => staff.tenant)
-  staff!: Staff[];
+  staff?: Staff[];
 
   @OneToMany(() => Service, (service) => service.tenant)
-  services!: Service[];
+  services?: Service[];
 
   @OneToMany(() => Client, (client) => client.tenant)
-  clients!: Client[];
+  clients?: Client[];
 
   @OneToMany(() => Conversation, (conversation) => conversation.tenant)
-  conversations!: Conversation[];
+  conversations?: Conversation[];
 
   @OneToMany(() => Message, (message) => message.tenant)
-  messages!: Message[];
+  messages?: Message[];
 
   @OneToMany(() => BusinessHour, (businessHour) => businessHour.tenant)
-  businessHours!: BusinessHour[];
+  businessHours?: BusinessHour[];
 
   @CreateDateColumn()
   createdAt!: Date;

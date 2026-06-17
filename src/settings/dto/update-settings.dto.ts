@@ -33,4 +33,8 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => OpeningHoursDto)
   openingHours?: OpeningHoursDto;
+
+  @IsOptional()
+  @IsBoolean()
+  aiEnabled?: boolean;
 }

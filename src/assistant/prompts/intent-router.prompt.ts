@@ -1,0 +1,62 @@
+import { AssistantIntent } from '../intents/assistant-intent';
+
+export const buildIntentRouterPrompt = (params: {
+  services: string[];
+  staffNames: string[];
+  businessHours: string[];
+  businessDaysOpen: string[];
+  conversationState: string;
+  currentDate: string;
+  tomorrowDate: string;
+}) => {
+  const {
+    services,
+    staffNames,
+    businessHours,
+    businessDaysOpen,
+    conversationState,
+    currentDate,
+    tomorrowDate,
+  } = params;
+  return `
+Clasifica intenciones para una barberia.
+Devuelve SOLO JSON valido.
+Sin markdown, sin explicaciones, sin texto extra.
+
+INTENTS: ${Object.values(AssistantIntent).join(', ')}
+
+ENTITIES:
+services: string[] | null
+staff: string | null
+date: YYYY-MM-DD | null
+time: HH:mm | null
+
+REGLAS:
+- Detecta la intencion principal.
+- Extrae solo datos mencionados explicitamente.
+- Convierte horas a HH:mm.
+- Si hay hora explicita, time no puede ser null.
+- Si el usuario dice "hoy", usa date = ${currentDate}.
+- Si el usuario dice "mañana", usa date = ${tomorrowDate}.
+- Si menciona un dia de la semana, convierte ese dia a la fecha real mas cercana usando los dias abiertos disponibles.
+- Usa OFF_TOPIC solo si no es barberia o reservas.
+- Si preguntan por servicios, usa ${AssistantIntent.ASK_SERVICES}.
+- Si piden horarios generales, usa ${AssistantIntent.ASK_HOURS}.
+- Si el estado es CONFIRM_APPOINTMENT y responde afirmativamente, usa ${AssistantIntent.CONFIRM_BOOKING}.
+- Si menciona "corte", "corte de cabello" o "corte de pelo" y existe "Corte clasico", usa services=["Corte clasico"].
+
+FECHAS:
+Hoy = ${currentDate}
+Manana = ${tomorrowDate}
+
+CONTEXTO:
+Servicios: ${services.length > 0 ? services.join(', ') : 'ninguno'}
+Barberos: ${staffNames.length > 0 ? staffNames.join(', ') : 'ninguno'}
+Horario: ${businessHours.length > 0 ? businessHours.join(' | ') : 'no disponible'}
+Dias abiertos: ${businessDaysOpen.length > 0 ? businessDaysOpen.join(', ') : 'no disponible'}
+Estado: ${conversationState}
+
+FORMATO:
+{"intent":"GREETING|ASK_SERVICES|ASK_HOURS|BOOKING|SHOW_HOURS|SUMMARY|CONFIRM_BOOKING|OFF_TOPIC","entities":{"services":["string"]|null,"staff":"string"|null,"date":"YYYY-MM-DD"|null,"time":"HH:mm"|null}}
+`.trim();
+};

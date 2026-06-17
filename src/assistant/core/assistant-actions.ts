@@ -1,5 +1,7 @@
 export enum AssistantAction {
   ASK_SERVICE = 'ASK_SERVICE',
+  ASK_DATE = 'ASK_DATE',
+  ASK_TIME = 'ASK_TIME',
   ASK_STAFF = 'ASK_STAFF',
   SHOW_HOURS = 'SHOW_HOURS',
   RESUMEN = 'RESUMEN',
@@ -12,4 +14,3 @@ export const isAssistantAction = (value: unknown): value is AssistantAction => {
     (Object.values(AssistantAction) as string[]).includes(value)
   );
 };
-
