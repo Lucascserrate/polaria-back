@@ -1,4 +1,4 @@
-import { HttpException, HttpStatus, Injectable } from '@nestjs/common';
+import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { CookieOptions, Response } from 'express';
 import { TenantsService } from '../tenants/tenants.service';
@@ -12,6 +12,8 @@ const jwtSecret = process.env.SECRET_JWT ?? '';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly jwtService: JwtService,
@@ -82,12 +84,21 @@ export class AuthService {
   async OAuthCallback(user: GoogleUserDto, res: Response) {
     try {
       const { data, notFound, notActive } = await this.oauthLogin(user);
-      const isProd = process.env.NODE_ENV === 'prod';
+      this.logger.log(
+        `OAuthCallback user=${user.email ?? 'unknown'} googleId=${user.googleId ?? 'missing'} notFound=${notFound} notActive=${notActive} tokensReady=${Boolean(data?.tokens?.accessToken && data?.tokens?.refreshToken)}`,
+      );
+
       if (notFound) {
+        this.logger.warn(
+          'OAuthCallback redirecting to /contact because tenant was not found',
+        );
         res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
       }
       if (notActive) {
+        this.logger.warn(
+          'OAuthCallback redirecting to /contact because tenant is not active',
+        );
         res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
       }
@@ -95,17 +106,30 @@ export class AuthService {
       const cookieOptions: CookieOptions = {
         secure: true,
         sameSite: 'none',
+        path: '/',
       };
 
-      if (isProd) {
-        cookieOptions.domain = '.polaria.io';
-      }
+      this.logger.log(
+        `Setting auth cookies secure=${cookieOptions.secure} sameSite=${cookieOptions.sameSite} path=${cookieOptions.path} domain=${cookieOptions.domain ?? 'host-only'}`,
+      );
 
       res.cookie('accessToken', data.tokens.accessToken, cookieOptions);
       res.cookie('refreshToken', data.tokens.refreshToken, cookieOptions);
 
+      this.logger.log(
+        `Set-Cookie header=${JSON.stringify(res.getHeader('Set-Cookie'))}`,
+      );
+
+      this.logger.log(
+        `Auth cookies set. redirectingTo=${CLIENT_BASE_URL ?? 'undefined'}`,
+      );
+
       res.redirect(`${CLIENT_BASE_URL}`);
-    } catch {
+    } catch (error) {
+      this.logger.error(
+        `OAuthCallback failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+        error instanceof Error ? error.stack : undefined,
+      );
       res.redirect(`${CLIENT_BASE_URL}/not-found`);
     }
   }

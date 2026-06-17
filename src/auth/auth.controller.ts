@@ -1,4 +1,12 @@
-import { Controller, Get, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Logger,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -9,9 +17,17 @@ type JwtAuthRequest = Request & {
   user: { sub: string; email?: string | null };
 };
 type RefreshRequest = Request & { cookies?: { refreshToken?: string } };
+type ValidateRequest = Request & {
+  cookies?: { accessToken?: string; refreshToken?: string };
+};
+
+const headerValue = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? (value[0] ?? 'undefined') : (value ?? 'undefined');
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly authService: AuthService) {}
 
   @Get('google')
@@ -24,32 +40,37 @@ export class AuthController {
     @Req() req: GoogleAuthRequest,
     @Res() res: Response,
   ) {
+    this.logger.log(
+      `Google callback hit origin=${headerValue(req.headers.origin)} host=${headerValue(req.headers.host)} proto=${headerValue(req.headers['x-forwarded-proto'])} userAgent=${headerValue(req.headers['user-agent'])}`,
+    );
     return this.authService.OAuthCallback(req.user, res);
   }
 
   @Post('refreshToken')
   refreshToken(@Req() req: RefreshRequest) {
+    this.logger.log(
+      `refreshToken called cookiePresent=${Boolean(req.cookies?.refreshToken)} origin=${headerValue(req.headers.origin)} host=${headerValue(req.headers.host)}`,
+    );
     const refreshToken = req.cookies?.refreshToken ?? '';
     return this.authService.refreshToken(refreshToken);
   }
 
   @Get('validateToken')
   @UseGuards(AuthGuard('jwt'))
-  validateToken(@Req() req: JwtAuthRequest) {
+  validateToken(@Req() req: ValidateRequest & JwtAuthRequest) {
+    this.logger.log(
+      `validateToken called accessCookiePresent=${Boolean(req.cookies?.accessToken)} refreshCookiePresent=${Boolean(req.cookies?.refreshToken)} origin=${headerValue(req.headers.origin)} host=${headerValue(req.headers.host)}`,
+    );
     return this.authService.validateTenant(req.user);
   }
 
   @Post('logout')
   logout(@Res() res: Response) {
+    this.logger.log('logout called, clearing auth cookies');
     const cookieOptions: CookieOptions = {
       secure: true,
       sameSite: 'none',
-      path: '/',
     };
-
-    if (process.env.NODE_ENV === 'prod') {
-      cookieOptions.domain = '.polaria.io';
-    }
     res.clearCookie('accessToken', cookieOptions);
     res.clearCookie('refreshToken', cookieOptions);
 
