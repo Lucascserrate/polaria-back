@@ -23,6 +23,7 @@ export class AssistantIntentRouterService {
     services: string[];
     staffNames: string[];
     businessHours: string[];
+    businessDaysOpen: string[];
     conversationState: string;
     currentDate: string;
   }): Promise<AssistantIntentRouterResult> {
@@ -265,6 +266,7 @@ export class AssistantIntentRouterService {
       services: params.services,
       staffNames: params.staffNames,
       businessHours: params.businessHours,
+      businessDaysOpen: params.businessDaysOpen,
       conversationState: params.conversationState,
       currentDate: params.currentDate,
       tomorrowDate: (() => {

@@ -106,6 +106,7 @@ export class AssistantService {
       messageText: input.messageText,
       services: promptContext.services,
       businessHours: promptContext.businessHours,
+      businessDaysOpen: promptContext.businessDaysOpen ?? [],
       staffNames: Object.keys(promptContext.staffServices),
       conversationState: conversation.currentState,
       currentDate: promptContext.currentDate,

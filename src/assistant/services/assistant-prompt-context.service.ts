@@ -75,6 +75,27 @@ export class AssistantPromptContextService {
     const businessHoursText = businessHours.map(
       (item) => `Dia ${item.dayOfWeek}: ${item.startTime}-${item.endTime}`,
     );
+    const dayNames = [
+      'domingo',
+      'lunes',
+      'martes',
+      'miercoles',
+      'jueves',
+      'viernes',
+      'sabado',
+    ];
+    const businessDaysOpen = [
+      ...new Set(businessHours.map((item) => item.dayOfWeek)),
+    ]
+      .sort((a, b) => a - b)
+      .map((day) => dayNames[day] ?? `dia ${day}`);
+    const businessHoursHuman = businessHoursText.map((line) => {
+      const match = line.match(/^Dia (\d): (\d{2}:\d{2})-(\d{2}:\d{2})$/);
+      if (!match) return line;
+      const dayIndex = Number(match[1]);
+      const dayName = dayNames[dayIndex] ?? `dia ${dayIndex}`;
+      return `${dayName}: ${match[2]} - ${match[3]}`;
+    });
     const serviceNames = services.map((item) => item.name);
     const servicesCatalog = services.map((item) => ({
       name: item.name,
@@ -96,6 +117,8 @@ export class AssistantPromptContextService {
     const baseContext = {
       timezone,
       businessHours: businessHoursText,
+      businessHoursHuman,
+      businessDaysOpen,
       services: serviceNames,
       servicesCatalog,
       staffServices,

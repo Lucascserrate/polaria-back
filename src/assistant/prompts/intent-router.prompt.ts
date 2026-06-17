@@ -4,6 +4,7 @@ export const buildIntentRouterPrompt = (params: {
   services: string[];
   staffNames: string[];
   businessHours: string[];
+  businessDaysOpen: string[];
   conversationState: string;
   currentDate: string;
   tomorrowDate: string;
@@ -12,11 +13,11 @@ export const buildIntentRouterPrompt = (params: {
     services,
     staffNames,
     businessHours,
+    businessDaysOpen,
     conversationState,
     currentDate,
     tomorrowDate,
   } = params;
-  console.log('Building intent router prompt with context:');
   return `
 Clasifica intenciones para una barberia.
 Devuelve SOLO JSON valido.
@@ -35,6 +36,9 @@ REGLAS:
 - Extrae solo datos mencionados explicitamente.
 - Convierte horas a HH:mm.
 - Si hay hora explicita, time no puede ser null.
+- Si el usuario dice "hoy", usa date = ${currentDate}.
+- Si el usuario dice "mañana", usa date = ${tomorrowDate}.
+- Si menciona un dia de la semana, convierte ese dia a la fecha real mas cercana usando los dias abiertos disponibles.
 - Usa OFF_TOPIC solo si no es barberia o reservas.
 - Si preguntan por servicios, usa ${AssistantIntent.ASK_SERVICES}.
 - Si piden horarios generales, usa ${AssistantIntent.ASK_HOURS}.
@@ -49,6 +53,7 @@ CONTEXTO:
 Servicios: ${services.length > 0 ? services.join(', ') : 'ninguno'}
 Barberos: ${staffNames.length > 0 ? staffNames.join(', ') : 'ninguno'}
 Horario: ${businessHours.length > 0 ? businessHours.join(' | ') : 'no disponible'}
+Dias abiertos: ${businessDaysOpen.length > 0 ? businessDaysOpen.join(', ') : 'no disponible'}
 Estado: ${conversationState}
 
 FORMATO:

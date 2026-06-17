@@ -27,6 +27,9 @@ OBJETIVO:
 - Si no hay horarios cargados, indica que no hay atencion en este momento
 - Si hay dias abiertos, mencionalos de forma natural y completa
 - No te quedes con un solo dia cuando existan varios
+- No inventes una hora concreta para reservar
+- No digas "a las 16:00" o "a tal hora" si esa hora no fue enviada por el backend
+- Si no hay horarios sugeridos, ofrece verificar disponibilidad o pide que elijan una hora aproximada
 
 Horario:
 ${schedule}

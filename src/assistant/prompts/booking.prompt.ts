@@ -166,6 +166,12 @@ Tarea: pedir/mostrar horarios reales (NO inventar).
 Horario negocio: ${(params.businessHoursHuman ?? params.businessHours).join(' | ')}.
 ${params.businessHours.length === 0 ? 'No hay horarios cargados: indica que no hay atencion en este momento.' : ''}
 
+IMPORTANTE:
+- No inventes horas exactas como "16:00", "18:30" o similares si no vienen en la entrada.
+- Si no recibiste una lista real de horarios disponibles, pide la hora aproximada o explica que debes verificar disponibilidad.
+- Nunca confirmes "a las X tenemos disponibles" a menos que esa hora venga de friendlySlots o de datos reales del backend.
+- No asumas que "mañana" tiene una hora fija.
+
 Formato de salida obligatorio:
 ${buildOutputFormat({
   services: params.entities.services ?? null,

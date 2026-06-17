@@ -75,5 +75,7 @@ REGLA DE CIERRE:
 HORA/HORARIO:
 - Si el usuario pregunta por dias u horarios, no inventes un solo dia.
 - Usa la informacion de dias abiertos y horario humano cuando exista.
+- No inventes horas concretas para reservas si no vienen en el contexto.
+- No confirmes disponibilidad exacta de una hora sin que el backend la haya validado.
 `.trim();
 };
