@@ -116,7 +116,8 @@ export class WebhookService {
       await this.sendTextMessageWithCredentials({
         to: from,
         message: reply,
-        accessToken: tenant.whatsappAccessToken,
+        accessToken:
+          tenant.whatsappSystemUserAccessToken ?? tenant.whatsappAccessToken,
         phoneNumberId: tenant.whatsappPhoneId ?? phoneNumberId,
       });
     } catch (error: unknown) {

@@ -9,9 +9,7 @@ export interface AssistantParsedResponse {
   };
 }
 
-export function parseAssistantResponse(
-  response: { content?: string | null },
-): {
+export function parseAssistantResponse(response: { content?: string | null }): {
   reply: string;
   entities?: AssistantParsedResponse['entities'];
   action?: string;

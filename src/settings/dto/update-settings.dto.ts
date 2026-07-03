@@ -17,6 +17,31 @@ class OpeningHoursDto {
   to!: string;
 }
 
+class WhatsappConnectionDto {
+  @IsString()
+  code!: string;
+
+  @IsOptional()
+  @IsString()
+  businessId?: string;
+
+  @IsOptional()
+  @IsString()
+  wabaId?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneNumberId?: string;
+
+  @IsOptional()
+  @IsString()
+  phoneNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  systemUserAccessToken?: string;
+}
+
 export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
@@ -37,4 +62,9 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsBoolean()
   aiEnabled?: boolean;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => WhatsappConnectionDto)
+  whatsappConnection?: WhatsappConnectionDto;
 }

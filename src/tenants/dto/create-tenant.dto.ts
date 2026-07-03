@@ -25,6 +25,26 @@ export class CreateTenantDto {
   @IsString()
   whatsappAccessToken?: string;
 
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  whatsappBusinessId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  whatsappWabaId?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  whatsappSystemUserAccessToken?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  whatsappVerifiedName?: string;
+
   @ApiProperty()
   @IsString()
   timezone!: string;
