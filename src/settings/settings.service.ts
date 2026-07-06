@@ -141,10 +141,7 @@ export class SettingsService {
       this.configService.get<string>('META_GRAPH_VERSION') ??
       this.configService.get<string>('WHATSAPP_GRAPH_VERSION') ??
       'v21.0';
-    const redirectUri =
-      this.configService.get<string>('META_REDIRECT_URI') ??
-      this.configService.get<string>('FACEBOOK_CALLBACK_URL') ??
-      this.configService.get<string>('PUBLIC_BASE_URL');
+    const redirectUri = this.configService.get<string>('META_REDIRECT_URI');
 
     if (!appId || !appSecret) {
       throw new NotFoundException('Meta app credentials are not configured');
