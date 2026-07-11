@@ -2,15 +2,18 @@ import {
   Controller,
   Get,
   Logger,
+  HttpStatus,
   Post,
   Req,
   Res,
+  Body,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import type { GoogleUserDto } from './dto/google-user.dto';
+import { LocalLoginDto } from './dto/local-login.dto';
 
 type GoogleAuthRequest = Request & { user: GoogleUserDto };
 type JwtAuthRequest = Request & {
@@ -44,6 +47,27 @@ export class AuthController {
       `Google callback hit origin=${headerValue(req.headers.origin)} host=${headerValue(req.headers.host)} proto=${headerValue(req.headers['x-forwarded-proto'])} userAgent=${headerValue(req.headers['user-agent'])}`,
     );
     return this.authService.OAuthCallback(req.user, res);
+  }
+
+  @Post('local-login')
+  async localLogin(@Body() body: LocalLoginDto, @Res() res: Response) {
+    this.logger.log(`localLogin called email=${body.email}`);
+    const session = await this.authService.localLogin(body);
+
+    if (session.notActive) {
+      return res.status(HttpStatus.UNAUTHORIZED).json(session);
+    }
+
+    const cookieOptions: CookieOptions = {
+      secure: true,
+      sameSite: 'none',
+      path: '/',
+    };
+
+    res.cookie('accessToken', session.data.tokens.accessToken, cookieOptions);
+    res.cookie('refreshToken', session.data.tokens.refreshToken, cookieOptions);
+
+    return res.status(session.statusCode).json(session);
   }
 
   @Post('refreshToken')

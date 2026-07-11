@@ -4,3 +4,8 @@ export enum AuthError {
   MISSING_TOKEN = 'Missing token',
   UNAUTHORIZED = 'Unauthorized',
 }
+
+export enum AuthProvider {
+  GOOGLE = 'GOOGLE',
+  LOCAL = 'LOCAL',
+}
