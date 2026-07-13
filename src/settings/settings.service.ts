@@ -131,12 +131,8 @@ export class SettingsService {
       `Starting embedded signup exchange tenantId=${tenantId} hasCode=${Boolean(payload.code)} payloadBusinessId=${payload.businessId ?? 'null'} payloadWabaId=${payload.wabaId ?? 'null'} payloadPhoneNumberId=${payload.phoneNumberId ?? 'null'} payloadPhoneNumber=${payload.phoneNumber ?? 'null'}`,
     );
 
-    const appId =
-      this.configService.get<string>('META_APP_ID') ??
-      this.configService.get<string>('FACEBOOK_APP_ID');
-    const appSecret =
-      this.configService.get<string>('META_APP_SECRET') ??
-      this.configService.get<string>('FACEBOOK_APP_SECRET');
+    const appId = this.configService.get<string>('META_APP_ID');
+    const appSecret = this.configService.get<string>('META_APP_SECRET');
     const graphVersion =
       this.configService.get<string>('META_GRAPH_VERSION') ??
       this.configService.get<string>('WHATSAPP_GRAPH_VERSION') ??
@@ -144,7 +140,9 @@ export class SettingsService {
     const redirectUri = this.configService.get<string>('META_REDIRECT_URI');
 
     if (!appId || !appSecret) {
-      throw new NotFoundException('Meta app credentials are not configured');
+      throw new NotFoundException(
+        'Meta WhatsApp credentials are not configured',
+      );
     }
     if (!redirectUri) {
       throw new NotFoundException('Meta redirect URI is not configured');
