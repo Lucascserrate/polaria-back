@@ -13,6 +13,7 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { SettingsService } from './settings.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { CompleteWhatsappEmbeddedSignupDto } from './dto/complete-whatsapp-embedded-signup.dto';
 
 @ApiTags('settings')
 @Controller('settings')
@@ -48,26 +49,15 @@ export class SettingsController {
   @Patch('whatsapp/embedded-signup')
   completeWhatsappEmbeddedSignup(
     @Req() req: Request,
-    @Body()
-    body: {
-      code?: string;
-      businessId?: string;
-      wabaId?: string;
-      phoneNumberId?: string;
-      phoneNumber?: string;
-      systemUserAccessToken?: string;
-    },
+    @Body() body: CompleteWhatsappEmbeddedSignupDto,
   ) {
     const tenantId = (req.user as { sub?: string }).sub;
     if (!tenantId) {
       throw new UnauthorizedException('Missing tenant id');
     }
-    if (!body.code) {
-      throw new UnauthorizedException('Missing authorization code');
-    }
 
     this.logger.log(
-      `Embedded signup request received tenantId=${tenantId} hasCode=${Boolean(body.code)} codeLength=${body.code.length} businessId=${body.businessId ?? 'null'} wabaId=${body.wabaId ?? 'null'} phoneNumberId=${body.phoneNumberId ?? 'null'} phoneNumber=${body.phoneNumber ?? 'null'}`,
+      `Embedded signup authorization code received tenantId=${tenantId}`,
     );
 
     return this.settingsService
@@ -81,7 +71,7 @@ export class SettingsController {
       })
       .then((result) => {
         this.logger.log(
-          `Embedded signup completed tenantId=${tenantId} connected=${result.whatsappConnection.connected} businessId=${result.whatsappConnection.businessId ?? 'null'} wabaId=${result.whatsappConnection.wabaId ?? 'null'} phoneNumberId=${result.whatsappConnection.phoneNumberId ?? 'null'} phoneNumber=${result.whatsappConnection.phoneNumber ?? 'null'} verifiedName=${result.whatsappConnection.verifiedName ?? 'null'}`,
+          `Embedded signup completed tenantId=${tenantId}`,
         );
         return result;
       })
