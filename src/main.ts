@@ -1,6 +1,4 @@
 import cookieParser from 'cookie-parser';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
 import { NestApplication, NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
@@ -11,31 +9,7 @@ const { CLIENT_BASE_URL, ADMIN_CLIENT_BASE_URL } = process.env;
 const logger = new Logger('Bootstrap');
 
 async function bootstrap() {
-  const keyPath = resolve(
-    process.cwd(),
-    '..',
-    'polaria-front',
-    'certificates',
-    'localhost-key.pem',
-  );
-  const certPath = resolve(
-    process.cwd(),
-    '..',
-    'polaria-front',
-    'certificates',
-    'localhost.pem',
-  );
-
-  logger.log(
-    `Bootstrapping HTTPS server keyPath=${keyPath} certPath=${certPath}`,
-  );
-
-  const app: NestApplication = await NestFactory.create(AppModule, {
-    httpsOptions: {
-      key: readFileSync(keyPath),
-      cert: readFileSync(certPath),
-    },
-  });
+  const app: NestApplication = await NestFactory.create(AppModule);
 
   const allowedOrigins = [CLIENT_BASE_URL, ADMIN_CLIENT_BASE_URL].filter(
     (origin): origin is string => Boolean(origin),
