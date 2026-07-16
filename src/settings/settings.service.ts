@@ -116,6 +116,7 @@ export class SettingsService {
     tenantId: string,
     payload: {
       code: string;
+      redirectUri?: string | null;
       businessId?: string | null;
       wabaId?: string | null;
       phoneNumberId?: string | null;
@@ -138,7 +139,9 @@ export class SettingsService {
       this.configService.get<string>('META_GRAPH_VERSION') ??
       this.configService.get<string>('WHATSAPP_GRAPH_VERSION') ??
       'v21.0';
-    const redirectUri = this.configService.get<string>('META_REDIRECT_URI');
+    const redirectUri =
+      payload.redirectUri ??
+      this.configService.get<string>('META_REDIRECT_URI');
 
     if (!appId || !appSecret) {
       throw new InternalServerErrorException(

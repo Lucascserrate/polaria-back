@@ -7,6 +7,10 @@ export class CompleteWhatsappEmbeddedSignupDto {
 
   @IsOptional()
   @IsString()
+  redirectUri?: string;
+
+  @IsOptional()
+  @IsString()
   businessId?: string;
 
   @IsOptional()
