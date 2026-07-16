@@ -3,6 +3,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
@@ -115,6 +116,7 @@ export class SettingsService {
     tenantId: string,
     payload: {
       code: string;
+      redirectUri?: string | null;
       businessId?: string | null;
       wabaId?: string | null;
       phoneNumberId?: string | null;
@@ -137,20 +139,27 @@ export class SettingsService {
       this.configService.get<string>('META_GRAPH_VERSION') ??
       this.configService.get<string>('WHATSAPP_GRAPH_VERSION') ??
       'v21.0';
-    const redirectUri = this.configService.get<string>('META_REDIRECT_URI');
+    const redirectUri =
+      payload.redirectUri ??
+      this.configService.get<string>('META_REDIRECT_URI');
+
+    this.logger.log(`[Embedded signup] redirectUri ${redirectUri}`);
 
     if (!appId || !appSecret) {
-      throw new NotFoundException(
+      throw new InternalServerErrorException(
         'Meta WhatsApp credentials are not configured',
       );
     }
     if (!redirectUri) {
-      throw new NotFoundException('Meta redirect URI is not configured');
+      throw new InternalServerErrorException(
+        'Meta redirect URI is not configured',
+      );
     }
 
     this.logger.log(
-      `Embedded signup OAuth exchange prepared tenantId=${tenantId} graphVersion=${graphVersion} redirectUri=${redirectUri} appIdSuffix=${appId.slice(-6)}`,
+      `Embedded signup OAuth exchange started tenantId=${tenantId}`,
     );
+    this.logger.log(`[Embedded signup] redirectUri ${redirectUri}`);
 
     const tokenEndpoint = `https://graph.facebook.com/${graphVersion}/oauth/access_token`;
     const tokenParams = new URLSearchParams({
@@ -160,10 +169,6 @@ export class SettingsService {
       code: payload.code,
       grant_type: 'authorization_code',
     });
-
-    this.logger.log(
-      `Embedded signup OAuth exchange request tenantId=${tenantId} endpoint=${tokenEndpoint} client_id=${appId} redirect_uri=${redirectUri} grant_type=authorization_code codeLength=${payload.code.length}`,
-    );
 
     const tokenResponse = await fetch(
       `${tokenEndpoint}?${tokenParams.toString()}`,
@@ -180,14 +185,14 @@ export class SettingsService {
     };
 
     this.logger.log(
-      `Embedded signup OAuth exchange response tenantId=${tenantId} ok=${tokenResponse.ok} status=${tokenResponse.status} hasAccessToken=${Boolean(tokenData.access_token)} tokenType=${tokenData.token_type ?? 'null'} expiresIn=${tokenData.expires_in ?? 'null'}`,
+      `Embedded signup OAuth exchange completed tenantId=${tenantId} ok=${tokenResponse.ok}`,
     );
 
     if (!tokenResponse.ok || !tokenData.access_token) {
       this.logger.error(
-        `Embedded signup token exchange failed tenantId=${tenantId} status=${tokenResponse.status} body=${JSON.stringify(tokenData)}`,
+        `Embedded signup token exchange failed tenantId=${tenantId} status=${tokenResponse.status}`,
       );
-      throw new NotFoundException(
+      throw new BadRequestException(
         tokenData.error?.message ??
           'Unable to exchange the Embedded Signup authorization code',
       );
@@ -196,15 +201,10 @@ export class SettingsService {
     const systemUserAccessToken =
       payload.systemUserAccessToken ?? tokenData.access_token;
 
-    this.logger.log(
-      `Embedded signup token exchange OK tenantId=${tenantId} tokenType=${tokenData.token_type ?? 'unknown'} expiresIn=${tokenData.expires_in ?? 'unknown'}`,
-    );
+    this.logger.log(`Embedded signup token exchange OK tenantId=${tenantId}`);
 
     const graphBaseUrl = `https://graph.facebook.com/${graphVersion}`;
     const graphGet = async <T>(path: string, accessToken: string) => {
-      this.logger.log(
-        `Embedded signup Graph request tenantId=${tenantId} path=${path}`,
-      );
       const response = await fetch(`${graphBaseUrl}${path}`, {
         method: 'GET',
         headers: {
@@ -215,11 +215,10 @@ export class SettingsService {
         error?: { message?: string; type?: string; code?: number };
       };
 
-      this.logger.log(
-        `Embedded signup Graph response tenantId=${tenantId} path=${path} ok=${response.ok} status=${response.status}`,
-      );
-
       if (!response.ok) {
+        this.logger.error(
+          `Embedded signup Graph request failed tenantId=${tenantId} path=${path} status=${response.status}`,
+        );
         throw new BadRequestException(
           data.error?.message ?? `Graph API request failed for ${path}`,
         );
@@ -251,9 +250,7 @@ export class SettingsService {
       systemUserAccessToken,
     );
 
-    this.logger.log(
-      `Embedded signup graph lookup tenantId=${tenantId} businessesCount=${meBusinesses?.data?.length ?? 0} wabasCount=${ownedWabas?.data?.length ?? 0}`,
-    );
+    this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
 
     const discoveredBusinessId =
       payload.businessId ?? meBusinesses.data?.[0]?.id ?? null;
@@ -275,24 +272,13 @@ export class SettingsService {
       !discoveredPhoneNumberId ||
       !discoveredPhoneNumber
     ) {
-      this.logger.error(
-        `Embedded signup Graph data incomplete tenantId=${tenantId} businessId=${discoveredBusinessId ?? 'null'} wabaId=${discoveredWabaId ?? 'null'} phoneNumberId=${discoveredPhoneNumberId ?? 'null'} phoneNumber=${discoveredPhoneNumber ?? 'null'} verifiedName=${discoveredVerifiedName ?? 'null'}`,
-      );
       throw new BadRequestException(
         'Meta did not return the expected business, WABA, or phone number data',
       );
     }
 
-    this.logger.log(
-      `Embedded signup normalized Graph data tenantId=${tenantId} businessId=${discoveredBusinessId} wabaId=${discoveredWabaId} phoneNumberId=${discoveredPhoneNumberId} phoneNumber=${discoveredPhoneNumber} verifiedName=${discoveredVerifiedName ?? 'null'}`,
-    );
-
     const updatedTenant = await this.dataSource.transaction(async (manager) => {
       const tenantRepository = manager.getRepository(Tenant);
-
-      this.logger.log(
-        `Embedded signup transaction started tenantId=${tenantId}`,
-      );
 
       const lockedTenant = await tenantRepository.findOne({
         where: { id: tenantId },
@@ -300,9 +286,6 @@ export class SettingsService {
       });
 
       if (!lockedTenant) {
-        this.logger.error(
-          `Embedded signup transaction tenant missing tenantId=${tenantId}`,
-        );
         throw new NotFoundException('Tenant not found');
       }
 
@@ -315,9 +298,6 @@ export class SettingsService {
         .andWhere('tenant.id != :tenantId', { tenantId })
         .getOne();
       if (tenantWithSamePhone) {
-        this.logger.error(
-          `Embedded signup phone collision detected tenantId=${tenantId} conflictingTenantId=${tenantWithSamePhone.id} phoneNumberId=${discoveredPhoneNumberId}`,
-        );
         throw new ConflictException(
           'This WhatsApp phone number is already connected to another tenant',
         );
@@ -330,9 +310,6 @@ export class SettingsService {
         .andWhere('tenant.id != :tenantId', { tenantId })
         .getOne();
       if (tenantWithSameWaba) {
-        this.logger.error(
-          `Embedded signup WABA collision detected tenantId=${tenantId} conflictingTenantId=${tenantWithSameWaba.id} wabaId=${discoveredWabaId}`,
-        );
         throw new ConflictException(
           'This WhatsApp Business Account is already connected to another tenant',
         );
@@ -347,21 +324,11 @@ export class SettingsService {
       lockedTenant.whatsappAccessToken = systemUserAccessToken;
       lockedTenant.whatsappConnectedAt = new Date();
 
-      this.logger.log(
-        `Embedded signup saving tenant tenantId=${tenantId} businessId=${lockedTenant.whatsappBusinessId} wabaId=${lockedTenant.whatsappWabaId} phoneNumberId=${lockedTenant.whatsappPhoneId} phoneNumber=${lockedTenant.whatsappPhoneNumber} verifiedName=${lockedTenant.whatsappVerifiedName ?? 'null'}`,
-      );
-
       const savedTenant = await tenantRepository.save(lockedTenant);
-      this.logger.log(
-        `Embedded signup tenant persisted tenantId=${tenantId} savedBusinessId=${savedTenant.whatsappBusinessId ?? 'null'} savedWabaId=${savedTenant.whatsappWabaId ?? 'null'} savedPhoneNumberId=${savedTenant.whatsappPhoneId ?? 'null'} savedPhoneNumber=${savedTenant.whatsappPhoneNumber ?? 'null'} savedVerifiedName=${savedTenant.whatsappVerifiedName ?? 'null'} savedConnectedAt=${savedTenant.whatsappConnectedAt?.toISOString() ?? 'null'}`,
-      );
+      this.logger.log(`Embedded signup tenant updated tenantId=${tenantId}`);
 
       return savedTenant;
     });
-
-    this.logger.log(
-      `Embedded signup tenant updated tenantId=${tenantId} businessId=${discoveredBusinessId ?? 'null'} wabaId=${discoveredWabaId ?? 'null'} phoneNumberId=${discoveredPhoneNumberId ?? 'null'} phoneNumber=${discoveredPhoneNumber ?? 'null'}`,
-    );
 
     if (!updatedTenant) {
       throw new NotFoundException('Tenant not found');
