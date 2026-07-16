@@ -143,6 +143,8 @@ export class SettingsService {
       payload.redirectUri ??
       this.configService.get<string>('META_REDIRECT_URI');
 
+    this.logger.log(`[Embedded signup] redirectUri ${redirectUri}`);
+
     if (!appId || !appSecret) {
       throw new InternalServerErrorException(
         'Meta WhatsApp credentials are not configured',
@@ -157,6 +159,7 @@ export class SettingsService {
     this.logger.log(
       `Embedded signup OAuth exchange started tenantId=${tenantId}`,
     );
+    this.logger.log(`[Embedded signup] redirectUri ${redirectUri}`);
 
     const tokenEndpoint = `https://graph.facebook.com/${graphVersion}/oauth/access_token`;
     const tokenParams = new URLSearchParams({
