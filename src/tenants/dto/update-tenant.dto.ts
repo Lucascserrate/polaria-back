@@ -6,6 +6,18 @@ import { AuthProvider } from '../../auth/domain/enums/auth.enum';
 export class UpdateTenantDto extends PartialType(CreateTenantDto) {
   @IsOptional()
   @IsString()
+  whatsappPhoneId?: string;
+
+  @IsOptional()
+  @IsString()
+  whatsappPhoneNumber?: string;
+
+  @IsOptional()
+  @IsString()
+  whatsappAccessToken?: string;
+
+  @IsOptional()
+  @IsString()
   whatsappBusinessId?: string;
 
   @IsOptional()
