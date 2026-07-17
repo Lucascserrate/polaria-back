@@ -12,6 +12,33 @@ import { Tenant } from '../tenants/entities/tenant.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
+import axios, { AxiosError } from 'axios';
+
+interface TokenResponse {
+  access_token?: string;
+  token_type?: string;
+  expires_in?: number;
+  error?: {
+    message?: string;
+  };
+}
+
+interface MetaErrorDetails {
+  message?: string;
+  code?: number;
+  error_subcode?: number;
+  type?: string;
+}
+
+interface MetaErrorResponse {
+  error?: MetaErrorDetails;
+}
+
+const isMetaAxiosError = (
+  error: unknown,
+): error is AxiosError<MetaErrorResponse> => {
+  return axios.isAxiosError<MetaErrorResponse>(error);
+};
 
 type SettingsResponse = {
   polariaName: string;
@@ -32,6 +59,7 @@ type SettingsResponse = {
 @Injectable()
 export class SettingsService {
   private readonly logger = new Logger(SettingsService.name);
+  private readonly consumedEmbeddedSignupCodes = new Set<string>();
 
   constructor(
     private readonly tenantsService: TenantsService,
@@ -153,7 +181,6 @@ export class SettingsService {
     tenantId: string,
     payload: {
       code: string;
-      redirectUri?: string | null;
       businessId?: string | null;
       wabaId?: string | null;
       phoneNumberId?: string | null;
@@ -176,61 +203,89 @@ export class SettingsService {
       this.configService.get<string>('META_GRAPH_VERSION') ??
       this.configService.get<string>('WHATSAPP_GRAPH_VERSION') ??
       'v21.0';
-    const redirectUri =
-      payload.redirectUri ??
-      this.configService.get<string>('META_REDIRECT_URI');
-
-    this.logger.log(`[Embedded signup] redirectUri ${redirectUri}`);
 
     if (!appId || !appSecret) {
       throw new InternalServerErrorException(
         'Meta WhatsApp credentials are not configured',
       );
     }
-    if (!redirectUri) {
-      throw new InternalServerErrorException(
-        'Meta redirect URI is not configured',
+
+    if (this.consumedEmbeddedSignupCodes.has(payload.code)) {
+      throw new BadRequestException(
+        'This Embedded Signup code was already consumed. Please start the flow again.',
       );
     }
 
+    this.consumedEmbeddedSignupCodes.add(payload.code);
+
     this.logger.log(
-      `Embedded signup OAuth exchange started tenantId=${tenantId}`,
+      `[Embedded signup] exchanging code ${payload.code.substring(0, 20)}...`,
     );
-    this.logger.log(`[Embedded signup] redirectUri ${redirectUri}`);
+    this.logger.log(
+      `[Embedded signup] params ${JSON.stringify({
+        client_id: appId,
+        has_client_secret: !!appSecret,
+      })}`,
+    );
 
     const tokenEndpoint = `https://graph.facebook.com/${graphVersion}/oauth/access_token`;
-    const tokenParams = new URLSearchParams({
-      client_id: appId,
-      redirect_uri: redirectUri,
-      client_secret: appSecret,
-      code: payload.code,
-      grant_type: 'authorization_code',
-    });
 
-    const tokenResponse = await fetch(
-      `${tokenEndpoint}?${tokenParams.toString()}`,
-      {
-        method: 'GET',
-      },
-    );
+    let tokenData: TokenResponse;
 
-    const tokenData = (await tokenResponse.json()) as {
-      access_token?: string;
-      token_type?: string;
-      expires_in?: number;
-      error?: { message?: string };
-    };
+    try {
+      const response = await axios.get<TokenResponse>(tokenEndpoint, {
+        params: {
+          client_id: appId,
+          client_secret: appSecret,
+          code: payload.code,
+        },
+      });
 
-    this.logger.log(
-      `Embedded signup OAuth exchange completed tenantId=${tenantId} ok=${tokenResponse.ok}`,
-    );
+      this.logger.debug(
+        '[Embedded signup] OAuth token response',
+        JSON.stringify(response.data),
+      );
+      tokenData = response.data;
+    } catch (error: unknown) {
+      const axiosError = isMetaAxiosError(error) ? error : null;
+      const metaError = axiosError?.response?.data?.error;
+      const errorMessage: string = metaError?.message ?? '';
+      const safeErrorMessage =
+        errorMessage ||
+        (error instanceof Error ? error.message : String(error));
 
-    if (!tokenResponse.ok || !tokenData.access_token) {
       this.logger.error(
-        `Embedded signup token exchange failed tenantId=${tenantId} status=${tokenResponse.status}`,
+        '[Embedded signup] Meta error',
+        JSON.stringify({
+          message: safeErrorMessage,
+          code: metaError?.code,
+          subcode: metaError?.error_subcode,
+          type: metaError?.type,
+        }),
+      );
+
+      if (metaError) {
+        const normalizedErrorMessage = safeErrorMessage;
+        if (
+          normalizedErrorMessage.includes('verification code') ||
+          normalizedErrorMessage.includes('consumed') ||
+          normalizedErrorMessage.includes('already')
+        ) {
+          throw new BadRequestException(
+            'This Embedded Signup code was already consumed. Please start the flow again.',
+          );
+        }
+      }
+
+      throw error;
+    }
+
+    if (!tokenData?.access_token) {
+      this.logger.error(
+        `[Embedded signup] token exchange failed tenantId=${tenantId} missing access_token`,
       );
       throw new BadRequestException(
-        tokenData.error?.message ??
+        tokenData?.error?.message ??
           'Unable to exchange the Embedded Signup authorization code',
       );
     }
@@ -282,9 +337,17 @@ export class SettingsService {
       '/me/businesses?fields=id,name',
       systemUserAccessToken,
     );
+    this.logger.debug(
+      '[Embedded signup] /me/businesses response',
+      JSON.stringify(meBusinesses),
+    );
     const ownedWabas = await graphGet<OwnedWabasResponse>(
       '/me/owned_whatsapp_business_accounts?fields=id,name',
       systemUserAccessToken,
+    );
+    this.logger.debug(
+      '[Embedded signup] /me/owned_whatsapp_business_accounts response',
+      JSON.stringify(ownedWabas),
     );
 
     this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
@@ -292,9 +355,18 @@ export class SettingsService {
     const discoveredBusinessId =
       payload.businessId ?? meBusinesses.data?.[0]?.id ?? null;
     const discoveredWabaId = payload.wabaId ?? ownedWabas.data?.[0]?.id ?? null;
+    if (!discoveredWabaId) {
+      throw new BadRequestException(
+        'Meta did not return a WhatsApp Business Account (WABA)',
+      );
+    }
     const wabaPhoneNumbers = await graphGet<{ data?: PhoneNumberNode[] }>(
-      `/${encodeURIComponent(discoveredWabaId!)}/phone_numbers?fields=id,display_phone_number,verified_name`,
+      `/${discoveredWabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
       systemUserAccessToken,
+    );
+    this.logger.debug(
+      '[Embedded signup] /phone_numbers response',
+      JSON.stringify(wabaPhoneNumbers),
     );
     const discoveredPhoneNumberId =
       payload.phoneNumberId ?? wabaPhoneNumbers.data?.[0]?.id ?? null;
@@ -302,6 +374,17 @@ export class SettingsService {
       wabaPhoneNumbers.data?.[0]?.display_phone_number ?? null;
     const discoveredVerifiedName =
       wabaPhoneNumbers.data?.[0]?.verified_name ?? null;
+
+    this.logger.debug(
+      '[Embedded signup] discovered identifiers',
+      JSON.stringify({
+        discoveredBusinessId,
+        discoveredWabaId,
+        discoveredPhoneNumberId,
+        discoveredPhoneNumber,
+        discoveredVerifiedName,
+      }),
+    );
 
     if (
       !discoveredBusinessId ||
