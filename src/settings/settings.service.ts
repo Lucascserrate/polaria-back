@@ -104,6 +104,43 @@ export class SettingsService {
       });
     }
 
+    if (dto.whatsappConnection) {
+      const { whatsappConnection } = dto;
+      const hasEmbeddedSignupPayload = Boolean(whatsappConnection.code);
+
+      if (hasEmbeddedSignupPayload) {
+        return this.completeWhatsappEmbeddedSignup(tenantId, {
+          code: whatsappConnection.code,
+          businessId: whatsappConnection.businessId ?? undefined,
+          wabaId: whatsappConnection.wabaId ?? undefined,
+          phoneNumberId: whatsappConnection.phoneNumberId ?? undefined,
+          phoneNumber: whatsappConnection.phoneNumber ?? undefined,
+          systemUserAccessToken:
+            whatsappConnection.systemUserAccessToken ?? undefined,
+        });
+      }
+
+      const updatedTenant = await this.tenantsService.update(tenantId, {
+        whatsappBusinessId:
+          whatsappConnection.businessId ?? tenant.whatsappBusinessId,
+        whatsappWabaId: whatsappConnection.wabaId ?? tenant.whatsappWabaId,
+        whatsappPhoneId:
+          whatsappConnection.phoneNumberId ?? tenant.whatsappPhoneId,
+        whatsappPhoneNumber:
+          whatsappConnection.phoneNumber ?? tenant.whatsappPhoneNumber,
+        whatsappSystemUserAccessToken:
+          whatsappConnection.systemUserAccessToken ??
+          tenant.whatsappSystemUserAccessToken,
+        whatsappAccessToken:
+          whatsappConnection.systemUserAccessToken ??
+          tenant.whatsappAccessToken,
+      });
+
+      if (!updatedTenant) {
+        throw new NotFoundException('Tenant not found');
+      }
+    }
+
     await this.businessHoursService.updateTenantHoursSettings(tenantId, {
       workingDays: dto.workingDays,
       openingHours: dto.openingHours,
