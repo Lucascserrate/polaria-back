@@ -332,7 +332,7 @@ export class SettingsService {
     type OwnedWabasResponse = { data?: OwnedWabaNode[] };
 
     const ownedWabas = await graphGet<OwnedWabasResponse>(
-      '/me/owned_whatsapp_business_accounts?fields=id,name',
+      '/me/whatsapp_business_accounts?fields=id,name',
       systemUserAccessToken,
     );
     this.logger.debug(
