@@ -332,7 +332,7 @@ export class SettingsService {
     type OwnedWabasResponse = { data?: OwnedWabaNode[] };
 
     const ownedWabas = await graphGet<OwnedWabasResponse>(
-      '/me/whatsapp_business_accounts?fields=id,name',
+      '/me/owned_whatsapp_business_accounts?fields=id,name',
       systemUserAccessToken,
     );
     this.logger.debug(
@@ -342,7 +342,27 @@ export class SettingsService {
 
     this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
 
-    const discoveredBusinessId = payload.businessId ?? null;
+    type BusinessNode = {
+      id?: string;
+      name?: string;
+    };
+
+    type MeBusinessesResponse = {
+      data?: BusinessNode[];
+    };
+
+    const meBusinesses = await graphGet<MeBusinessesResponse>(
+      '/me/businesses?fields=id,name',
+      systemUserAccessToken,
+    );
+
+    this.logger.debug(
+      '[Embedded signup] /me/businesses response',
+      JSON.stringify(meBusinesses),
+    );
+
+    const discoveredBusinessId =
+      payload.businessId ?? meBusinesses.data?.[0]?.id ?? null;
     const discoveredWabaId = payload.wabaId ?? ownedWabas.data?.[0]?.id ?? null;
     if (!discoveredWabaId) {
       throw new BadRequestException(
