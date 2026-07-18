@@ -5,12 +5,12 @@ import {
   BadRequestException,
   InternalServerErrorException,
 } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
-import { Logger } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import axios, { AxiosError } from 'axios';
 
@@ -193,9 +193,7 @@ export class SettingsService {
       throw new NotFoundException('Tenant not found');
     }
 
-    this.logger.log(
-      `Starting embedded signup exchange tenantId=${tenantId} hasCode=${Boolean(payload.code)} payloadBusinessId=${payload.businessId ?? 'null'} payloadWabaId=${payload.wabaId ?? 'null'} payloadPhoneNumberId=${payload.phoneNumberId ?? 'null'} payloadPhoneNumber=${payload.phoneNumber ?? 'null'}`,
-    );
+    this.logger.log(`Starting embedded signup exchange tenantId=${tenantId}`);
 
     const appId = this.configService.get<string>('META_APP_ID');
     const appSecret = this.configService.get<string>('META_APP_SECRET');
@@ -218,16 +216,6 @@ export class SettingsService {
 
     this.consumedEmbeddedSignupCodes.add(payload.code);
 
-    this.logger.log(
-      `[Embedded signup] exchanging code ${payload.code.substring(0, 20)}...`,
-    );
-    this.logger.log(
-      `[Embedded signup] params ${JSON.stringify({
-        client_id: appId,
-        has_client_secret: !!appSecret,
-      })}`,
-    );
-
     const tokenEndpoint = `https://graph.facebook.com/${graphVersion}/oauth/access_token`;
 
     let tokenData: TokenResponse;
@@ -241,10 +229,6 @@ export class SettingsService {
         },
       });
 
-      this.logger.debug(
-        '[Embedded signup] OAuth token response',
-        JSON.stringify(response.data),
-      );
       tokenData = response.data;
     } catch (error: unknown) {
       const axiosError = isMetaAxiosError(error) ? error : null;
@@ -345,26 +329,12 @@ export class SettingsService {
       `/${discoveredWabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
       systemUserAccessToken,
     );
-    this.logger.debug(
-      '[Embedded signup] /phone_numbers response',
-      JSON.stringify(wabaPhoneNumbers),
-    );
     const discoveredPhoneNumberId =
       payload.phoneNumberId ?? wabaPhoneNumbers.data?.[0]?.id ?? null;
     const discoveredPhoneNumber =
       wabaPhoneNumbers.data?.[0]?.display_phone_number ?? null;
     const discoveredVerifiedName =
       wabaPhoneNumbers.data?.[0]?.verified_name ?? null;
-
-    this.logger.debug(
-      '[Embedded signup] discovered identifiers',
-      JSON.stringify({
-        discoveredWabaId,
-        discoveredPhoneNumberId,
-        discoveredPhoneNumber,
-        discoveredVerifiedName,
-      }),
-    );
 
     if (
       !discoveredWabaId ||

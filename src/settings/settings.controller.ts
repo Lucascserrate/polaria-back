@@ -70,9 +70,7 @@ export class SettingsController {
         systemUserAccessToken: body.systemUserAccessToken,
       })
       .then((result) => {
-        this.logger.log(
-          `Embedded signup completed tenantId=${tenantId}`,
-        );
+        this.logger.log(`Embedded signup completed tenantId=${tenantId}`);
         return result;
       })
       .catch((error) => {
