@@ -269,7 +269,7 @@ export class SettingsService {
         if (
           normalizedErrorMessage.includes('verification code') ||
           normalizedErrorMessage.includes('consumed') ||
-          normalizedErrorMessage.includes('already')
+          normalizedErrorMessage.includes('already used')
         ) {
           throw new BadRequestException(
             'This Embedded Signup code was already consumed. Please start the flow again.',
@@ -319,29 +319,6 @@ export class SettingsService {
       return data;
     };
 
-    type PhoneNumberNode = {
-      id?: string;
-      display_phone_number?: string;
-      verified_name?: string;
-    };
-    type OwnedWabaNode = {
-      id?: string;
-      name?: string;
-      phone_numbers?: PhoneNumberNode[];
-    };
-    type OwnedWabasResponse = { data?: OwnedWabaNode[] };
-
-    const ownedWabas = await graphGet<OwnedWabasResponse>(
-      '/me/owned_whatsapp_business_accounts?fields=id,name',
-      systemUserAccessToken,
-    );
-    this.logger.debug(
-      '[Embedded signup] /me/owned_whatsapp_business_accounts response',
-      JSON.stringify(ownedWabas),
-    );
-
-    this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
-
     type BusinessNode = {
       id?: string;
       name?: string;
@@ -363,12 +340,26 @@ export class SettingsService {
 
     const discoveredBusinessId =
       payload.businessId ?? meBusinesses.data?.[0]?.id ?? null;
-    const discoveredWabaId = payload.wabaId ?? ownedWabas.data?.[0]?.id ?? null;
+    if (!discoveredBusinessId) {
+      throw new BadRequestException(
+        'Meta did not return a business account for this Embedded Signup',
+      );
+    }
+
+    this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
+
+    const discoveredWabaId = payload.wabaId ?? null;
     if (!discoveredWabaId) {
       throw new BadRequestException(
         'Meta did not return a WhatsApp Business Account (WABA)',
       );
     }
+
+    type PhoneNumberNode = {
+      id?: string;
+      display_phone_number?: string;
+      verified_name?: string;
+    };
     const wabaPhoneNumbers = await graphGet<{ data?: PhoneNumberNode[] }>(
       `/${discoveredWabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
       systemUserAccessToken,
