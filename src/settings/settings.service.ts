@@ -319,34 +319,15 @@ export class SettingsService {
       return data;
     };
 
-    type BusinessNode = {
-      id?: string;
-      name?: string;
-    };
+    this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
 
-    type MeBusinessesResponse = {
-      data?: BusinessNode[];
-    };
+    const discoveredBusinessId = payload.businessId ?? null;
 
-    const meBusinesses = await graphGet<MeBusinessesResponse>(
-      '/me/businesses?fields=id,name',
-      systemUserAccessToken,
-    );
-
-    this.logger.debug(
-      '[Embedded signup] /me/businesses response',
-      JSON.stringify(meBusinesses),
-    );
-
-    const discoveredBusinessId =
-      payload.businessId ?? meBusinesses.data?.[0]?.id ?? null;
     if (!discoveredBusinessId) {
       throw new BadRequestException(
-        'Meta did not return a business account for this Embedded Signup',
+        'Meta did not return a business_id in the Embedded Signup payload',
       );
     }
-
-    this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
 
     const discoveredWabaId = payload.wabaId ?? null;
     if (!discoveredWabaId) {
@@ -378,7 +359,6 @@ export class SettingsService {
     this.logger.debug(
       '[Embedded signup] discovered identifiers',
       JSON.stringify({
-        discoveredBusinessId,
         discoveredWabaId,
         discoveredPhoneNumberId,
         discoveredPhoneNumber,
@@ -387,7 +367,6 @@ export class SettingsService {
     );
 
     if (
-      !discoveredBusinessId ||
       !discoveredWabaId ||
       !discoveredPhoneNumberId ||
       !discoveredPhoneNumber
