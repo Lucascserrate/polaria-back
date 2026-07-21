@@ -3,6 +3,7 @@ import { AvailabilityCalculator } from './availability.calculator';
 import { AvailabilityRepository } from './availability.repository';
 import type {
   AvailabilityResult,
+  BookingRejectionReason,
   FindAvailableSlotsInput,
   StaffSlot,
 } from './utils/availability.types';
@@ -32,17 +33,17 @@ export class AvailabilityService {
       this.availabilityCalculator.calculateTotalDuration(services);
 
     if (totalDuration <= 0) {
-      return { isAvailable: false, suggestedSlots: [] };
+      return this.reject('INVALID_INPUT_DATA', 'Servicios inválidos o vacíos');
     }
 
     const tenant = await this.availabilityRepository.getTenant(input.tenantId);
     if (!tenant) {
-      return { isAvailable: false, suggestedSlots: [] };
+      return this.reject('INVALID_TENANT', 'Tenant inválido');
     }
 
     const timeZone = tenant.timezone;
     if (!timeZone) {
-      return { isAvailable: false, suggestedSlots: [] };
+      return this.reject('INVALID_TENANT', 'Tenant sin zona horaria');
     }
 
     const nowFormatted = new Intl.DateTimeFormat('en-CA', {
@@ -66,7 +67,10 @@ export class AvailabilityService {
       dayOfWeek,
     );
     if (businessHours.length === 0) {
-      return { isAvailable: false, suggestedSlots: [] };
+      return this.reject(
+        'OUTSIDE_BUSINESS_HOURS',
+        'El día solicitado no tiene horario de atención configurado',
+      );
     }
 
     const desiredStart = makeDateInTimeZone(desiredDate, desiredTime, timeZone);
@@ -115,7 +119,10 @@ export class AvailabilityService {
           input.tenantId,
         );
       if (staffCandidates.length === 0) {
-        return { isAvailable: false, suggestedSlots: [] };
+        return this.reject(
+          'STAFF_NOT_FOUND',
+          'No hay staff activo disponible para los servicios solicitados',
+        );
       }
 
       const appointmentsByStaff =
@@ -194,7 +201,10 @@ export class AvailabilityService {
         });
       }
     } else {
-      return { isAvailable: false, suggestedSlots: [] };
+      return this.reject(
+        'STAFF_CANNOT_PERFORM_SERVICE',
+        'No hay staff que pueda realizar todos los servicios solicitados',
+      );
     }
 
     const nowInTenantTz = makeDateInTimeZone(todayDate, nowTime, timeZone);
@@ -286,6 +296,12 @@ export class AvailabilityService {
       suggestedSlots: selected
         .slice(0, 3)
         .map((slot) => this.availabilityCalculator.toSuggestedSlot(slot)),
+      ...(selected.length === 0
+        ? {
+            rejectionReason: 'NO_AVAILABLE_SLOT' as BookingRejectionReason,
+            rejectionMessage: 'No hay disponibilidad para ese horario',
+          }
+        : {}),
     };
   }
 
@@ -314,6 +330,18 @@ export class AvailabilityService {
     return {
       isAvailable: availability.isAvailable,
       friendlySlots,
+    };
+  }
+
+  private reject(
+    reason: BookingRejectionReason,
+    message: string,
+  ): AvailabilityResult {
+    return {
+      isAvailable: false,
+      suggestedSlots: [],
+      rejectionReason: reason,
+      rejectionMessage: message,
     };
   }
 }

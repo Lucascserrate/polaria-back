@@ -50,7 +50,8 @@ export class CreateAppointmentDto {
 
   @ApiProperty({ type: String, format: 'date-time' })
   @IsDateString()
-  endTime!: Date;
+  @IsOptional()
+  endTime?: Date;
 
   @ApiPropertyOptional({ enum: AppointmentStatus })
   @IsOptional()
