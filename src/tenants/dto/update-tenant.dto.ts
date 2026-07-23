@@ -1,5 +1,5 @@
-import { PartialType } from '@nestjs/swagger';
-import { IsOptional, IsString } from 'class-validator';
+import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { IsDateString, IsOptional, IsString } from 'class-validator';
 import { CreateTenantDto } from './create-tenant.dto';
 import { AuthProvider } from '../../auth/domain/enums/auth.enum';
 
@@ -32,7 +32,10 @@ export class UpdateTenantDto extends PartialType(CreateTenantDto) {
   @IsString()
   whatsappVerifiedName?: string;
 
-  whatsappConnectedAt?: Date;
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  whatsappConnectedAt?: string;
 
   @IsOptional()
   @IsString()
