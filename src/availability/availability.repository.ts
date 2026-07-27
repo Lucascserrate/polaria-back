@@ -130,7 +130,11 @@ export class AvailabilityRepository {
       .innerJoin('as.appointment', 'a')
       .where('a.tenantId = :tenantId', { tenantId })
       .andWhere('a.status IN (:...statuses)', {
-        statuses: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+        statuses: [
+          AppointmentStatus.PENDING,
+          AppointmentStatus.BOOKED,
+          AppointmentStatus.CONFIRMED,
+        ],
       })
       .andWhere('as.staffId IN (:...staffIds)', { staffIds: uniqueStaffIds })
       .andWhere('as.startTime BETWEEN :dayStart AND :dayEnd', {
@@ -172,7 +176,11 @@ export class AvailabilityRepository {
       .innerJoin('as.appointment', 'a')
       .where('a.tenantId = :tenantId', { tenantId })
       .andWhere('a.status IN (:...statuses)', {
-        statuses: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+        statuses: [
+          AppointmentStatus.PENDING,
+          AppointmentStatus.BOOKED,
+          AppointmentStatus.CONFIRMED,
+        ],
       })
       .andWhere('as.startTime BETWEEN :dayStart AND :dayEnd', {
         dayStart,
