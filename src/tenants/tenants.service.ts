@@ -5,7 +5,6 @@ import { Repository } from 'typeorm';
 import { Tenant } from './entities/tenant.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
-import { AuthProvider } from '../auth/domain/enums/auth.enum';
 
 @Injectable()
 export class TenantsService {
@@ -35,22 +34,6 @@ export class TenantsService {
     return this.tenantRepository.findOneBy({ email });
   }
 
-  async createLocalIdentity(email: string): Promise<Tenant> {
-    const normalizedEmail = email.trim().toLowerCase();
-    const localPart = normalizedEmail.split('@')[0] || 'local-user';
-    const localTenant = this.tenantRepository.create({
-      name: localPart,
-      email: normalizedEmail,
-      timezone: 'America/La_Paz',
-      whatsappPhoneNumber: `LOCAL-${normalizedEmail}`,
-      status: 'active',
-      aiEnabled: true,
-      provider: AuthProvider.LOCAL,
-    });
-
-    return this.tenantRepository.save(localTenant);
-  }
-
   findByWhatsappPhoneId(whatsappPhoneId: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ whatsappPhoneId });
   }
@@ -64,7 +47,6 @@ export class TenantsService {
   async setGoogleId(id: string, googleId: string) {
     await this.tenantRepository.update(id, {
       googleId,
-      provider: AuthProvider.GOOGLE,
     });
     return this.findOne(id);
   }

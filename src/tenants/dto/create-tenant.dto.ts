@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsOptional, IsString } from 'class-validator';
-import { AuthProvider } from '../../auth/domain/enums/auth.enum';
 
 export class CreateTenantDto {
   @ApiProperty()
@@ -59,11 +58,6 @@ export class CreateTenantDto {
   @IsOptional()
   @IsString()
   googleId?: string;
-
-  @ApiPropertyOptional({ enum: AuthProvider })
-  @IsOptional()
-  @IsString()
-  provider?: AuthProvider;
 
   @ApiPropertyOptional()
   @IsOptional()
