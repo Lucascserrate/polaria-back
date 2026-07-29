@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Polaria Chat IA</title>
+    <title>Polaria Chat</title>
 
     <style>
       :root {
@@ -114,7 +114,7 @@
 
   <body>
     <header>
-      <h3>Polaria · Chat IA</h3>
+      <h3>Polaria · Chat guiado</h3>
     </header>
 
     <div class="container">
@@ -176,18 +176,21 @@
         messageInput.value = '';
 
         try {
-          const res = await fetch('/assistant/chat', {
+          const res = await fetch('/webhook/test-booking', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               tenantId,
               phone,
-              messageText: message,
+              event: {
+                type: 'text',
+                value: message,
+              },
             }),
           });
 
           const data = await res.json();
-          addBubble(data.reply || 'Sin respuesta', 'bot');
+          addBubble(data.reply?.text || 'Sin respuesta', 'bot');
           chatStatus.textContent = '';
         } catch {
           addBubble('Error de conexion', 'bot');

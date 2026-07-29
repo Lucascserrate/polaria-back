@@ -8,6 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WebhookService } from './webhook.service';
+import { BookingChannelEvent } from '../booking-flow/booking-flow.types';
 
 @Controller('webhook')
 export class WebhookController {
@@ -38,5 +39,17 @@ export class WebhookController {
   @Post()
   receiveMessage(@Body() body: unknown): Promise<void> {
     return this.webhookService.handleIncomingWhatsAppWebhook(body);
+  }
+
+  @Post('test-booking')
+  testBooking(
+    @Body()
+    body: {
+      tenantId: string;
+      phone: string;
+      event: BookingChannelEvent;
+    },
+  ) {
+    return this.webhookService.handleLocalBookingTest(body);
   }
 }

@@ -4,19 +4,19 @@ import { IsInt, IsString, IsUUID, Max, Min } from 'class-validator';
 export class CreateBusinessHourDto {
   @ApiProperty()
   @IsUUID()
-  tenantId: string;
+  tenantId!: string;
 
   @ApiProperty()
   @IsInt()
   @Min(0)
   @Max(6)
-  dayOfWeek: number;
+  dayOfWeek!: number;
 
   @ApiProperty()
   @IsString()
-  startTime: string;
+  startTime!: string;
 
   @ApiProperty()
   @IsString()
-  endTime: string;
+  endTime!: string;
 }
