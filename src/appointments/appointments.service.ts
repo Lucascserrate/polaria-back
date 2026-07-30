@@ -534,6 +534,66 @@ export class AppointmentsService {
     return appointment;
   }
 
+  /**
+   * Crea la reserva del flujo guiado.
+   *
+   * A diferencia de `createFromAssistant`, no vuelve a consultar disponibilidad:
+   * el horario y el profesional ya fueron revalidados por
+   * `BookingAvailabilityService.confirmSlot` inmediatamente antes. Repetir el
+   * cálculo acá, además de redundante, reintroduciría el suggester legado con sus
+   * criterios cosméticos.
+   *
+   * Un servicio por reserva, y por lo tanto un único segmento.
+   */
+  async createFromBookingFlow(input: {
+    tenantId: string;
+    clientId: string;
+    serviceId: string;
+    staffId: string;
+    startTime: Date;
+    endTime: Date;
+  }): Promise<Appointment> {
+    const service = await this.serviceRepository.findOne({
+      where: {
+        id: input.serviceId,
+        tenantId: input.tenantId,
+        isActive: true,
+      },
+    });
+
+    if (!service) {
+      throw new BadRequestException(
+        'El servicio no existe o no está activo para este tenant',
+      );
+    }
+
+    const appointment = await this.appointmentRepository.save(
+      this.appointmentRepository.create({
+        tenantId: input.tenantId,
+        clientId: input.clientId,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        status: AppointmentStatus.CONFIRMED,
+        reminderSent: false,
+      }),
+    );
+
+    await this.appointmentServiceRepository.save(
+      this.appointmentServiceRepository.create({
+        appointmentId: appointment.id,
+        serviceId: service.id,
+        staffId: input.staffId,
+        startTime: input.startTime,
+        endTime: input.endTime,
+        priceAtBooking: service.price,
+        durationAtBooking: service.durationMinutes,
+        sequenceOrder: 0,
+      }),
+    );
+
+    return appointment;
+  }
+
   async updateFromAssistant(input: {
     appointmentId: string;
     tenantId: string;

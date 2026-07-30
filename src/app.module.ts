@@ -22,6 +22,7 @@ import { WebhookController } from './webhook/webhook.controller';
 import { WebhookService } from './webhook/webhook.service';
 import { WebhookModule } from './webhook/webhook.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
+import { BookingFlowModule } from './booking-flow/booking-flow.module';
 
 @Module({
   imports: [
@@ -55,6 +56,7 @@ import { WhatsAppModule } from './whatsapp/whatsapp.module';
     SettingsModule,
     WebhookModule,
     WhatsAppModule,
+    BookingFlowModule,
   ],
   controllers: [WebhookController],
   providers: [WebhookService],
