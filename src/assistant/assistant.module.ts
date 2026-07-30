@@ -47,6 +47,9 @@ import { AssistantReplyEnricherService } from './services/assistant-reply-enrich
     AssistantContextService,
     AssistantReplyEnricherService,
   ],
-  exports: [AssistantService],
+  // `AssistantSessionService` se exporta porque el borde de entrada necesita
+  // resolver cliente y conversación antes de decidir si el mensaje va al flujo
+  // guiado o al asistente.
+  exports: [AssistantService, AssistantSessionService],
 })
 export class AssistantModule {}

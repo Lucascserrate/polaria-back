@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 
+import { BookingPromptRenderer } from './booking-prompt.renderer';
 import { WhatsAppSenderService } from './whatsapp-sender.service';
 
 /**
@@ -9,7 +10,7 @@ import { WhatsAppSenderService } from './whatsapp-sender.service';
  */
 @Module({
   imports: [ConfigModule],
-  providers: [WhatsAppSenderService],
-  exports: [WhatsAppSenderService],
+  providers: [WhatsAppSenderService, BookingPromptRenderer],
+  exports: [WhatsAppSenderService, BookingPromptRenderer],
 })
 export class WhatsAppModule {}

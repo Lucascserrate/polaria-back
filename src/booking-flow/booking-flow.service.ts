@@ -860,6 +860,7 @@ export class BookingFlowService {
       endTime: new Date(
         selectedSlotStart.getTime() + service.durationMinutes * 60_000,
       ),
+      timezone: await this.resolveTimezone(tenantId),
     };
   }
 

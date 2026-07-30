@@ -87,6 +87,8 @@ export type BookingSummary = {
   staffName: string | null;
   startTime: Date;
   endTime: Date;
+  /** Zona del negocio: el renderizador necesita formatear la hora sin resolverla. */
+  timezone: string;
 };
 
 // ---------------------------------------------------------------------------
