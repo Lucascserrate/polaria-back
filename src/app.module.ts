@@ -21,6 +21,7 @@ import { SettingsModule } from './settings/settings.module';
 import { WebhookController } from './webhook/webhook.controller';
 import { WebhookService } from './webhook/webhook.service';
 import { WebhookModule } from './webhook/webhook.module';
+import { WhatsAppModule } from './whatsapp/whatsapp.module';
 
 @Module({
   imports: [
@@ -53,6 +54,7 @@ import { WebhookModule } from './webhook/webhook.module';
     AvailabilityModule,
     SettingsModule,
     WebhookModule,
+    WhatsAppModule,
   ],
   controllers: [WebhookController],
   providers: [WebhookService],

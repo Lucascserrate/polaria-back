@@ -1,125 +1,44 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { AssistantService } from '../assistant/assistant.service';
 import { TenantsService } from '../tenants/tenants.service';
+import { parseIncomingWhatsAppMessage } from '../whatsapp/incoming-message.parser';
 import {
-  asObject,
-  getArrayField,
-  getObjectField,
-  getStringField,
-  normalizePhoneNumber,
-} from './webhook-meta.util';
+  IncomingMessageKind,
+  type IncomingWhatsAppMessage,
+} from '../whatsapp/types/incoming-message.type';
+import type { WhatsAppCredentials } from '../whatsapp/types/outgoing-message.type';
+import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
+import { normalizePhoneNumber } from './webhook-meta.util';
+import type { Tenant } from '../tenants/entities/tenant.entity';
 
-export type SendTextMessageArgs = {
-  to: string;
-  message: string;
-  accessToken?: string;
-  phoneNumberId?: string;
-};
+const UNSUPPORTED_MESSAGE_REPLY = 'Hola 👋';
 
 @Injectable()
 export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
 
   constructor(
-    private readonly configService: ConfigService,
     private readonly tenantsService: TenantsService,
     private readonly assistantService: AssistantService,
+    private readonly whatsAppSenderService: WhatsAppSenderService,
   ) {}
 
   async handleIncomingWhatsAppWebhook(body: unknown): Promise<void> {
     let metaMessageId: string | null = null;
 
     try {
-      const data = asObject(body);
-      if (!data) return;
+      const message = parseIncomingWhatsAppMessage(body);
+      if (!message) return;
 
-      const entry0Obj = asObject(getArrayField(data, 'entry')?.[0]);
-      if (!entry0Obj) return;
+      metaMessageId = message.metaMessageId;
 
-      const changes0Obj = asObject(getArrayField(entry0Obj, 'changes')?.[0]);
-      if (!changes0Obj) return;
+      const tenant = await this.resolveTenant(message);
+      if (!tenant) return;
 
-      const value = getObjectField(changes0Obj, 'value');
-      if (!value) return;
+      const credentials = this.resolveCredentials(tenant, message);
+      if (!credentials) return;
 
-      const messageObj = asObject(getArrayField(value, 'messages')?.[0]);
-      metaMessageId = messageObj ? getStringField(messageObj, 'id') : null;
-      const from = messageObj ? getStringField(messageObj, 'from') : null;
-      const textObj = messageObj ? getObjectField(messageObj, 'text') : null;
-      const incomingText = textObj ? getStringField(textObj, 'body') : null;
-
-      const contact0Obj = asObject(getArrayField(value, 'contacts')?.[0]);
-      const contactProfile = contact0Obj
-        ? getObjectField(contact0Obj, 'profile')
-        : null;
-      const contactName = contactProfile
-        ? getStringField(contactProfile, 'name')
-        : null;
-
-      const metadata = getObjectField(value, 'metadata');
-      const phoneNumberId = metadata
-        ? getStringField(metadata, 'phone_number_id')
-        : null;
-      const displayPhoneNumber = metadata
-        ? getStringField(metadata, 'display_phone_number')
-        : null;
-
-      if (!from || !phoneNumberId) return;
-
-      const normalizedDisplayPhone = displayPhoneNumber
-        ? normalizePhoneNumber(displayPhoneNumber)
-        : null;
-
-      const tenant = normalizedDisplayPhone
-        ? await this.tenantsService.findByWhatsappPhoneNumber(
-            normalizedDisplayPhone,
-          )
-        : null;
-
-      if (!tenant) {
-        this.logger.warn(
-          `Webhook dropped (metaMessageId=${String(
-            metaMessageId,
-          )}): no tenant match (displayPhoneNumber=${String(
-            displayPhoneNumber,
-          )}, from=${from}).`,
-        );
-        return;
-      }
-
-      if (incomingText) {
-        this.logger.log(
-          `Incoming WhatsApp text (metaMessageId=${String(
-            metaMessageId,
-          )}, tenantId=${tenant.id}, from=${from}): ${incomingText}`,
-        );
-      }
-
-      const reply = incomingText
-        ? (
-            await this.assistantService.chat({
-              tenantId: tenant.id,
-              phone: from,
-              clientName: contactName ?? undefined,
-              messageText: incomingText,
-            })
-          ).reply
-        : 'Hola 👋';
-
-      this.logger.log(
-        `AI reply (metaMessageId=${String(
-          metaMessageId,
-        )}, tenantId=${tenant.id}, to=${from}): ${reply}`,
-      );
-
-      await this.sendTextMessageWithCredentials({
-        to: from,
-        message: reply,
-        accessToken:
-          tenant.whatsappSystemUserAccessToken ?? tenant.whatsappAccessToken,
-        phoneNumberId: tenant.whatsappPhoneId ?? phoneNumberId,
-      });
+      await this.dispatch(message, tenant, credentials);
     } catch (error: unknown) {
       const errorMessage =
         error instanceof Error ? (error.stack ?? error.message) : String(error);
@@ -131,68 +50,120 @@ export class WebhookService {
     }
   }
 
-  async sendTextMessageWithCredentials({
-    to,
-    message,
-    accessToken,
-    phoneNumberId,
-  }: SendTextMessageArgs): Promise<void> {
-    if (!accessToken || !phoneNumberId) {
-      this.logger.warn(
-        `Missing WhatsApp credentials (to=${to}, phoneNumberId=${String(
-          phoneNumberId,
-        )})`,
-      );
-      return;
-    }
+  private async dispatch(
+    message: IncomingWhatsAppMessage,
+    tenant: Tenant,
+    credentials: WhatsAppCredentials,
+  ): Promise<void> {
+    const trace = `metaMessageId=${String(message.metaMessageId)}, tenantId=${
+      tenant.id
+    }, from=${message.from}`;
 
-    const trimmedMessage = message.trim();
-    if (trimmedMessage.length === 0) return;
+    switch (message.kind) {
+      case IncomingMessageKind.TEXT: {
+        this.logger.log(`Incoming WhatsApp text (${trace}): ${message.text}`);
 
-    const graphVersion =
-      this.configService.get<string>('WHATSAPP_GRAPH_VERSION') ?? 'v21.0';
-    const url = `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(
-      phoneNumberId,
-    )}/messages`;
+        const { reply } = await this.assistantService.chat({
+          tenantId: tenant.id,
+          phone: message.from,
+          clientName: message.contactName ?? undefined,
+          messageText: message.text,
+        });
 
-    const payload = {
-      messaging_product: 'whatsapp',
-      recipient_type: 'individual',
-      to,
-      type: 'text',
-      text: {
-        preview_url: false,
-        body: trimmedMessage,
-      },
-    };
+        this.logger.log(`AI reply (${trace}): ${reply}`);
+        await this.whatsAppSenderService.sendText(credentials, {
+          to: message.from,
+          body: reply,
+        });
+        return;
+      }
 
-    try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
-      });
-
-      const rawText = await response.text();
-      if (!response.ok) {
-        this.logger.error(
-          `WhatsApp send failed (status=${response.status}, to=${to}, phoneNumberId=${phoneNumberId}): ${rawText}`,
+      // Las respuestas interactivas son la entrada del flujo guiado de reservas.
+      // Todavía no hay máquina de estados que las consuma, así que se registran
+      // y se descartan; hoy es inalcanzable porque no enviamos componentes.
+      case IncomingMessageKind.BUTTON_REPLY:
+      case IncomingMessageKind.LIST_REPLY: {
+        this.logger.log(
+          `Incoming WhatsApp ${message.kind} (${trace}): selectionId=${message.selectionId}, title=${String(
+            message.title,
+          )}`,
         );
         return;
       }
 
-      this.logger.log(
-        `WhatsApp send OK (to=${to}, phoneNumberId=${phoneNumberId}): ${rawText}`,
-      );
-    } catch (error: unknown) {
-      const errorMessage =
-        error instanceof Error ? error.message : JSON.stringify(error);
-      this.logger.error(
-        `WhatsApp send error (to=${to}, phoneNumberId=${phoneNumberId}): ${errorMessage}`,
-      );
+      case IncomingMessageKind.FLOW_REPLY: {
+        this.logger.log(
+          `Incoming WhatsApp FLOW_REPLY (${trace}): flowToken=${String(
+            message.flowToken,
+          )}, parsed=${message.response ? 'yes' : 'no'}`,
+        );
+        if (!message.response && message.rawResponseJson) {
+          this.logger.warn(
+            `Flow response_json no parseable (${trace}): ${message.rawResponseJson}`,
+          );
+        }
+        return;
+      }
+
+      case IncomingMessageKind.UNSUPPORTED: {
+        this.logger.log(
+          `Incoming WhatsApp unsupported message (${trace}): type=${String(
+            message.messageType,
+          )}`,
+        );
+        await this.whatsAppSenderService.sendText(credentials, {
+          to: message.from,
+          body: UNSUPPORTED_MESSAGE_REPLY,
+        });
+        return;
+      }
     }
+  }
+
+  private async resolveTenant(
+    message: IncomingWhatsAppMessage,
+  ): Promise<Tenant | null> {
+    const normalizedDisplayPhone = message.displayPhoneNumber
+      ? normalizePhoneNumber(message.displayPhoneNumber)
+      : null;
+
+    const tenant = normalizedDisplayPhone
+      ? await this.tenantsService.findByWhatsappPhoneNumber(
+          normalizedDisplayPhone,
+        )
+      : null;
+
+    if (!tenant) {
+      this.logger.warn(
+        `Webhook dropped (metaMessageId=${String(
+          message.metaMessageId,
+        )}): no tenant match (displayPhoneNumber=${String(
+          message.displayPhoneNumber,
+        )}, from=${message.from}).`,
+      );
+      return null;
+    }
+
+    return tenant;
+  }
+
+  private resolveCredentials(
+    tenant: Tenant,
+    message: IncomingWhatsAppMessage,
+  ): WhatsAppCredentials | null {
+    const accessToken =
+      tenant.whatsappSystemUserAccessToken ?? tenant.whatsappAccessToken;
+    const phoneNumberId = tenant.whatsappPhoneId ?? message.phoneNumberId;
+
+    if (!accessToken || !phoneNumberId) {
+      this.logger.warn(
+        `Missing WhatsApp credentials (tenantId=${tenant.id}, to=${
+          message.from
+        }, phoneNumberId=${String(phoneNumberId)})`,
+      );
+      return null;
+    }
+
+    return { accessToken, phoneNumberId };
   }
 }
