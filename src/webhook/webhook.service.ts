@@ -1,18 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { AssistantSessionService } from '../assistant/services/assistant-session.service';
-import { BookingFlowEngine } from '../booking-flow/booking-flow.engine';
-import { WhatsappInteractiveAdapter } from '../booking-flow/whatsapp-interactive.adapter';
-import { ProcessedWhatsappMessageEntity } from '../booking-flow/entities/processed-message.entity';
-import {
-  BookingChannelEvent,
-  BookingReplyAction,
-} from '../booking-flow/booking-flow.types';
-import { ConversationsService } from '../conversations/conversations.service';
-import { MessageRole } from '../messages/entities/message.entity';
-import { MessagesService } from '../messages/messages.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { WhatsappMessageSenderService } from '../whatsapp/whatsapp-message-sender.service';
 import {
@@ -28,157 +14,112 @@ export class WebhookService {
   private readonly logger = new Logger(WebhookService.name);
 
   constructor(
-    private readonly configService: ConfigService,
     private readonly tenantsService: TenantsService,
-    private readonly assistantSessionService: AssistantSessionService,
-    private readonly conversationsService: ConversationsService,
-    private readonly bookingFlowEngine: BookingFlowEngine,
-    private readonly whatsappInteractiveAdapter: WhatsappInteractiveAdapter,
     private readonly whatsappMessageSenderService: WhatsappMessageSenderService,
-    private readonly messagesService: MessagesService,
-    @InjectRepository(ProcessedWhatsappMessageEntity)
-    private readonly processedRepository: Repository<ProcessedWhatsappMessageEntity>,
   ) {}
 
   async handleIncomingWhatsAppWebhook(body: unknown): Promise<void> {
+    this.logger.log(
+      `[Webhook] handleIncomingWhatsAppWebhook entered type=${typeof body} isArray=${Array.isArray(body)}`,
+    );
+    this.logger.log(`[Webhook] Body received: ${this.safeJson(body)}`);
+
     const parsed = this.parseIncoming(body);
-    if (!parsed) return;
-
-    const {
-      metaMessageId,
-      from,
-      contactName,
-      phoneNumberId,
-      displayPhoneNumber,
-      event,
-    } = parsed;
-
-    const tenant = await this.tenantsService.findByWhatsappPhoneNumber(
-      normalizePhoneNumber(displayPhoneNumber),
-    );
-    if (!tenant) return;
-
-    if (metaMessageId) {
-      const already = await this.processedRepository.findOneBy({
-        message_id: metaMessageId,
-      });
-      if (already) return;
-      await this.processedRepository.save({
-        message_id: metaMessageId,
-        user_phone: from,
-        processed_at: new Date(),
-      });
-    }
-
-    const { conversation, client } =
-      await this.assistantSessionService.getOrCreateSession({
-        tenantId: tenant.id,
-        phone: from,
-        clientName: contactName ?? undefined,
-      });
-
-    if (event.type === 'button' || event.type === 'list') {
-      this.logger.log(
-        `WhatsApp interactive reply received tenantId=${tenant.id} conversationId=${conversation.id} type=${event.type} value=${event.value}`,
+    if (!parsed) {
+      this.logger.warn(
+        `[Webhook] Payload ignored: could not parse incoming event keys=${this.describePayload(body)} reason=unsupported-or-missing-structure`,
       );
-      await this.messagesService.create({
-        tenantId: tenant.id,
-        conversationId: conversation.id,
-        clientId: client.id,
-        role: MessageRole.USER,
-        content: `${event.type}:${event.value}`,
-        rawJson: { event, metaMessageId, source: 'whatsapp' },
-      });
       return;
     }
 
-    const recentMessages = await this.messagesService.findRecentByConversation(
-      conversation.id,
-      1,
+    const { from, contactName, phoneNumberId, displayPhoneNumber, text } =
+      parsed;
+    this.logger.log(
+      `[Webhook] parseIncoming succeeded from=${from} phoneNumberId=${phoneNumberId} displayPhoneNumber=${displayPhoneNumber} contactName=${contactName ?? 'null'} text=${text ?? 'null'}`,
+    );
+    if (!text) {
+      this.logger.log(
+        `[Webhook] Incoming webhook ignored: non-text message from=${from} phoneNumberId=${phoneNumberId}`,
+      );
+      return;
+    }
+
+    this.logger.log(
+      `[Webhook] Searching tenant by phoneNumberId=${phoneNumberId} displayPhoneNumber=${displayPhoneNumber}`,
+    );
+    const tenant =
+      (await this.tenantsService.findByWhatsappPhoneId(phoneNumberId)) ??
+      (await this.tenantsService.findByWhatsappPhoneNumber(
+        normalizePhoneNumber(displayPhoneNumber),
+      )) ??
+      (await this.tenantsService.findByWhatsappPhoneNumber(displayPhoneNumber));
+
+    if (!tenant) {
+      this.logger.warn(
+        `[Webhook] No tenant matched phoneNumberId=${phoneNumberId} displayPhoneNumber=${displayPhoneNumber} from=${from}`,
+      );
+      return;
+    }
+
+    this.logger.log(
+      `[Webhook] Tenant identified tenantId=${tenant.id} tenantName=${tenant.name}`,
+    );
+    this.logger.log(
+      `[Webhook] Incoming message details from=${from} text=${text}`,
     );
 
-    await this.messagesService.create({
-      tenantId: tenant.id,
-      conversationId: conversation.id,
-      clientId: client.id,
-      role: MessageRole.USER,
-      content: `${event.type}:${event.value}`,
-      rawJson: { event, metaMessageId, source: 'whatsapp' },
-    });
+    const replyText = `Hola, soy Polaria, el asistente virtual de ${tenant.name}.\n\n¿Cómo puedo ayudarte?`;
+    const replyPhoneNumberId = tenant.whatsappPhoneId ?? phoneNumberId;
+    const accessToken = tenant.whatsappAccessToken;
 
-    if (recentMessages.length === 0) {
-      await this.sendWelcomeMessage({
+    this.logger.log(
+      `[WhatsApp] Preparing fixed reply tenantId=${tenant.id} to=${from} replyPhoneNumberId=${replyPhoneNumberId} accessTokenPresent=${Boolean(accessToken)}`,
+    );
+
+    try {
+      const sent = await this.whatsappMessageSenderService.sendText({
         to: from,
-        businessName: tenant.name,
-        accessToken:
-          tenant.whatsappSystemUserAccessToken ?? tenant.whatsappAccessToken,
-        phoneNumberId: tenant.whatsappPhoneId ?? phoneNumberId,
+        text: replyText,
+        accessToken,
+        phoneNumberId: replyPhoneNumberId,
       });
-      return;
+
+      if (!sent) {
+        this.logger.warn(
+          `[WhatsApp] Reply skipped tenantId=${tenant.id} missing accessToken or phoneNumberId`,
+        );
+        return;
+      }
+
+      this.logger.log(
+        `[WhatsApp] Reply sent tenantId=${tenant.id} to=${from} usingPhoneNumberId=${replyPhoneNumberId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[WhatsApp] Reply failed tenantId=${tenant.id} to=${from} error=${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
-    const result = await this.bookingFlowEngine.handle(conversation, event);
-    await this.conversationsService.update(conversation.id, {
-      currentState: result.conversationState,
-      contextJson: result.contextJson,
-      lastMessageAt: new Date(),
-    });
-
-    const replyAction = result.reply;
-    const replyText = result.reply.text;
-    await this.messagesService.create({
-      tenantId: tenant.id,
-      conversationId: conversation.id,
-      clientId: client.id,
-      role: MessageRole.ASSISTANT,
-      content: replyText,
-      rawJson: replyAction ?? { booking: true },
-    });
-
-    await this.sendReply({
-      to: from,
-      replyText,
-      replyAction,
-      accessToken:
-        tenant.whatsappSystemUserAccessToken ?? tenant.whatsappAccessToken,
-      phoneNumberId: tenant.whatsappPhoneId ?? phoneNumberId,
-    });
-  }
-
-  async handleLocalBookingTest(body: {
-    tenantId: string;
-    phone: string;
-    event: BookingChannelEvent;
-  }) {
-    const tenant = await this.tenantsService.findOne(body.tenantId);
-    if (!tenant) throw new Error('Tenant no encontrado');
-    const { conversation } =
-      await this.assistantSessionService.getOrCreateSession({
-        tenantId: tenant.id,
-        phone: body.phone,
-      });
-    const result = await this.bookingFlowEngine.handle(
-      conversation,
-      body.event,
+    this.logger.log(
+      '[Webhook] handleIncomingWhatsAppWebhook completed successfully',
     );
-    console.log(JSON.stringify(result.reply, null, 2));
-    return result;
   }
 
   private parseIncoming(body: unknown): null | {
-    metaMessageId: string | null;
     from: string;
     contactName: string | null;
     phoneNumberId: string;
     displayPhoneNumber: string;
-    event: BookingChannelEvent;
+    text: string | null;
   } {
     const data = asObject(body);
     if (!data) return null;
 
     const entry0 = getArrayField(data, 'entry')?.[0];
     const entry0Obj = entry0 ? asObject(entry0) : null;
-    const changes0 = entry0Obj ? getArrayField(entry0Obj, 'changes')?.[0] : null;
+    const changes0 = entry0Obj
+      ? getArrayField(entry0Obj, 'changes')?.[0]
+      : null;
     const changes0Obj = changes0 ? asObject(changes0) : null;
     const value = changes0Obj ? getObjectField(changes0Obj, 'value') : null;
     if (!value) return null;
@@ -186,7 +127,6 @@ export class WebhookService {
     const messageObj = asObject(getArrayField(value, 'messages')?.[0]);
     if (!messageObj) return null;
 
-    const metaMessageId = getStringField(messageObj, 'id');
     const from = getStringField(messageObj, 'from');
     const contact0Obj = asObject(getArrayField(value, 'contacts')?.[0]);
     const contactProfile = contact0Obj
@@ -205,102 +145,29 @@ export class WebhookService {
 
     if (!from || !phoneNumberId || !displayPhoneNumber) return null;
 
-    const event = this.parseEvent(messageObj);
-    if (!event) return null;
+    const textObj = getObjectField(messageObj, 'text');
+    const text = textObj ? getStringField(textObj, 'body') : null;
 
     return {
-      metaMessageId,
       from,
       contactName,
       phoneNumberId,
       displayPhoneNumber,
-      event,
+      text,
     };
   }
 
-  private parseEvent(
-    messageObj: Record<string, unknown>,
-  ): BookingChannelEvent | null {
-    const textObj = getObjectField(messageObj, 'text');
-    if (textObj) {
-      return { type: 'text', value: getStringField(textObj, 'body') ?? '' };
-    }
-
-    const interactiveObj = getObjectField(messageObj, 'interactive');
-    if (!interactiveObj) return null;
-
-    const buttonReply = getObjectField(interactiveObj, 'button_reply');
-    if (buttonReply) {
-      return {
-        type: 'button',
-        value: getStringField(buttonReply, 'id') ?? '',
-      };
-    }
-
-    const listReply = getObjectField(interactiveObj, 'list_reply');
-    if (listReply) {
-      return {
-        type: 'list',
-        value: getStringField(listReply, 'id') ?? '',
-      };
-    }
-
-    // TODO: soportar interactive.nfm_reply / Flows.
-    return null;
+  private describePayload(body: unknown): string {
+    const data = asObject(body);
+    if (!data) return 'non-object';
+    return Object.keys(data).slice(0, 10).join(',');
   }
 
-  private async sendReply(params: {
-    to: string;
-    replyText: string;
-    replyAction: BookingReplyAction | null;
-    accessToken?: string | null;
-    phoneNumberId?: string | null;
-  }): Promise<void> {
-    const { to, replyAction, replyText, accessToken, phoneNumberId } = params;
-    if (!accessToken || !phoneNumberId) return;
-
-    const payload = replyAction
-      ? this.whatsappInteractiveAdapter.toWhatsAppPayload(to, replyAction)
-      : {
-          messaging_product: 'whatsapp',
-          recipient_type: 'individual',
-          to,
-          type: 'text',
-          text: { preview_url: false, body: replyText },
-        };
-
-    const graphVersion =
-      this.configService.get<string>('WHATSAPP_GRAPH_VERSION') ?? 'v21.0';
-    const url = `https://graph.facebook.com/${graphVersion}/${encodeURIComponent(phoneNumberId)}/messages`;
-    await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    });
-  }
-
-  private async sendWelcomeMessage(params: {
-    to: string;
-    businessName: string;
-    accessToken?: string | null;
-    phoneNumberId?: string | null;
-  }): Promise<void> {
-    const { to, businessName, accessToken, phoneNumberId } = params;
-    await this.whatsappMessageSenderService.sendInteractive({
-      to,
-      accessToken,
-      phoneNumberId,
-      message: {
-        kind: 'buttons',
-        text: `👋 ¡Hola! Soy Polaria, el asistente virtual de ${businessName}.\nEstoy aquí para ayudarte de forma rápida y sencilla.`,
-        buttons: [
-          { id: 'welcome_booking', title: '📅 Reservar cita' },
-          { id: 'welcome_info', title: 'ℹ️ Más información' },
-        ],
-      },
-    });
+  private safeJson(value: unknown): string {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '[unserializable-body]';
+    }
   }
 }
