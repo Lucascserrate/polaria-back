@@ -20,6 +20,23 @@ export enum AppointmentStatus {
   CANCELLED = 'cancelled',
   COMPLETED = 'completed',
 }
+
+/**
+ * Estados en los que una cita ocupa la agenda.
+ *
+ * Fuente única para dos cosas que deben coincidir siempre: qué citas descarta el
+ * cálculo de disponibilidad, y cuándo `appointment_services.activeStartTime` está
+ * poblado para que el índice único bloquee duplicados. Si divergieran, el índice
+ * rechazaría reservas que la disponibilidad considera libres.
+ */
+export const BLOCKING_APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
+  AppointmentStatus.PENDING,
+  AppointmentStatus.CONFIRMED,
+];
+
+export function blocksAgenda(status: AppointmentStatus): boolean {
+  return BLOCKING_APPOINTMENT_STATUSES.includes(status);
+}
 @Index(['tenantId', 'startTime'])
 @Entity('appointments')
 export class Appointment {

@@ -3,7 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
 import {
   Appointment,
-  AppointmentStatus,
+  BLOCKING_APPOINTMENT_STATUSES,
 } from '../appointments/entities/appointment.entity';
 import { AppointmentService as AppointmentServiceEntity } from '../appointments/entities/appointment_service.entity';
 import { BusinessHour } from '../business_hours/entities/business_hour.entity';
@@ -138,7 +138,7 @@ export class AvailabilityRepository {
       .innerJoin('as.appointment', 'a')
       .where('a.tenantId = :tenantId', { tenantId })
       .andWhere('a.status IN (:...statuses)', {
-        statuses: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+        statuses: [...BLOCKING_APPOINTMENT_STATUSES],
       })
       .andWhere('as.staffId IN (:...staffIds)', { staffIds: uniqueStaffIds })
       .andWhere('as.startTime BETWEEN :dayStart AND :dayEnd', {
@@ -180,7 +180,7 @@ export class AvailabilityRepository {
       .innerJoin('as.appointment', 'a')
       .where('a.tenantId = :tenantId', { tenantId })
       .andWhere('a.status IN (:...statuses)', {
-        statuses: [AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED],
+        statuses: [...BLOCKING_APPOINTMENT_STATUSES],
       })
       .andWhere('as.startTime BETWEEN :dayStart AND :dayEnd', {
         dayStart,

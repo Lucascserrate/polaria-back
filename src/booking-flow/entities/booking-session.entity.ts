@@ -90,6 +90,16 @@ export class BookingSession {
   @Column({ type: 'datetime', nullable: true })
   selectedSlotStart?: Date | null;
 
+  /**
+   * Página actual de la lista del paso en curso, para canales que no pueden
+   * mostrar todas las opciones de una vez.
+   *
+   * Es una sola columna para todos los pasos porque solo hay un componente vivo a
+   * la vez. Se reinicia automáticamente al cambiar de paso.
+   */
+  @Column({ type: 'int', default: 0 })
+  pageOffset!: number;
+
   // --- Control del flujo ---------------------------------------------------
 
   /**

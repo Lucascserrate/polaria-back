@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AppointmentsModule } from '../appointments/appointments.module';
@@ -7,6 +8,7 @@ import { ServicesModule } from '../services/services.module';
 import { StaffModule } from '../staff/staff.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { BookingFlowService } from './booking-flow.service';
+import { BookingSessionCleanupJob } from './booking-session-cleanup.job';
 import { BookingSessionService } from './booking-session.service';
 import { BookingSession } from './entities/booking-session.entity';
 
@@ -17,13 +19,18 @@ import { BookingSession } from './entities/booking-session.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([BookingSession]),
+    ScheduleModule.forRoot(),
     AvailabilityModule,
     AppointmentsModule,
     ServicesModule,
     StaffModule,
     TenantsModule,
   ],
-  providers: [BookingSessionService, BookingFlowService],
+  providers: [
+    BookingSessionService,
+    BookingFlowService,
+    BookingSessionCleanupJob,
+  ],
   exports: [BookingFlowService, BookingSessionService],
 })
 export class BookingFlowModule {}

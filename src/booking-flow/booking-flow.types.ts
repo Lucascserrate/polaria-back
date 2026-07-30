@@ -48,7 +48,19 @@ export const RESERVED_VALUES = {
   ANY_STAFF: 'any',
   CONFIRM: 'confirm',
   CANCEL: 'cancel',
+  /** Avanza a la página siguiente de horarios sin elegir ninguno. */
+  MORE: 'more',
 } as const;
+
+/**
+ * Capacidades del canal por el que se renderiza el flujo.
+ *
+ * Es lo único que el transporte le cuenta al flujo sobre sus límites. Una lista
+ * nativa de WhatsApp pasa 10; un Dropdown de Flows puede omitirlo.
+ */
+export type BookingChannelLimits = {
+  maxOptionsPerPrompt?: number;
+};
 
 /** Tiempo de inactividad tras el cual la sesión se considera abandonada. */
 export const BOOKING_SESSION_TTL_MINUTES = 15;

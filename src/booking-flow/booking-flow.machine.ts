@@ -118,6 +118,10 @@ export function isValueValidForState(
   state: BookingSessionState,
   value: string,
 ): boolean {
+  // "Ver más" es una respuesta legítima de cualquier paso paginado: no elige nada,
+  // avanza la página.
+  if (value === RESERVED_VALUES.MORE) return isPaginatedState(state);
+
   switch (state) {
     case BookingSessionState.ASK_WHEN:
       return (
@@ -142,6 +146,16 @@ export function isValueValidForState(
     default:
       return false;
   }
+}
+
+/** Pasos que se muestran como lista y por lo tanto pueden necesitar paginación. */
+export function isPaginatedState(state: BookingSessionState): boolean {
+  return (
+    state === BookingSessionState.ASK_DATE ||
+    state === BookingSessionState.ASK_SERVICE ||
+    state === BookingSessionState.ASK_STAFF ||
+    state === BookingSessionState.ASK_SLOT
+  );
 }
 
 /**

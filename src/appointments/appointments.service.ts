@@ -6,7 +6,7 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, Repository } from 'typeorm';
 
-import { Appointment } from './entities/appointment.entity';
+import { Appointment, blocksAgenda } from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { AvailabilityService } from '../availability/availability.service';
@@ -14,6 +14,10 @@ import { AppointmentService as AppointmentServiceEntity } from './entities/appoi
 import { Service } from '../services/entities/service.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import {
+  isDuplicateEntryError,
+  SlotAlreadyTakenError,
+} from './slot-already-taken.error';
 
 @Injectable()
 export class AppointmentsService {
@@ -130,6 +134,7 @@ export class AppointmentsService {
         serviceId: service.id,
         staffId: staffIdForService,
         startTime: segmentStart,
+        activeStartTime: blocksAgenda(saved.status) ? segmentStart : null,
         endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
@@ -138,11 +143,37 @@ export class AppointmentsService {
     });
 
     if (appointmentServices.length > 0) {
-      await this.appointmentServiceRepository.save(appointmentServices);
+      await this.saveSegments(appointmentServices, saved.id);
     }
 
     return saved;
   }
+
+  /**
+   * Persiste segmentos traduciendo el fallo del índice único a un conflicto
+   * explicable. `rollbackAppointmentId` borra la cita huérfana cuando la carrera
+   * se pierde: sin eso quedaría una cita sin segmentos.
+   */
+  private async saveSegments(
+    segments: AppointmentServiceEntity[],
+    rollbackAppointmentId?: string,
+  ): Promise<void> {
+    try {
+      await this.appointmentServiceRepository.save(segments);
+    } catch (error: unknown) {
+      if (rollbackAppointmentId) {
+        await this.appointmentRepository.delete({ id: rollbackAppointmentId });
+      }
+      if (isDuplicateEntryError(error)) {
+        const first = segments[0];
+        throw new ConflictException(
+          new SlotAlreadyTakenError(first.staffId, first.startTime).message,
+        );
+      }
+      throw error;
+    }
+  }
+
   async findAllByTenant(
     tenantId: string,
     page = 1,
@@ -520,6 +551,7 @@ export class AppointmentsService {
         serviceId: service.id,
         staffId: staffIdForService,
         startTime: segmentStart,
+        activeStartTime: blocksAgenda(appointment.status) ? segmentStart : null,
         endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
@@ -528,7 +560,7 @@ export class AppointmentsService {
     });
 
     if (appointmentServices.length > 0) {
-      await this.appointmentServiceRepository.save(appointmentServices);
+      await this.saveSegments(appointmentServices, appointment.id);
     }
 
     return appointment;
@@ -578,20 +610,71 @@ export class AppointmentsService {
       }),
     );
 
-    await this.appointmentServiceRepository.save(
-      this.appointmentServiceRepository.create({
-        appointmentId: appointment.id,
-        serviceId: service.id,
-        staffId: input.staffId,
-        startTime: input.startTime,
-        endTime: input.endTime,
-        priceAtBooking: service.price,
-        durationAtBooking: service.durationMinutes,
-        sequenceOrder: 0,
-      }),
-    );
+    try {
+      await this.appointmentServiceRepository.save(
+        this.appointmentServiceRepository.create({
+          appointmentId: appointment.id,
+          serviceId: service.id,
+          staffId: input.staffId,
+          startTime: input.startTime,
+          activeStartTime: input.startTime,
+          endTime: input.endTime,
+          priceAtBooking: service.price,
+          durationAtBooking: service.durationMinutes,
+          sequenceOrder: 0,
+        }),
+      );
+    } catch (error: unknown) {
+      // El índice único rechazó el segmento: otro cliente ganó la carrera entre la
+      // revalidación y esta inserción. Se deshace la cita huérfana y se informa
+      // como horario ocupado.
+      await this.appointmentRepository.delete({ id: appointment.id });
+
+      if (isDuplicateEntryError(error)) {
+        throw new SlotAlreadyTakenError(input.staffId, input.startTime);
+      }
+      throw error;
+    }
 
     return appointment;
+  }
+
+  /**
+   * Mantiene `activeStartTime` en línea con el estado de la cita.
+   *
+   * Cancelar libera el horario anulando la columna; reactivar lo vuelve a reclamar
+   * y puede chocar con el índice único, que es el comportamiento correcto: si
+   * alguien más tomó ese horario mientras la cita estaba cancelada, no se puede
+   * revivir sin más.
+   */
+  private async syncActiveSlot(
+    appointmentId: string,
+    status: AppointmentStatus | undefined,
+  ): Promise<void> {
+    if (!status) return;
+
+    const releasesSlot = !blocksAgenda(status);
+
+    const segments = await this.appointmentServiceRepository.find({
+      where: { appointmentId },
+    });
+    if (segments.length === 0) return;
+
+    for (const segment of segments) {
+      segment.activeStartTime = releasesSlot ? null : segment.startTime;
+    }
+
+    try {
+      await this.appointmentServiceRepository.save(segments);
+    } catch (error: unknown) {
+      if (isDuplicateEntryError(error)) {
+        const first = segments[0];
+        throw new ConflictException(
+          new SlotAlreadyTakenError(first.staffId, first.startTime).message,
+        );
+      }
+      throw error;
+    }
   }
 
   async updateFromAssistant(input: {
@@ -660,6 +743,7 @@ export class AppointmentsService {
         serviceId: service.id,
         staffId: staffIdForService,
         startTime: segmentStart,
+        activeStartTime: blocksAgenda(appointment.status) ? segmentStart : null,
         endTime: segmentEnd,
         priceAtBooking: service.price,
         durationAtBooking: service.durationMinutes,
@@ -668,7 +752,7 @@ export class AppointmentsService {
     });
 
     if (appointmentServices.length > 0) {
-      await this.appointmentServiceRepository.save(appointmentServices);
+      await this.saveSegments(appointmentServices);
     }
 
     return appointment;
@@ -700,6 +784,9 @@ export class AppointmentsService {
       { id, tenantId },
       appointmentUpdates,
     );
+
+    // Un cambio de estado libera o reclama el horario en el índice único.
+    await this.syncActiveSlot(id, appointmentUpdates.status);
 
     if (serviceIds && serviceIds.length > 0) {
       const appointment = await this.appointmentRepository.findOne({
@@ -772,6 +859,9 @@ export class AppointmentsService {
             serviceId: service.id,
             staffId: staffIdForService,
             startTime: segmentStart,
+            activeStartTime: blocksAgenda(appointment.status)
+              ? segmentStart
+              : null,
             endTime: segmentEnd,
             priceAtBooking: service.price,
             durationAtBooking: service.durationMinutes,
@@ -780,7 +870,7 @@ export class AppointmentsService {
         });
 
         if (appointmentServices.length > 0) {
-          await this.appointmentServiceRepository.save(appointmentServices);
+          await this.saveSegments(appointmentServices);
         }
       }
     }

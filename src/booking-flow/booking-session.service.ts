@@ -17,6 +17,7 @@ export type BookingSelectionPatch = {
   staffPreference?: StaffPreference | null;
   selectedStaffId?: string | null;
   selectedSlotStart?: Date | null;
+  pageOffset?: number;
 };
 
 /**
@@ -102,6 +103,13 @@ export class BookingSessionService {
     now: Date;
   }): Promise<BookingSession> {
     const { session, state, selection, metaMessageId, now } = params;
+
+    // Cambiar de paso invalida la paginación del anterior. Si el llamador la fija
+    // explícitamente (por ejemplo, "ver más" dentro del mismo paso), manda él.
+    const changesStep = state !== session.state;
+    if (changesStep && selection?.pageOffset === undefined) {
+      session.pageOffset = 0;
+    }
 
     Object.assign(session, selection ?? {});
     session.state = state;

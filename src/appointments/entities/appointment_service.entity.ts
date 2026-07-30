@@ -13,6 +13,18 @@ import { Staff } from '../../staff/entities/staff.entity';
 @Index(['appointmentId', 'serviceId'])
 @Index(['staffId', 'startTime'])
 @Index(['staffId', 'startTime', 'endTime'])
+/**
+ * Última barrera contra reservas duplicadas: dos segmentos activos no pueden
+ * compartir profesional e instante de inicio.
+ *
+ * El índice va sobre `activeStartTime` y no sobre `startTime` a propósito. Cancelar
+ * una cita no borra sus segmentos, y la disponibilidad vuelve a ofrecer ese
+ * horario; con el índice sobre `startTime`, cualquier horario cancelado quedaría
+ * bloqueado para siempre. `activeStartTime` se anula al cancelar, y MySQL admite
+ * múltiples `NULL` en un índice único, así que los segmentos cancelados dejan de
+ * competir por el horario.
+ */
+@Index(['staffId', 'activeStartTime'], { unique: true })
 @Entity('appointment_services')
 export class AppointmentService {
   @PrimaryGeneratedColumn('uuid')
@@ -50,6 +62,14 @@ export class AppointmentService {
 
   @Column({ type: 'timestamp' })
   endTime!: Date;
+
+  /**
+   * Copia de `startTime` mientras el segmento ocupa realmente la agenda, y `NULL`
+   * cuando la cita fue cancelada. Solo existe para sostener el índice único que
+   * impide reservas duplicadas; para leer el horario usar siempre `startTime`.
+   */
+  @Column({ type: 'timestamp', nullable: true })
+  activeStartTime?: Date | null;
 
   @Column('decimal', { precision: 10, scale: 2 })
   priceAtBooking!: number;
