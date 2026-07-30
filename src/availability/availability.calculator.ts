@@ -28,9 +28,11 @@ export class AvailabilityCalculator {
     desiredDate: string,
     timeZone: string,
     durationMinutes: number,
+    // El flujo guiado usa un paso más grueso; el conversacional necesitaba 5
+    // para poder buscar el horario más cercano al que pedía el usuario.
+    stepMinutes = 5,
   ): SlotRange[] {
     const slots: SlotRange[] = [];
-    const stepMinutes = 5;
 
     for (const hours of businessHours) {
       const startTime = makeDateInTimeZone(

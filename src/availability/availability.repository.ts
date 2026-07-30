@@ -47,6 +47,14 @@ export class AvailabilityRepository {
     });
   }
 
+  /** Catálogo activo del negocio, ordenado por nombre. */
+  async getActiveServices(tenantId: string): Promise<Service[]> {
+    return this.serviceRepository.find({
+      where: { tenantId, isActive: true },
+      order: { name: 'ASC' },
+    });
+  }
+
   async getBusinessHours(
     tenantId: string,
     dayOfWeek: number,

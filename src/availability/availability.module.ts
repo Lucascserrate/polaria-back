@@ -10,6 +10,7 @@ import { AvailabilityController } from './availability.controller';
 import { AvailabilityCalculator } from './availability.calculator';
 import { AvailabilityRepository } from './availability.repository';
 import { AvailabilityService } from './availability.service';
+import { BookingAvailabilityService } from './booking/booking-availability.service';
 
 @Module({
   imports: [
@@ -27,7 +28,8 @@ import { AvailabilityService } from './availability.service';
     AvailabilityService,
     AvailabilityRepository,
     AvailabilityCalculator,
+    BookingAvailabilityService,
   ],
-  exports: [AvailabilityService],
+  exports: [AvailabilityService, BookingAvailabilityService],
 })
 export class AvailabilityModule {}
