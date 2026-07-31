@@ -168,13 +168,14 @@ export class InboundMessageService {
       return;
     }
 
-    // 3. Todo lo demás sigue siendo conversación libre con la IA.
-    const { reply } = await this.assistantService.chat({
-      tenantId,
-      phone: message.from,
-      clientName: message.contactName ?? undefined,
-      messageText: text,
-    });
+    // 3. Mientras la IA esté deshabilitada, respondemos con un texto fijo para
+    //    confirmar que el canal sigue vivo.
+    const reply =
+      'Gracias por escribirnos. En este momento te podemos ayudar con reservas. Si quieres agendar una cita, dime "reservar".';
+
+    this.logger.log(
+      `Respuesta fija enviada (tenantId=${tenantId}, clientId=${client.id}).`,
+    );
 
     await this.whatsAppSenderService.sendText(credentials, {
       to: message.from,

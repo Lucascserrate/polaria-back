@@ -63,15 +63,24 @@ export class WebhookService {
   private async resolveTenant(
     message: IncomingWhatsAppMessage,
   ): Promise<Tenant | null> {
+    const tenantByPhoneId = await this.tenantsService.findByWhatsappPhoneId(
+      message.phoneNumberId,
+    );
+    if (tenantByPhoneId) {
+      return tenantByPhoneId;
+    }
+
     const normalizedDisplayPhone = message.displayPhoneNumber
       ? normalizePhoneNumber(message.displayPhoneNumber)
       : null;
 
-    const tenant = normalizedDisplayPhone
-      ? await this.tenantsService.findByWhatsappPhoneNumber(
-          normalizedDisplayPhone,
-        )
-      : null;
+    const displayPhoneCandidates = normalizedDisplayPhone
+      ? [normalizedDisplayPhone, `+${normalizedDisplayPhone}`]
+      : [];
+
+    const tenant = await this.findTenantByWhatsappPhoneNumberCandidates(
+      displayPhoneCandidates,
+    );
 
     if (!tenant) {
       this.logger.warn(
@@ -85,6 +94,18 @@ export class WebhookService {
     }
 
     return tenant;
+  }
+
+  private async findTenantByWhatsappPhoneNumberCandidates(
+    candidates: string[],
+  ): Promise<Tenant | null> {
+    for (const candidate of candidates) {
+      const tenant =
+        await this.tenantsService.findByWhatsappPhoneNumber(candidate);
+      if (tenant) return tenant;
+    }
+
+    return null;
   }
 
   private resolveCredentials(
