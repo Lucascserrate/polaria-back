@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 
 export class CompleteWhatsappEmbeddedSignupDto {
   @IsString()
@@ -24,4 +24,13 @@ export class CompleteWhatsappEmbeddedSignupDto {
   @IsOptional()
   @IsString()
   systemUserAccessToken?: string;
+
+  /**
+   * `true` cuando Embedded Signup terminó con
+   * `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`: el número queda compartido entre
+   * la app de WhatsApp Business y Cloud API (Coexistence).
+   */
+  @IsOptional()
+  @IsBoolean()
+  coexistence?: boolean;
 }

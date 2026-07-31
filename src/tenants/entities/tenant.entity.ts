@@ -51,6 +51,17 @@ export class Tenant {
   @Column({ type: 'timestamp', nullable: true })
   whatsappConnectedAt?: Date;
 
+  /**
+   * Coexistence: el número sigue usándose desde la app de WhatsApp Business
+   * en paralelo a Cloud API. Cambia lo que se puede hacer con el número
+   * (no se registra, throughput fijo, llegan echoes de la app).
+   */
+  @Column({ default: false })
+  whatsappIsOnBusinessApp!: boolean;
+
+  @Column({ type: 'text', nullable: true })
+  whatsappPlatformType?: string;
+
   @Column()
   timezone!: string;
 

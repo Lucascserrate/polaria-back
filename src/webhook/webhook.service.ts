@@ -5,8 +5,27 @@ import { parseIncomingWhatsAppMessage } from '../whatsapp/incoming-message.parse
 import type { IncomingWhatsAppMessage } from '../whatsapp/types/incoming-message.type';
 import type { WhatsAppCredentials } from '../whatsapp/types/outgoing-message.type';
 import { InboundMessageService } from './inbound-message.service';
-import { normalizePhoneNumber } from './webhook-meta.util';
+import {
+  asObject,
+  getArrayField,
+  getStringField,
+  normalizePhoneNumber,
+} from './webhook-meta.util';
 import type { Tenant } from '../tenants/entities/tenant.entity';
+
+/**
+ * Campos que Meta solo entrega cuando el número está en Coexistence (app de
+ * WhatsApp Business + Cloud API sobre el mismo número).
+ *
+ * Hoy no se ingieren: `parseIncomingWhatsAppMessage` los descarta porque no
+ * traen `value.messages`. Se listan para poder distinguir en los logs un evento
+ * de Coexistence de un webhook malformado.
+ */
+const COEXISTENCE_WEBHOOK_FIELDS = new Set([
+  'history',
+  'smb_app_state_sync',
+  'smb_message_echoes',
+]);
 
 /**
  * Borde de entrada de WhatsApp.
@@ -27,6 +46,14 @@ export class WebhookService {
     let metaMessageId: string | null = null;
 
     try {
+      const coexistenceField = this.readCoexistenceField(body);
+      if (coexistenceField) {
+        this.logger.log(
+          `Webhook de Coexistence ignorado (field=${coexistenceField}).`,
+        );
+        return;
+      }
+
       const message = parseIncomingWhatsAppMessage(body);
       if (!message) return;
 
@@ -58,6 +85,20 @@ export class WebhookService {
         )}): ${errorMessage}`,
       );
     }
+  }
+
+  private readCoexistenceField(body: unknown): string | null {
+    const data = asObject(body);
+    if (!data) return null;
+
+    const entry = asObject(getArrayField(data, 'entry')?.[0]);
+    if (!entry) return null;
+
+    const change = asObject(getArrayField(entry, 'changes')?.[0]);
+    if (!change) return null;
+
+    const field = getStringField(change, 'field');
+    return field && COEXISTENCE_WEBHOOK_FIELDS.has(field) ? field : null;
   }
 
   private async resolveTenant(

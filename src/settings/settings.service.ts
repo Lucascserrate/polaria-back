@@ -53,6 +53,8 @@ type SettingsResponse = {
     phoneNumber: string | null;
     verifiedName: string | null;
     connectedAt: string | null;
+    isOnBusinessApp: boolean;
+    platformType: string | null;
   };
 };
 
@@ -100,6 +102,8 @@ export class SettingsService {
         connectedAt: tenant.whatsappConnectedAt
           ? tenant.whatsappConnectedAt.toISOString()
           : null,
+        isOnBusinessApp: Boolean(tenant.whatsappIsOnBusinessApp),
+        platformType: tenant.whatsappPlatformType ?? null,
       },
     };
   }
@@ -186,6 +190,7 @@ export class SettingsService {
       phoneNumberId?: string | null;
       phoneNumber?: string | null;
       systemUserAccessToken?: string | null;
+      coexistence?: boolean | null;
     },
   ): Promise<SettingsResponse> {
     const tenant = await this.tenantsService.findOne(tenantId);
@@ -303,6 +308,35 @@ export class SettingsService {
       return data;
     };
 
+    const graphPost = async <T>(
+      path: string,
+      accessToken: string,
+      body?: Record<string, unknown>,
+    ) => {
+      const response = await fetch(`${graphBaseUrl}${path}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = (await response.json()) as T & {
+        error?: { message?: string; type?: string; code?: number };
+      };
+
+      if (!response.ok) {
+        this.logger.error(
+          `Embedded signup Graph POST failed tenantId=${tenantId} path=${path} status=${response.status} message=${data.error?.message ?? ''}`,
+        );
+        throw new BadRequestException(
+          data.error?.message ?? `Graph API request failed for ${path}`,
+        );
+      }
+
+      return data;
+    };
+
     this.logger.log(`Embedded signup Graph data obtained tenantId=${tenantId}`);
 
     const discoveredBusinessId = payload.businessId ?? null;
@@ -320,21 +354,56 @@ export class SettingsService {
       );
     }
 
+    // Sin esta suscripción Meta no entrega los webhooks de la WABA recién
+    // vinculada (mensajes, y en Coexistence también echoes e historial).
+    try {
+      await graphPost(
+        `/${discoveredWabaId}/subscribed_apps`,
+        systemUserAccessToken,
+      );
+      this.logger.log(
+        `Embedded signup subscribed app to WABA tenantId=${tenantId} wabaId=${discoveredWabaId}`,
+      );
+    } catch (error: unknown) {
+      // Reintentar el signup no debería fallar solo porque la app ya estaba
+      // suscrita; se registra y se sigue.
+      this.logger.warn(
+        `Embedded signup could not subscribe app to WABA tenantId=${tenantId} wabaId=${discoveredWabaId} message=${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+
     type PhoneNumberNode = {
       id?: string;
       display_phone_number?: string;
       verified_name?: string;
+      platform_type?: string;
+      is_on_biz_app?: boolean;
     };
     const wabaPhoneNumbers = await graphGet<{ data?: PhoneNumberNode[] }>(
-      `/${discoveredWabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
+      `/${discoveredWabaId}/phone_numbers?fields=id,display_phone_number,verified_name,platform_type,is_on_biz_app`,
       systemUserAccessToken,
     );
+
+    // El flujo puede devolver una WABA con más de un número: se prioriza el que
+    // Meta reportó en la sesión de Embedded Signup.
+    const phoneNumberNode =
+      (payload.phoneNumberId
+        ? wabaPhoneNumbers.data?.find((node) => node.id === payload.phoneNumberId)
+        : undefined) ?? wabaPhoneNumbers.data?.[0];
+
     const discoveredPhoneNumberId =
-      payload.phoneNumberId ?? wabaPhoneNumbers.data?.[0]?.id ?? null;
+      phoneNumberNode?.id ?? payload.phoneNumberId ?? null;
     const discoveredPhoneNumber =
-      wabaPhoneNumbers.data?.[0]?.display_phone_number ?? null;
-    const discoveredVerifiedName =
-      wabaPhoneNumbers.data?.[0]?.verified_name ?? null;
+      phoneNumberNode?.display_phone_number ?? payload.phoneNumber ?? null;
+    const discoveredVerifiedName = phoneNumberNode?.verified_name ?? null;
+    const discoveredPlatformType = phoneNumberNode?.platform_type ?? null;
+
+    // Coexistence se confirma con el estado real del número en Graph; el flag
+    // del cliente solo es un fallback si Meta todavía no propagó el campo.
+    const isOnBusinessApp =
+      phoneNumberNode?.is_on_biz_app ?? Boolean(payload.coexistence);
 
     if (
       !discoveredWabaId ||
@@ -343,6 +412,20 @@ export class SettingsService {
     ) {
       throw new BadRequestException(
         'Meta did not return the expected business, WABA, or phone number data',
+      );
+    }
+
+    if (isOnBusinessApp) {
+      this.logger.log(
+        `Embedded signup coexistence detected tenantId=${tenantId} phoneNumberId=${discoveredPhoneNumberId} platformType=${String(discoveredPlatformType)}`,
+      );
+      // En Coexistence el número ya está registrado por la app de WhatsApp
+      // Business: no se llama a /register, solo se sincronizan datos.
+      await this.syncBusinessAppData(
+        tenantId,
+        discoveredPhoneNumberId,
+        systemUserAccessToken,
+        graphPost,
       );
     }
 
@@ -389,6 +472,8 @@ export class SettingsService {
       lockedTenant.whatsappPhoneId = discoveredPhoneNumberId;
       lockedTenant.whatsappPhoneNumber = discoveredPhoneNumber;
       lockedTenant.whatsappVerifiedName = discoveredVerifiedName ?? undefined;
+      lockedTenant.whatsappIsOnBusinessApp = isOnBusinessApp;
+      lockedTenant.whatsappPlatformType = discoveredPlatformType ?? undefined;
       lockedTenant.whatsappSystemUserAccessToken = systemUserAccessToken;
       lockedTenant.whatsappAccessToken = systemUserAccessToken;
       lockedTenant.whatsappConnectedAt = new Date();
@@ -404,5 +489,46 @@ export class SettingsService {
     }
 
     return this.getSettings(tenantId);
+  }
+
+  /**
+   * Coexistence: pide a Meta que empuje los contactos y el historial (últimos
+   * 180 días) de la app de WhatsApp Business hacia los webhooks
+   * `smb_app_state_sync` e `history`.
+   *
+   * Cada sync corre una sola vez por onboarding y hay 24 h desde que termina
+   * Embedded Signup para dispararlo; pasado ese plazo el negocio tiene que
+   * volver a conectarse. Es best-effort: si falla, la conexión igual queda
+   * usable para mensajería y solo se pierde el arrastre de datos.
+   */
+  private async syncBusinessAppData(
+    tenantId: string,
+    phoneNumberId: string,
+    accessToken: string,
+    graphPost: <T>(
+      path: string,
+      accessToken: string,
+      body?: Record<string, unknown>,
+    ) => Promise<T>,
+  ): Promise<void> {
+    const syncTypes = ['smb_app_state_sync', 'history'] as const;
+
+    for (const syncType of syncTypes) {
+      try {
+        await graphPost(`/${phoneNumberId}/smb_app_data`, accessToken, {
+          messaging_product: 'whatsapp',
+          sync_type: syncType,
+        });
+        this.logger.log(
+          `Coexistence sync requested tenantId=${tenantId} phoneNumberId=${phoneNumberId} syncType=${syncType}`,
+        );
+      } catch (error: unknown) {
+        this.logger.warn(
+          `Coexistence sync failed tenantId=${tenantId} phoneNumberId=${phoneNumberId} syncType=${syncType} message=${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
   }
 }

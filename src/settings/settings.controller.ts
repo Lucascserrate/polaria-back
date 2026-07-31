@@ -68,6 +68,7 @@ export class SettingsController {
         phoneNumberId: body.phoneNumberId,
         phoneNumber: body.phoneNumber,
         systemUserAccessToken: body.systemUserAccessToken,
+        coexistence: body.coexistence,
       })
       .then((result) => {
         this.logger.log(`Embedded signup completed tenantId=${tenantId}`);
