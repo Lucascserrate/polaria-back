@@ -7,7 +7,6 @@ import {
   Index,
   OneToMany,
 } from 'typeorm';
-import { AuthProvider } from '../../auth/domain/enums/auth.enum';
 import { Staff } from '../../staff/entities/staff.entity';
 import { Service } from '../../services/entities/service.entity';
 import { Client } from '../../clients/entities/client.entity';
@@ -70,13 +69,6 @@ export class Tenant {
 
   @Column({ nullable: true })
   googleId?: string;
-
-  @Column({
-    type: 'enum',
-    enum: AuthProvider,
-    default: AuthProvider.GOOGLE,
-  })
-  provider!: AuthProvider;
 
   @Column({ default: 'active' })
   status?: string;

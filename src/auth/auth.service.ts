@@ -3,11 +3,9 @@ import { JwtService } from '@nestjs/jwt';
 import { CookieOptions, Response } from 'express';
 import { TenantsService } from '../tenants/tenants.service';
 import { GoogleUserDto } from './dto/google-user.dto';
-import { LocalLoginDto } from './dto/local-login.dto';
 import { createJwtToken } from './utils/jwt-token.util';
-import { AuthError, AuthProvider } from './domain/enums/auth.enum';
+import { AuthError } from './domain/enums/auth.enum';
 import { TenantError } from '../tenants/enums/tenant.enum';
-import { Tenant } from '../tenants/entities/tenant.entity';
 
 const { CLIENT_BASE_URL } = process.env;
 const jwtSecret = process.env.SECRET_JWT ?? '';
@@ -20,34 +18,6 @@ export class AuthService {
     private readonly tenantsService: TenantsService,
     private readonly jwtService: JwtService,
   ) {}
-
-  private async createSessionResponse(tenant: Tenant | null) {
-    if (!tenant) {
-      throw new HttpException(TenantError.NOT_FOUND, HttpStatus.UNAUTHORIZED);
-    }
-    if (tenant.status && tenant.status !== 'active') {
-      return {
-        statusCode: HttpStatus.UNAUTHORIZED,
-        data: {
-          user: tenant,
-          tokens: null,
-        },
-        notFound: false as const,
-        notActive: true as const,
-      };
-    }
-
-    const tokens = createJwtToken(tenant, this.jwtService);
-    return {
-      statusCode: HttpStatus.OK,
-      data: {
-        user: tenant,
-        tokens,
-      },
-      notFound: false as const,
-      notActive: false as const,
-    };
-  }
 
   async oauthLogin(user: GoogleUserDto) {
     try {
@@ -80,11 +50,18 @@ export class AuthService {
             tokens: null,
           },
           notFound: true as const,
-          notActive: false as const,
         };
       }
 
-      return this.createSessionResponse(tenant);
+      const tokens = createJwtToken(tenant, this.jwtService);
+      return {
+        statusCode: HttpStatus.OK,
+        data: {
+          user: tenant,
+          tokens,
+        },
+        notFound: false as const,
+      };
     } catch {
       throw new HttpException(
         AuthError.LOGIN_FAILED,
@@ -95,9 +72,9 @@ export class AuthService {
 
   async OAuthCallback(user: GoogleUserDto, res: Response) {
     try {
-      const { data, notFound, notActive } = await this.oauthLogin(user);
+      const { data, notFound } = await this.oauthLogin(user);
       this.logger.log(
-        `OAuthCallback user=${user.email ?? 'unknown'} googleId=${user.googleId ?? 'missing'} notFound=${notFound} notActive=${notActive} tokensReady=${Boolean(data?.tokens?.accessToken && data?.tokens?.refreshToken)}`,
+        `OAuthCallback user=${user.email ?? 'unknown'} googleId=${user.googleId ?? 'missing'} notFound=${notFound} tokensReady=${Boolean(data?.tokens?.accessToken && data?.tokens?.refreshToken)}`,
       );
 
       if (notFound) {
@@ -107,14 +84,6 @@ export class AuthService {
         res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
       }
-      if (notActive) {
-        this.logger.warn(
-          'OAuthCallback redirecting to /contact because tenant is not active',
-        );
-        res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
-        return;
-      }
-
       const cookieOptions: CookieOptions = {
         secure: true,
         sameSite: 'none',
@@ -187,28 +156,5 @@ export class AuthService {
       message: 'Tenant is authenticated',
       user: tenant,
     };
-  }
-
-  async localLogin(body: LocalLoginDto) {
-    try {
-      const normalizedEmail = body.email.trim().toLowerCase();
-      let tenant = await this.tenantsService.findByEmail(normalizedEmail);
-
-      if (!tenant) {
-        tenant = await this.tenantsService.createLocalIdentity(normalizedEmail);
-      } else if (!tenant.provider) {
-        tenant = await this.tenantsService.update(tenant.id, {
-          provider: AuthProvider.LOCAL,
-        });
-      }
-
-      const session = await this.createSessionResponse(tenant);
-      return session;
-    } catch {
-      throw new HttpException(
-        AuthError.LOGIN_FAILED,
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
   }
 }
