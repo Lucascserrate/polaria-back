@@ -14,7 +14,7 @@ const configDB = {
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
   migrations: [__dirname + '/../migrations/*{.ts,.js}'],
   synchronize: true,
-  dropSchema: true,
+  dropSchema: false,
   legacySpatialSupport: false,
   logging: ['error'],
 };
