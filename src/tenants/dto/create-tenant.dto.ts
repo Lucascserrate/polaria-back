@@ -38,11 +38,6 @@ export class CreateTenantDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  whatsappSystemUserAccessToken?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsString()
   whatsappVerifiedName?: string;
 
   @ApiProperty()

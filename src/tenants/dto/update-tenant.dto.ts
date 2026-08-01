@@ -25,10 +25,6 @@ export class UpdateTenantDto extends PartialType(CreateTenantDto) {
 
   @IsOptional()
   @IsString()
-  whatsappSystemUserAccessToken?: string;
-
-  @IsOptional()
-  @IsString()
   whatsappVerifiedName?: string;
 
   @ApiPropertyOptional()

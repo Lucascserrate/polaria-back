@@ -11,6 +11,7 @@ import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { DataSource } from 'typeorm';
 import axios, { AxiosError } from 'axios';
 
@@ -77,7 +78,7 @@ export class SettingsService {
     }
 
     this.logger.log(
-      `Loading settings tenantId=${tenantId} tenantName=${tenant.name} hasWhatsappToken=${Boolean(tenant.whatsappSystemUserAccessToken)} hasPhoneId=${Boolean(tenant.whatsappPhoneId)} hasWabaId=${Boolean(tenant.whatsappWabaId)}`,
+      `Loading settings tenantId=${tenantId} tenantName=${tenant.name} hasWhatsappToken=${Boolean(readStoredCredential(tenant.whatsappAccessToken))} hasPhoneId=${Boolean(tenant.whatsappPhoneId)} hasWabaId=${Boolean(tenant.whatsappWabaId)}`,
     );
 
     const { workingDays, openingHours } =
@@ -90,9 +91,9 @@ export class SettingsService {
       aiEnabled: tenant.aiEnabled,
       whatsappConnection: {
         connected: Boolean(
-          tenant.whatsappSystemUserAccessToken &&
-          tenant.whatsappPhoneId &&
-          tenant.whatsappWabaId,
+          readStoredCredential(tenant.whatsappAccessToken) &&
+            readStoredCredential(tenant.whatsappPhoneId) &&
+            readStoredCredential(tenant.whatsappWabaId),
         ),
         businessId: tenant.whatsappBusinessId ?? null,
         wabaId: tenant.whatsappWabaId ?? null,
@@ -152,6 +153,10 @@ export class SettingsService {
         });
       }
 
+      const incomingAccessToken = readStoredCredential(
+        whatsappConnection.systemUserAccessToken,
+      );
+
       const updatedTenant = await this.tenantsService.update(tenantId, {
         whatsappBusinessId:
           whatsappConnection.businessId ?? tenant.whatsappBusinessId,
@@ -160,12 +165,9 @@ export class SettingsService {
           whatsappConnection.phoneNumberId ?? tenant.whatsappPhoneId,
         whatsappPhoneNumber:
           whatsappConnection.phoneNumber ?? tenant.whatsappPhoneNumber,
-        whatsappSystemUserAccessToken:
-          whatsappConnection.systemUserAccessToken ??
-          tenant.whatsappSystemUserAccessToken,
         whatsappAccessToken:
-          whatsappConnection.systemUserAccessToken ??
-          tenant.whatsappAccessToken,
+          incomingAccessToken ??
+          readStoredCredential(tenant.whatsappAccessToken),
       });
 
       if (!updatedTenant) {
@@ -280,7 +282,8 @@ export class SettingsService {
     }
 
     const systemUserAccessToken =
-      payload.systemUserAccessToken ?? tokenData.access_token;
+      readStoredCredential(payload.systemUserAccessToken) ??
+      tokenData.access_token;
 
     this.logger.log(`Embedded signup token exchange OK tenantId=${tenantId}`);
 
@@ -474,7 +477,6 @@ export class SettingsService {
       lockedTenant.whatsappVerifiedName = discoveredVerifiedName ?? undefined;
       lockedTenant.whatsappIsOnBusinessApp = isOnBusinessApp;
       lockedTenant.whatsappPlatformType = discoveredPlatformType ?? undefined;
-      lockedTenant.whatsappSystemUserAccessToken = systemUserAccessToken;
       lockedTenant.whatsappAccessToken = systemUserAccessToken;
       lockedTenant.whatsappConnectedAt = new Date();
 
