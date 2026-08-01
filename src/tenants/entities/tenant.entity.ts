@@ -42,9 +42,6 @@ export class Tenant {
   whatsappWabaId?: string;
 
   @Column({ type: 'text', nullable: true })
-  whatsappSystemUserAccessToken?: string;
-
-  @Column({ type: 'text', nullable: true })
   whatsappVerifiedName?: string;
 
   @Column({ type: 'timestamp', nullable: true })

@@ -4,6 +4,7 @@ import { TenantsService } from '../tenants/tenants.service';
 import { parseIncomingWhatsAppMessage } from '../whatsapp/incoming-message.parser';
 import type { IncomingWhatsAppMessage } from '../whatsapp/types/incoming-message.type';
 import type { WhatsAppCredentials } from '../whatsapp/types/outgoing-message.type';
+import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { InboundMessageService } from './inbound-message.service';
 import {
   asObject,
@@ -153,9 +154,9 @@ export class WebhookService {
     tenant: Tenant,
     message: IncomingWhatsAppMessage,
   ): WhatsAppCredentials | null {
-    const accessToken =
-      tenant.whatsappSystemUserAccessToken ?? tenant.whatsappAccessToken;
-    const phoneNumberId = tenant.whatsappPhoneId ?? message.phoneNumberId;
+    const accessToken = readStoredCredential(tenant.whatsappAccessToken);
+    const phoneNumberId =
+      readStoredCredential(tenant.whatsappPhoneId) ?? message.phoneNumberId;
 
     if (!accessToken || !phoneNumberId) {
       this.logger.warn(
