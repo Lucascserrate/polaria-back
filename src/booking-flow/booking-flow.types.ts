@@ -123,7 +123,13 @@ export type BookingPrompt =
   /** La interacción pertenece a una sesión vencida, ajena o a un paso anterior. */
   | { kind: 'STALE' }
   /** No hay ningún horario para lo pedido; incluye hasta dónde se llegó. */
-  | { kind: 'NO_AVAILABILITY'; scope: 'DATE' | 'SERVICE' | 'STAFF' }
+  /**
+   * No se puede seguir. **Cierra la sesión**: es un final, no un paso.
+   *
+   * `SETUP` significa que el negocio todavía no está configurado —sin servicios
+   * activos, sin profesionales—, que es distinto de no tener cupo.
+   */
+  | { kind: 'NO_AVAILABILITY'; scope: 'SETUP' | 'SERVICE' | 'STAFF' }
   /** El horario elegido se ocupó entre que se mostró y se confirmó. */
   | { kind: 'SLOT_TAKEN'; date: string; options: BookingOption[] }
   /** Llegó texto libre con el flujo abierto: se recuerda y se reenvía el paso. */
@@ -138,3 +144,15 @@ export type PendingBookingPrompt = Extract<
     kind: 'ASK_DATE' | 'ASK_SERVICE' | 'ASK_STAFF' | 'ASK_SLOT' | 'CONFIRM';
   }
 >;
+
+/**
+ * Indica si el prompt le ofrece al cliente alguna forma de continuar.
+ *
+ * Es la invariante que sostiene el flujo: **una sesión abierta nunca puede
+ * quedar en un prompt sin opciones**. Si lo hiciera, la conversación queda
+ * congelada —el texto libre no se interpreta— y sin botones que tocar, ni
+ * siquiera "Cancelar". El cliente no tendría salida.
+ */
+export function hasOptions(prompt: BookingPrompt): boolean {
+  return 'options' in prompt && prompt.options.length > 0;
+}

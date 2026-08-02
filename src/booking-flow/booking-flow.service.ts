@@ -17,6 +17,8 @@ import {
 import {
   BOOKING_DATE_HORIZON_DAYS,
   BookingSessionState,
+  hasOptions,
+  isTerminalState,
   RESERVED_VALUES,
   StaffPreference,
   type BookingChannelLimits,
@@ -106,7 +108,44 @@ export class BookingFlowService {
       now,
     });
 
-    return this.askServicePrompt(ready, today, params.limits);
+    return this.emit(
+      ready,
+      await this.askServicePrompt(ready, today, params.limits),
+      now,
+    );
+  }
+
+  /**
+   * Devuelve el prompt, cerrando la sesión si resultó ser un final sin salida.
+   *
+   * Solo aplica a `NO_AVAILABILITY`, que es el único prompt que corta el flujo sin
+   * ofrecer nada que tocar. Deliberadamente **no** cierra ante `STALE`: eso
+   * significa que llegó un toque viejo, no que la reserva en curso esté rota, y
+   * cerrarla destruiría una sesión perfectamente válida.
+   *
+   * Sin esta regla, la sesión quedaba abierta en un paso sin botones: la
+   * conversación congelada, el texto libre sin interpretar y ni siquiera
+   * "Cancelar" para salir, hasta que venciera el TTL.
+   */
+  private async emit(
+    session: BookingSession,
+    prompt: BookingPrompt,
+    now: Date,
+  ): Promise<BookingPrompt> {
+    const isDeadEnd = prompt.kind === 'NO_AVAILABILITY';
+    if (!isDeadEnd || isTerminalState(session.state)) return prompt;
+
+    this.logger.log(
+      `Sesión cerrada por paso sin salida (sessionId=${session.id}, scope=${prompt.scope}).`,
+    );
+    await this.bookingSessionService.close(
+      session,
+      BookingSessionState.CANCELLED,
+      `NO_AVAILABILITY_${prompt.scope}`,
+      now,
+    );
+
+    return prompt;
   }
 
   /**
@@ -136,6 +175,14 @@ export class BookingFlowService {
       now,
     });
     const current = await this.promptForCurrentState(refreshed, params.limits);
+
+    // Si el paso pendiente dejó de tener salida —por ejemplo, el negocio se quedó
+    // sin servicios activos a mitad del flujo—, congelar la conversación dejaría
+    // al cliente sin nada que tocar. Se cierra la sesión y se le dice por qué.
+    if (!hasOptions(current)) {
+      return this.emit(refreshed, current, now);
+    }
+
     return { kind: 'FROZEN', current };
   }
 
@@ -192,13 +239,17 @@ export class BookingFlowService {
         return { kind: 'STALE' };
 
       case 'ACCEPT':
-        return this.applySelection({
+        return this.emit(
           session,
-          value: verdict.value,
-          metaMessageId: params.metaMessageId,
-          limits: params.limits,
+          await this.applySelection({
+            session,
+            value: verdict.value,
+            metaMessageId: params.metaMessageId,
+            limits: params.limits,
+            now,
+          }),
           now,
-        });
+        );
     }
   }
 
@@ -341,8 +392,9 @@ export class BookingFlowService {
       serviceId,
     });
 
+    // Un servicio sin nadie que lo haga es un problema de configuración del
+    // negocio, no de cupo. La sesión la cierra `emit`, que recibe este prompt.
     if (staff.length === 0) {
-      await this.bookingSessionService.reissue({ session, metaMessageId, now });
       return { kind: 'NO_AVAILABILITY', scope: 'SERVICE' };
     }
 
@@ -592,19 +644,28 @@ export class BookingFlowService {
     };
   }
 
+  /**
+   * Catálogo del negocio.
+   *
+   * Lista **todos** los servicios activos, sin filtrar por disponibilidad de la
+   * fecha. Ese filtro existía cuando la fecha se elegía primero y servía para
+   * evitar callejones sin salida; con la fecha puesta en hoy por defecto, filtrar
+   * acá dejaba el primer paso vacío cada vez que hoy no tenía cupo —incluido un
+   * negocio recién creado sin horarios cargados—, que es justamente el callejón
+   * que se quería evitar. Ahora la falta de cupo se descubre en el paso de
+   * horarios, que sí ofrece salida.
+   */
   private async askServicePrompt(
     session: BookingSession,
     date: string,
     limits?: BookingChannelLimits,
   ): Promise<BookingPrompt> {
-    const services =
-      await this.bookingAvailabilityService.getServicesWithAvailability({
-        tenantId: session.tenantId,
-        date,
-      });
+    const services = await this.servicesService.findActiveByTenant(
+      session.tenantId,
+    );
 
     if (services.length === 0) {
-      return { kind: 'NO_AVAILABILITY', scope: 'DATE' };
+      return { kind: 'NO_AVAILABILITY', scope: 'SETUP' };
     }
 
     // La descripción muestra el precio y no la duración: los minutos son un dato
@@ -762,11 +823,9 @@ export class BookingFlowService {
         return BOOKING_DATE_HORIZON_DAYS;
 
       case BookingSessionState.ASK_SERVICE: {
-        const services =
-          await this.bookingAvailabilityService.getServicesWithAvailability({
-            tenantId: session.tenantId,
-            date: session.selectedDate ?? '',
-          });
+        const services = await this.servicesService.findActiveByTenant(
+          session.tenantId,
+        );
         return services.length;
       }
 

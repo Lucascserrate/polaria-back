@@ -79,9 +79,15 @@ export class BookingAvailabilityService {
   /**
    * Servicios que tienen al menos un horario disponible en la fecha dada.
    *
-   * Se usa para el paso de selección de servicio: si el cliente ya eligió el
-   * viernes, mostrarle un servicio sin cupo ese día lo lleva a un callejón sin
-   * salida. Resuelve todo con un único juego de consultas y el resto en memoria.
+   * **Hoy no lo usa el flujo de reservas.** Servía cuando la fecha se elegía
+   * primero, para no ofrecer un servicio sin cupo ese día. Con la fecha puesta en
+   * hoy por defecto ese filtro dejaba el primer paso vacío justo cuando hoy no
+   * tenía cupo, así que la falta de disponibilidad se descubre ahora en el paso de
+   * horarios, que sí ofrece salida.
+   *
+   * Se conserva porque es la consulta que hace falta para marcar días sin cupo en
+   * un calendario, que es lo que pide `unavailable-dates` del `CalendarPicker` de
+   * WhatsApp Flows.
    */
   async getServicesWithAvailability(params: {
     tenantId: string;

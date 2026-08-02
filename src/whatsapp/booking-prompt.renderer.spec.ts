@@ -221,7 +221,7 @@ describe('BookingPromptRenderer', () => {
   });
 
   it('NO_AVAILABILITY explica según el alcance', async () => {
-    for (const scope of ['DATE', 'SERVICE', 'STAFF'] as const) {
+    for (const scope of ['SETUP', 'SERVICE', 'STAFF'] as const) {
       const { sender, sent } = fakeSender();
 
       await new BookingPromptRenderer(sender).render({

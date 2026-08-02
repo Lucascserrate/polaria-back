@@ -180,14 +180,19 @@ function list(
   return { component: 'list', kind, body, buttonText, options };
 }
 
-function noAvailabilityText(scope: 'DATE' | 'SERVICE' | 'STAFF'): string {
+/**
+ * Los tres casos son finales del flujo, así que el texto tiene que decir qué
+ * hacer después. `SETUP` no es falta de cupo sino de configuración: pasa con un
+ * negocio recién creado, sin servicios cargados o sin nadie asignado a ellos.
+ */
+function noAvailabilityText(scope: 'SETUP' | 'SERVICE' | 'STAFF'): string {
   switch (scope) {
-    case 'DATE':
-      return 'No quedan turnos disponibles para ese día. Escríbeme y probamos con otra fecha.';
-    case 'STAFF':
-      return 'Ese profesional no tiene horarios disponibles ese día. Escríbeme y buscamos otra opción.';
+    case 'SETUP':
+      return 'Todavía no tengo los servicios cargados para poder agendar. Avisale al equipo y lo resolvemos.';
     case 'SERVICE':
-      return 'No quedan horarios disponibles para ese servicio ese día. Escríbeme y buscamos otra opción.';
+      return 'Ese servicio no tiene a nadie asignado por ahora. Avisale al equipo y lo resolvemos.';
+    case 'STAFF':
+      return 'Ese profesional no tiene horarios disponibles. Escribime y buscamos otra opción.';
   }
 }
 
