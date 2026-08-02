@@ -21,7 +21,24 @@ import { BookingSessionState, StaffPreference } from '../booking-flow.types';
  * controlar caducidad, descartar interacciones obsoletas y garantizar
  * idempotencia. Cada dato seleccionado tiene su columna, y ninguno se infiere.
  */
-@Index(['tenantId', 'clientId', 'state'])
+/**
+ * El orden de las columnas del índice es deliberado: `clientId` primero.
+ *
+ * MySQL exige que toda foreign key tenga un índice que empiece por su columna, y
+ * reutiliza uno existente si le sirve. Con `tenantId` primero, este índice pasaba
+ * a sostener la FK a `tenants` y **dejaba de poder soltarse**: cualquier cambio a
+ * la tabla que obligara a recrearlo fallaba con "Cannot drop index: needed in a
+ * foreign key constraint", y bastaba con agregar un valor al enum de estados para
+ * romper la sincronización del esquema.
+ *
+ * Con `clientId` primero, MySQL crea su propio índice para la FK de `tenantId` y
+ * este queda libre. Para la consulta da igual: `findActive` filtra por igualdad en
+ * las dos columnas.
+ *
+ * Tampoco incluye `state`: `(clientId, tenantId)` ya deja un puñado de filas, y
+ * filtrar el estado sobre eso es gratis.
+ */
+@Index(['clientId', 'tenantId'])
 @Entity('booking_sessions')
 export class BookingSession {
   @PrimaryGeneratedColumn('uuid')
@@ -56,7 +73,7 @@ export class BookingSession {
   @Column({
     type: 'enum',
     enum: BookingSessionState,
-    default: BookingSessionState.ASK_WHEN,
+    default: BookingSessionState.ASK_SERVICE,
   })
   state!: BookingSessionState;
 

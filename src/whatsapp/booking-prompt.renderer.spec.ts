@@ -73,19 +73,16 @@ describe('NATIVE_CHANNEL_LIMITS', () => {
 });
 
 describe('BookingPromptRenderer', () => {
-  it('ASK_WHEN se envía como botones', async () => {
+  it('CONFIRM se envía como botones', async () => {
     const { sender, sent } = fakeSender();
 
     await new BookingPromptRenderer(sender).render({
       credentials: CREDENTIALS,
       to: TO,
       prompt: {
-        kind: 'ASK_WHEN',
-        options: [
-          option('today', 'Hoy'),
-          option('other', 'Otro día'),
-          option('cancel', 'Cancelar'),
-        ],
+        kind: 'CONFIRM',
+        summary: SUMMARY,
+        options: [option('confirm', 'Confirmar'), option('cancel', 'Cancelar')],
       },
     });
 
@@ -93,8 +90,7 @@ describe('BookingPromptRenderer', () => {
     expect(sent[0].kind).toBe('buttons');
     const input = sent[0].input as SendButtonsInput;
     expect(input.buttons.map((b) => b.title)).toEqual([
-      'Hoy',
-      'Otro día',
+      'Confirmar',
       'Cancelar',
     ]);
   });
@@ -106,7 +102,12 @@ describe('BookingPromptRenderer', () => {
     await new BookingPromptRenderer(sender).render({
       credentials: CREDENTIALS,
       to: TO,
-      prompt: { kind: 'ASK_SLOT', date: '2026-07-31', options: [slot] },
+      prompt: {
+        kind: 'ASK_SLOT',
+        date: '2026-07-31',
+        hasSlots: true,
+        options: [slot],
+      },
     });
 
     const input = sent[0].input as SendListInput;

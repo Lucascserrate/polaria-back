@@ -80,7 +80,7 @@ export class BookingSessionService {
         clientId: params.clientId,
         conversationId: params.conversationId,
         token: generateSessionToken(),
-        state: BookingSessionState.ASK_WHEN,
+        state: BookingSessionState.ASK_SERVICE,
         stepVersion: 1,
         expiresAt: expiryFrom(params.now),
         lastInteractionAt: params.now,

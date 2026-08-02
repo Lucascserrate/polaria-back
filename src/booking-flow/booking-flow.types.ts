@@ -7,13 +7,20 @@
  * nunca construye identificadores ni decide transiciones.
  */
 
+/**
+ * Pasos del flujo guiado.
+ *
+ * El recorrido optimiza el caso mayoritario, que en una barbería es reservar para
+ * hoy: la sesión arranca con la fecha puesta en hoy y va directo al servicio. El
+ * cliente solo ve un selector de fecha si pide "Ver otros días" desde el paso de
+ * horarios, así que `ASK_DATE` es un desvío opcional y no un paso obligatorio.
+ */
 export enum BookingSessionState {
-  /** ¿Hoy u otro día? Primer paso: optimiza el caso mayoritario. */
-  ASK_WHEN = 'ASK_WHEN',
-  ASK_DATE = 'ASK_DATE',
   ASK_SERVICE = 'ASK_SERVICE',
   ASK_STAFF = 'ASK_STAFF',
   ASK_SLOT = 'ASK_SLOT',
+  /** Desvío desde `ASK_SLOT` cuando la fecha actual no sirve. */
+  ASK_DATE = 'ASK_DATE',
   CONFIRM = 'CONFIRM',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
@@ -43,13 +50,13 @@ export enum StaffPreference {
 
 /** Valores reservados que viajan en el `selectionId` en lugar de un uuid. */
 export const RESERVED_VALUES = {
-  TODAY: 'today',
-  OTHER_DAY: 'other',
   ANY_STAFF: 'any',
   CONFIRM: 'confirm',
   CANCEL: 'cancel',
-  /** Avanza a la página siguiente de horarios sin elegir ninguno. */
+  /** Avanza a la página siguiente sin elegir nada. */
   MORE: 'more',
+  /** Abre el selector de fecha desde el paso de horarios. */
+  OTHER_DAYS: 'otherdays',
 } as const;
 
 /**
@@ -96,11 +103,19 @@ export type BookingSummary = {
 // ---------------------------------------------------------------------------
 
 export type BookingPrompt =
-  | { kind: 'ASK_WHEN'; options: BookingOption[] }
   | { kind: 'ASK_DATE'; options: BookingOption[] }
   | { kind: 'ASK_SERVICE'; date: string; options: BookingOption[] }
   | { kind: 'ASK_STAFF'; options: BookingOption[] }
-  | { kind: 'ASK_SLOT'; date: string; options: BookingOption[] }
+  /**
+   * Horarios de una fecha. `hasSlots` en `false` significa que ese día se agotó:
+   * las únicas opciones son "Ver otros días" y "Cancelar", y el texto cambia.
+   */
+  | {
+      kind: 'ASK_SLOT';
+      date: string;
+      hasSlots: boolean;
+      options: BookingOption[];
+    }
   | { kind: 'CONFIRM'; summary: BookingSummary; options: BookingOption[] }
   | { kind: 'COMPLETED'; summary: BookingSummary; appointmentId: string }
   | { kind: 'CANCELLED' }
@@ -120,12 +135,6 @@ export type BookingPrompt =
 export type PendingBookingPrompt = Extract<
   BookingPrompt,
   {
-    kind:
-      | 'ASK_WHEN'
-      | 'ASK_DATE'
-      | 'ASK_SERVICE'
-      | 'ASK_STAFF'
-      | 'ASK_SLOT'
-      | 'CONFIRM';
+    kind: 'ASK_DATE' | 'ASK_SERVICE' | 'ASK_STAFF' | 'ASK_SLOT' | 'CONFIRM';
   }
 >;

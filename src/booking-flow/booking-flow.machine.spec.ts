@@ -186,19 +186,14 @@ describe('classifyInteraction', () => {
 });
 
 describe('isValueValidForState', () => {
-  it('ASK_WHEN solo admite hoy u otro día', () => {
-    expect(
-      isValueValidForState(BookingSessionState.ASK_WHEN, RESERVED_VALUES.TODAY),
-    ).toBe(true);
+  it('ASK_SLOT admite "Ver otros días" además de un horario', () => {
+    // No elige horario: abre el selector de fecha sin salir del paso.
     expect(
       isValueValidForState(
-        BookingSessionState.ASK_WHEN,
-        RESERVED_VALUES.OTHER_DAY,
+        BookingSessionState.ASK_SLOT,
+        RESERVED_VALUES.OTHER_DAYS,
       ),
     ).toBe(true);
-    expect(
-      isValueValidForState(BookingSessionState.ASK_WHEN, '2026-07-31'),
-    ).toBe(false);
   });
 
   it('ASK_DATE exige una fecha calendaria válida', () => {
@@ -243,28 +238,21 @@ describe('isValueValidForState', () => {
 });
 
 describe('nextStateAfter', () => {
-  it('"Hoy" salta el selector de fecha', () => {
-    expect(nextStateAfter(BookingSessionState.ASK_WHEN)).toBe(
-      BookingSessionState.ASK_SERVICE,
-    );
-  });
-
-  it('"Otro día" pasa por el selector de fecha', () => {
-    expect(
-      nextStateAfter(BookingSessionState.ASK_WHEN, { chosenOtherDay: true }),
-    ).toBe(BookingSessionState.ASK_DATE);
-  });
-
   it('omite el paso de profesional cuando hay uno solo', () => {
     expect(
       nextStateAfter(BookingSessionState.ASK_SERVICE, { skipStaffStep: true }),
     ).toBe(BookingSessionState.ASK_SLOT);
   });
 
-  it('recorre el camino completo', () => {
+  it('elegir fecha devuelve a los horarios, no avanza', () => {
+    // `ASK_DATE` es un desvío desde `ASK_SLOT`: corrige la fecha y vuelve al paso
+    // donde el cliente estaba.
     expect(nextStateAfter(BookingSessionState.ASK_DATE)).toBe(
-      BookingSessionState.ASK_SERVICE,
+      BookingSessionState.ASK_SLOT,
     );
+  });
+
+  it('recorre el camino completo, que empieza en el servicio', () => {
     expect(nextStateAfter(BookingSessionState.ASK_SERVICE)).toBe(
       BookingSessionState.ASK_STAFF,
     );

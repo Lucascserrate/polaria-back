@@ -71,6 +71,43 @@ export function buildWelcomeMenu(businessName: string): {
   };
 }
 
+/** Marca con la que el menú queda identificado en `messages.rawJson.source`. */
+export const WELCOME_MENU_SOURCE = 'welcome-menu';
+
+/**
+ * Ventana durante la cual no se reenvía el menú.
+ *
+ * Sin esto, tres mensajes seguidos sin intención detectada producen tres menús
+ * idénticos, que se lee como un bot roto. Media hora es suficiente para cubrir
+ * una ráfaga de mensajes y lo bastante corta para que el menú vuelva a aparecer
+ * si el cliente retoma la conversación más tarde.
+ */
+export const WELCOME_MENU_COOLDOWN_MINUTES = 30;
+
+/**
+ * Decide si corresponde mandar el menú.
+ *
+ * Se apoya en el último mensaje saliente registrado: si ya fue un menú y es
+ * reciente, se calla. No hace falta estado nuevo porque el historial ya guarda el
+ * origen de cada mensaje.
+ */
+export function shouldSendWelcomeMenu(params: {
+  lastOutgoingSource?: string | null;
+  lastOutgoingAt?: Date | null;
+  now: Date;
+}): boolean {
+  const { lastOutgoingSource, lastOutgoingAt, now } = params;
+
+  if (lastOutgoingSource !== WELCOME_MENU_SOURCE || !lastOutgoingAt) {
+    return true;
+  }
+
+  const elapsedMinutes =
+    (now.getTime() - lastOutgoingAt.getTime()) / (60 * 1000);
+
+  return elapsedMinutes >= WELCOME_MENU_COOLDOWN_MINUTES;
+}
+
 /** Confirmación de que Polaria se apartó de la conversación. */
 export function buildHandoffAcknowledgement(): string {
   return 'Listo, le aviso al equipo. En un rato te responde una persona por acá.';

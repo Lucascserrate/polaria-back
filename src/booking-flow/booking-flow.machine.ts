@@ -123,11 +123,6 @@ export function isValueValidForState(
   if (value === RESERVED_VALUES.MORE) return isPaginatedState(state);
 
   switch (state) {
-    case BookingSessionState.ASK_WHEN:
-      return (
-        value === RESERVED_VALUES.TODAY || value === RESERVED_VALUES.OTHER_DAY
-      );
-
     case BookingSessionState.ASK_DATE:
       return isIsoDate(value);
 
@@ -138,7 +133,9 @@ export function isValueValidForState(
       return value === RESERVED_VALUES.ANY_STAFF || value.length > 0;
 
     case BookingSessionState.ASK_SLOT:
-      return isIsoInstant(value);
+      // "Ver otros días" es una respuesta legítima de este paso: no elige
+      // horario, abre el selector de fecha.
+      return value === RESERVED_VALUES.OTHER_DAYS || isIsoInstant(value);
 
     case BookingSessionState.CONFIRM:
       return value === RESERVED_VALUES.CONFIRM;
@@ -166,16 +163,13 @@ export function isPaginatedState(state: BookingSessionState): boolean {
  */
 export function nextStateAfter(
   state: BookingSessionState,
-  options: { chosenOtherDay?: boolean; skipStaffStep?: boolean } = {},
+  options: { skipStaffStep?: boolean } = {},
 ): BookingSessionState {
   switch (state) {
-    case BookingSessionState.ASK_WHEN:
-      return options.chosenOtherDay
-        ? BookingSessionState.ASK_DATE
-        : BookingSessionState.ASK_SERVICE;
-
+    // Elegir fecha vuelve a los horarios, no avanza: es un desvío que corrige la
+    // fecha de la sesión y devuelve al paso donde estaba el cliente.
     case BookingSessionState.ASK_DATE:
-      return BookingSessionState.ASK_SERVICE;
+      return BookingSessionState.ASK_SLOT;
 
     case BookingSessionState.ASK_SERVICE:
       return options.skipStaffStep

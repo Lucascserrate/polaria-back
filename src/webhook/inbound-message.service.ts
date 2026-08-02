@@ -10,6 +10,8 @@ import {
   buildHandoffAcknowledgement,
   buildWelcomeMenu,
   decodeMenuAction,
+  shouldSendWelcomeMenu,
+  WELCOME_MENU_SOURCE,
   WelcomeMenuAction,
 } from '../conversations/welcome-menu';
 import { TenantsService } from '../tenants/tenants.service';
@@ -338,6 +340,25 @@ export class InboundMessageService {
     clientId: string;
     to: string;
   }): Promise<void> {
+    // Enfriamiento: varios mensajes seguidos sin intención detectada no deben
+    // producir varios menús idénticos.
+    const lastOutgoing = await this.conversationRecorder.findLastOutgoing(
+      params.conversationId,
+    );
+
+    const allowed = shouldSendWelcomeMenu({
+      lastOutgoingSource: lastOutgoing?.source,
+      lastOutgoingAt: lastOutgoing?.createdAt,
+      now: new Date(),
+    });
+
+    if (!allowed) {
+      this.logger.log(
+        `Menú omitido por enfriamiento (conversationId=${params.conversationId}).`,
+      );
+      return;
+    }
+
     const tenant = await this.tenantsService.findOne(params.tenantId);
     const menu = buildWelcomeMenu(tenant?.name ?? 'la barbería');
 
@@ -362,7 +383,7 @@ export class InboundMessageService {
       text: `${menu.body}\n\nOpciones: ${menu.options
         .map((option) => option.title)
         .join(' · ')}`,
-      source: 'welcome-menu',
+      source: WELCOME_MENU_SOURCE,
     });
   }
 

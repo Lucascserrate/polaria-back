@@ -19,14 +19,30 @@ const SUMMARY: BookingSummary = {
 };
 
 describe('planBookingPrompt', () => {
-  it('ASK_WHEN produce un solo mensaje con botones', () => {
+  it('CONFIRM produce un solo mensaje con botones', () => {
     const plans = planBookingPrompt({
-      kind: 'ASK_WHEN',
-      options: [option('today', 'Hoy'), option('cancel', 'Cancelar')],
+      kind: 'CONFIRM',
+      summary: SUMMARY,
+      options: [option('confirm', 'Confirmar'), option('cancel', 'Cancelar')],
     });
 
     expect(plans).toHaveLength(1);
     expect(plans[0].component).toBe('buttons');
+  });
+
+  it('un día sin cupo ofrece el desvío en vez de cortar el flujo', () => {
+    const plans = planBookingPrompt({
+      kind: 'ASK_SLOT',
+      date: '2026-07-31',
+      hasSlots: false,
+      options: [
+        option('otherdays', 'Ver otros días'),
+        option('cancel', 'Cancelar'),
+      ],
+    });
+
+    expect(plans).toHaveLength(1);
+    expect(plans[0].body).toContain('No quedan horarios');
   });
 
   it('SLOT_TAKEN produce dos mensajes: aviso y lista', () => {
@@ -106,14 +122,11 @@ describe('planToTranscript', () => {
 
   it('los botones también dejan constancia de las opciones', () => {
     const [plan] = planBookingPrompt({
-      kind: 'ASK_WHEN',
-      options: [
-        option('today', 'Hoy'),
-        option('other', 'Otro día'),
-        option('cancel', 'Cancelar'),
-      ],
+      kind: 'CONFIRM',
+      summary: SUMMARY,
+      options: [option('confirm', 'Confirmar'), option('cancel', 'Cancelar')],
     });
 
-    expect(planToTranscript(plan)).toContain('Hoy · Otro día · Cancelar');
+    expect(planToTranscript(plan)).toContain('Confirmar · Cancelar');
   });
 });

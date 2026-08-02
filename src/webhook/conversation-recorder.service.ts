@@ -87,6 +87,33 @@ export class ConversationRecorderService {
   }
 
   /**
+   * Origen y momento del último mensaje que envió Polaria.
+   *
+   * Lo usa el enfriamiento del menú: si el último saliente ya fue un menú
+   * reciente, no se reenvía. Se mira una ventana corta de mensajes porque en el
+   * medio pueden haber quedado entrantes del cliente.
+   */
+  async findLastOutgoing(conversationId: string): Promise<{
+    source: string | null;
+    createdAt: Date;
+  } | null> {
+    const recent = await this.messagesService.findRecentByConversation(
+      conversationId,
+      10,
+    );
+
+    const lastAssistant = recent.find(
+      (message) => message.role === MessageRole.ASSISTANT,
+    );
+    if (!lastAssistant) return null;
+
+    const raw = lastAssistant.rawJson as { source?: unknown } | null;
+    const source = typeof raw?.source === 'string' ? raw.source : null;
+
+    return { source, createdAt: lastAssistant.createdAt };
+  }
+
+  /**
    * Registra un mensaje saliente que no vino del flujo de reservas: el menú de
    * bienvenida o el aviso de traspaso a una persona.
    */

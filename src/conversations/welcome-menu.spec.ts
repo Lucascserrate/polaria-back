@@ -3,8 +3,57 @@ import {
   decodeMenuAction,
   encodeMenuAction,
   isMenuSelection,
+  shouldSendWelcomeMenu,
+  WELCOME_MENU_COOLDOWN_MINUTES,
+  WELCOME_MENU_SOURCE,
   WelcomeMenuAction,
 } from './welcome-menu';
+
+const NOW = new Date('2026-08-02T12:00:00.000Z');
+
+function minutesAgo(minutes: number): Date {
+  return new Date(NOW.getTime() - minutes * 60 * 1000);
+}
+
+describe('shouldSendWelcomeMenu', () => {
+  it('lo manda si nunca hubo saliente', () => {
+    expect(shouldSendWelcomeMenu({ now: NOW })).toBe(true);
+  });
+
+  it('no lo repite si el último saliente fue un menú reciente', () => {
+    // Tres mensajes seguidos sin intención detectada no deben producir tres
+    // menús idénticos.
+    expect(
+      shouldSendWelcomeMenu({
+        lastOutgoingSource: WELCOME_MENU_SOURCE,
+        lastOutgoingAt: minutesAgo(1),
+        now: NOW,
+      }),
+    ).toBe(false);
+  });
+
+  it('vuelve a mandarlo pasado el enfriamiento', () => {
+    expect(
+      shouldSendWelcomeMenu({
+        lastOutgoingSource: WELCOME_MENU_SOURCE,
+        lastOutgoingAt: minutesAgo(WELCOME_MENU_COOLDOWN_MINUTES + 1),
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
+
+  it('lo manda si el último saliente fue otra cosa', () => {
+    // Después de un paso del flujo o del aviso de traspaso, el menú vuelve a
+    // tener sentido.
+    expect(
+      shouldSendWelcomeMenu({
+        lastOutgoingSource: 'booking-flow',
+        lastOutgoingAt: minutesAgo(1),
+        now: NOW,
+      }),
+    ).toBe(true);
+  });
+});
 
 describe('codificación de acciones del menú', () => {
   it('hace ida y vuelta', () => {

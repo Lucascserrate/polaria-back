@@ -73,17 +73,25 @@ export class BookingFlowService {
   }
 
   /**
-   * Arranca el flujo. Es lo único que la IA puede disparar: detecta la intención
-   * de reservar y llama acá, sin aportar ningún dato.
+   * Arranca el flujo. Es lo único que la detección de intención puede disparar:
+   * reconoce que el cliente quiere un turno y llama acá, sin aportar ningún dato.
+   *
+   * La sesión nace con la fecha puesta en **hoy**. En una barbería la mayoría de
+   * las reservas son para el mismo día, así que preguntar la fecha por adelantado
+   * cobraba un paso al caso frecuente para servir al infrecuente. Quien quiera
+   * otro día lo pide desde el paso de horarios.
    */
-  // No recibe `limits`: el primer paso son tres botones fijos, nunca pagina.
   async start(params: {
     tenantId: string;
     clientId: string;
     conversationId?: string;
+    limits?: BookingChannelLimits;
     now?: Date;
   }): Promise<BookingPrompt> {
     const now = params.now ?? new Date();
+    const timezone = await this.resolveTimezone(params.tenantId);
+    const today = todayIsoDateIn(timezone, now);
+
     const session = await this.bookingSessionService.start({
       tenantId: params.tenantId,
       clientId: params.clientId,
@@ -91,7 +99,14 @@ export class BookingFlowService {
       now,
     });
 
-    return this.askWhenPrompt(session);
+    const ready = await this.bookingSessionService.advance({
+      session,
+      state: BookingSessionState.ASK_SERVICE,
+      selection: { selectedDate: today },
+      now,
+    });
+
+    return this.askServicePrompt(ready, today, params.limits);
   }
 
   /**
@@ -219,10 +234,18 @@ export class BookingFlowService {
       return this.nextPage({ session, metaMessageId, limits, now });
     }
 
-    switch (session.state) {
-      case BookingSessionState.ASK_WHEN:
-        return this.afterWhen({ session, value, metaMessageId, limits, now });
+    // "Ver otros días" tampoco avanza: abre el selector de fecha.
+    if (value === RESERVED_VALUES.OTHER_DAYS) {
+      const advanced = await this.bookingSessionService.advance({
+        session,
+        state: BookingSessionState.ASK_DATE,
+        metaMessageId,
+        now,
+      });
+      return this.askDatePrompt(advanced, limits, now);
+    }
 
+    switch (session.state) {
       case BookingSessionState.ASK_DATE:
         return this.afterDate({
           session,
@@ -283,44 +306,7 @@ export class BookingFlowService {
     return this.promptForCurrentState(advanced, limits);
   }
 
-  private async afterWhen(params: {
-    session: BookingSession;
-    value: string;
-    metaMessageId?: string | null;
-    limits?: BookingChannelLimits;
-    now: Date;
-  }): Promise<BookingPrompt> {
-    const { session, value, metaMessageId, limits, now } = params;
-    const chosenOtherDay = value === RESERVED_VALUES.OTHER_DAY;
-
-    const nextState = nextStateAfter(BookingSessionState.ASK_WHEN, {
-      chosenOtherDay,
-    });
-
-    if (chosenOtherDay) {
-      const advanced = await this.bookingSessionService.advance({
-        session,
-        state: nextState,
-        metaMessageId,
-        now,
-      });
-      return this.askDatePrompt(advanced, limits, now);
-    }
-
-    const timezone = await this.resolveTimezone(session.tenantId);
-    const today = todayIsoDateIn(timezone, now);
-
-    const advanced = await this.bookingSessionService.advance({
-      session,
-      state: nextState,
-      selection: { selectedDate: today },
-      metaMessageId,
-      now,
-    });
-
-    return this.askServicePrompt(advanced, today, limits);
-  }
-
+  /** Elegida la fecha, se vuelve a los horarios de ese día. */
   private async afterDate(params: {
     session: BookingSession;
     date: string;
@@ -338,7 +324,7 @@ export class BookingFlowService {
       now,
     });
 
-    return this.askServicePrompt(advanced, date, limits);
+    return this.askSlotPrompt(advanced, limits);
   }
 
   private async afterService(params: {
@@ -558,9 +544,6 @@ export class BookingFlowService {
     limits?: BookingChannelLimits,
   ): Promise<BookingPrompt> {
     switch (session.state) {
-      case BookingSessionState.ASK_WHEN:
-        return this.askWhenPrompt(session);
-
       case BookingSessionState.ASK_DATE:
         return this.askDatePrompt(session, limits, new Date());
 
@@ -590,17 +573,6 @@ export class BookingFlowService {
       default:
         return { kind: 'STALE' };
     }
-  }
-
-  private askWhenPrompt(session: BookingSession): BookingPrompt {
-    return {
-      kind: 'ASK_WHEN',
-      options: [
-        this.option(session, RESERVED_VALUES.TODAY, 'Hoy'),
-        this.option(session, RESERVED_VALUES.OTHER_DAY, 'Otro día'),
-        this.cancelOption(session),
-      ],
-    };
   }
 
   private async askDatePrompt(
@@ -677,28 +649,39 @@ export class BookingFlowService {
     };
   }
 
+  /**
+   * Horarios de la fecha en curso.
+   *
+   * Un día sin cupo **no es un callejón sin salida**: el paso se muestra igual, con
+   * "Ver otros días" como única alternativa. Por eso desapareció el filtro previo
+   * de servicios por disponibilidad de la fecha: ya no hace falta anticipar el
+   * vacío si el vacío ofrece su propia salida.
+   */
   private async askSlotPrompt(
     session: BookingSession,
     limits?: BookingChannelLimits,
   ): Promise<BookingPrompt> {
     const slots = await this.loadSlots(session);
+    const timezone = await this.resolveTimezone(session.tenantId);
 
     if (slots.length === 0) {
       return {
-        kind: 'NO_AVAILABILITY',
-        scope: session.selectedStaffId ? 'STAFF' : 'SERVICE',
+        kind: 'ASK_SLOT',
+        date: session.selectedDate ?? '',
+        hasSlots: false,
+        options: [this.otherDaysOption(session), this.cancelOption(session)],
       };
     }
-
-    const timezone = await this.resolveTimezone(session.tenantId);
 
     return {
       kind: 'ASK_SLOT',
       date: session.selectedDate ?? '',
+      hasSlots: true,
       options: this.paginate(
         session,
         this.slotOptions(session, slots, timezone),
         limits,
+        [this.otherDaysOption(session)],
       ),
     };
   }
@@ -729,8 +712,14 @@ export class BookingFlowService {
     session: BookingSession,
     content: BookingOption[],
     limits?: BookingChannelLimits,
+    extraOptions: BookingOption[] = [],
   ): BookingOption[] {
-    const window = this.window(content.length, session.pageOffset, limits);
+    const window = this.window(
+      content.length,
+      session.pageOffset,
+      limits,
+      extraOptions.length,
+    );
     const page = content.slice(window.start, window.end);
 
     return [
@@ -738,16 +727,26 @@ export class BookingFlowService {
       ...(window.hasMore
         ? [this.option(session, RESERVED_VALUES.MORE, 'Ver más opciones')]
         : []),
+      ...extraOptions,
       this.cancelOption(session),
     ];
   }
 
-  private window(total: number, offset: number, limits?: BookingChannelLimits) {
+  /**
+   * `extraOptions` son filas fijas del paso, como "Ver otros días". Ocupan lugar
+   * en el componente igual que `Cancelar`, así que entran en la reserva.
+   */
+  private window(
+    total: number,
+    offset: number,
+    limits?: BookingChannelLimits,
+    extraOptionCount = 0,
+  ) {
     return computeOptionWindow({
       total,
       offset,
       maxOptionsPerPrompt: limits?.maxOptionsPerPrompt,
-      reservedOptions: RESERVED_OPTION_COUNT,
+      reservedOptions: RESERVED_OPTION_COUNT + extraOptionCount,
     });
   }
 
@@ -890,6 +889,11 @@ export class BookingFlowService {
   /** Salida siempre visible, en todos los pasos. */
   private cancelOption(session: BookingSession): BookingOption {
     return this.option(session, RESERVED_VALUES.CANCEL, 'Cancelar');
+  }
+
+  /** Desvío al selector de fecha, disponible en el paso de horarios. */
+  private otherDaysOption(session: BookingSession): BookingOption {
+    return this.option(session, RESERVED_VALUES.OTHER_DAYS, 'Ver otros días');
   }
 
   private async resolveTimezone(tenantId: string): Promise<string> {

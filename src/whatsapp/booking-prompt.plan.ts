@@ -29,16 +29,11 @@ export type BookingMessagePlan =
 
 export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
   switch (prompt.kind) {
-    case 'ASK_WHEN':
-      return [
-        buttons(prompt.kind, '¿Para cuándo quieres tu turno?', prompt.options),
-      ];
-
     case 'ASK_DATE':
       return [
         list(
           prompt.kind,
-          'Elige el día que prefieras.',
+          '¿Para qué día lo querés?',
           'Elegir día',
           prompt.options,
         ),
@@ -65,11 +60,15 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
       ];
 
     case 'ASK_SLOT':
+      // Un día sin cupo no corta el flujo: se dice que no hay y se ofrece el
+      // desvío a otra fecha, que viene en las opciones.
       return [
         list(
           prompt.kind,
-          `Estos son los horarios disponibles para el ${formatDate(prompt.date)}.`,
-          'Ver horarios',
+          prompt.hasSlots
+            ? `Estos son los horarios disponibles para el ${formatDate(prompt.date)}.`
+            : `No quedan horarios para el ${formatDate(prompt.date)}. ¿Querés ver otro día?`,
+          prompt.hasSlots ? 'Ver horarios' : 'Ver opciones',
           prompt.options,
         ),
       ];

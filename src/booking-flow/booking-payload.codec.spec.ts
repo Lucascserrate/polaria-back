@@ -35,7 +35,7 @@ describe('encodeSelection', () => {
       encodeSelection({
         token: '',
         stepVersion: 1,
-        state: BookingSessionState.ASK_WHEN,
+        state: BookingSessionState.ASK_SERVICE,
         value: 'today',
       }),
     ).toThrow(BookingPayloadError);
@@ -47,7 +47,7 @@ describe('encodeSelection', () => {
         encodeSelection({
           token: TOKEN,
           stepVersion,
-          state: BookingSessionState.ASK_WHEN,
+          state: BookingSessionState.ASK_SERVICE,
           value: 'today',
         }),
       ).toThrow(BookingPayloadError);
@@ -90,7 +90,7 @@ describe('decodeSelection', () => {
   });
 
   it('rechaza otro protocolo', () => {
-    expect(decodeSelection(`b2|${TOKEN}|1|ASK_WHEN|today`)).toBeNull();
+    expect(decodeSelection(`b2|${TOKEN}|1|ASK_SERVICE|uuid`)).toBeNull();
   });
 
   it('rechaza un estado inexistente', () => {
@@ -98,17 +98,17 @@ describe('decodeSelection', () => {
   });
 
   it('rechaza una versión no numérica', () => {
-    expect(decodeSelection(`b1|${TOKEN}|abc|ASK_WHEN|today`)).toBeNull();
+    expect(decodeSelection(`b1|${TOKEN}|abc|ASK_SERVICE|uuid`)).toBeNull();
   });
 
   it('rechaza cantidades de campos distintas a cinco', () => {
-    expect(decodeSelection(`b1|${TOKEN}|1|ASK_WHEN`)).toBeNull();
-    expect(decodeSelection(`b1|${TOKEN}|1|ASK_WHEN|today|extra`)).toBeNull();
+    expect(decodeSelection(`b1|${TOKEN}|1|ASK_SERVICE`)).toBeNull();
+    expect(decodeSelection(`b1|${TOKEN}|1|ASK_SERVICE|uuid|extra`)).toBeNull();
   });
 
   it('rechaza token o valor vacíos', () => {
-    expect(decodeSelection('b1||1|ASK_WHEN|today')).toBeNull();
-    expect(decodeSelection(`b1|${TOKEN}|1|ASK_WHEN|`)).toBeNull();
+    expect(decodeSelection('b1||1|ASK_SERVICE|uuid')).toBeNull();
+    expect(decodeSelection(`b1|${TOKEN}|1|ASK_SERVICE|`)).toBeNull();
   });
 
   it('rechaza entradas que no son payloads nuestros', () => {
