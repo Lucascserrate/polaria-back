@@ -58,12 +58,16 @@ export class Message {
   rawJson?: any;
 
   /**
-   * Precisión de milisegundos porque el historial se ordena por esta columna.
+   * Precisión de microsegundos porque el historial se ordena por esta columna.
    *
    * El flujo guiado emite varios mensajes en el mismo turno —el aviso y la lista,
    * por ejemplo— y con precisión de segundo caían todos en el mismo instante, con
    * lo cual el orden en que se leían quedaba indefinido.
+   *
+   * El 6 no es arbitrario: TypeORM genera el default `CURRENT_TIMESTAMP(6)`, y
+   * MySQL rechaza la tabla si la precisión de la columna no coincide con la del
+   * default.
    */
-  @CreateDateColumn({ type: 'datetime', precision: 3 })
+  @CreateDateColumn({ type: 'datetime', precision: 6 })
   createdAt!: Date;
 }
