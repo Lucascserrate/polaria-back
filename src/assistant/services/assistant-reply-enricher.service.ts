@@ -100,21 +100,10 @@ export class AssistantReplyEnricherService {
     promptContext: AssistantPromptContext;
     historyMessages: ChatCompletionMessageParam[];
     baseReply: string;
-    action?: string;
   }): Promise<string> {
-    const { tenantId, promptContext, historyMessages, baseReply, action } =
-      params;
+    const { tenantId, promptContext, historyMessages, baseReply } = params;
 
     const needs = this.detectNeedsHeuristic({ historyMessages, baseReply });
-
-    // Si ya hay una accion definida, solo seguimos enriqueciendo cuando el
-    // usuario realmente pidio datos factuales (precio, horario, descuento o ubicacion).
-    if (action) {
-      const shouldOverrideBaseReply = Boolean(
-        needs.prices || needs.hours || needs.discounts || needs.location,
-      );
-      if (!shouldOverrideBaseReply) return baseReply;
-    }
 
     const hasAnyNeed = Boolean(
       needs.prices ||

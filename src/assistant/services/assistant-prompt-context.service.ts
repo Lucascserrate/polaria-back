@@ -30,8 +30,6 @@ export class AssistantPromptContextService {
   async build(
     tenantId?: string,
     clientName?: string,
-    conversationState?: string,
-    storedEntitiesJson?: string,
   ): Promise<AssistantPromptContext> {
     if (!tenantId) {
       throw new Error('TenantId is required');
@@ -50,8 +48,6 @@ export class AssistantPromptContextService {
           cached.context.timezone,
         ),
         clientName,
-        conversationState,
-        storedEntitiesJson,
       };
     }
 
@@ -140,8 +136,6 @@ export class AssistantPromptContextService {
       currentTime: this.formatCurrentTime(timezone),
       isClosedNow: this.isClosedNow(businessHoursText, timezone),
       clientName,
-      conversationState,
-      storedEntitiesJson,
     };
   }
 

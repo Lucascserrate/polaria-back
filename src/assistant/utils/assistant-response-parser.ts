@@ -1,59 +1,39 @@
+/**
+ * Lectura de la respuesta del modelo.
+ *
+ * El asistente solo produce texto. Antes esta función también extraía
+ * `entities` y `action` —servicio, barbero, fecha y hora inferidos del
+ * mensaje—, que era el mecanismo con el que la IA armaba una reserva. Esos
+ * campos se eliminaron del prompt y de acá: si el modelo los devolviera igual,
+ * se ignoran.
+ */
 export interface AssistantParsedResponse {
   reply?: string;
-  action?: string;
-  entities?: {
-    services?: string[] | null;
-    staff?: string | null;
-    date?: string | null;
-    time?: string | null;
-  };
 }
 
 export function parseAssistantResponse(response: { content?: string | null }): {
   reply: string;
-  entities?: AssistantParsedResponse['entities'];
-  action?: string;
 } {
   const responseText = response.content ?? '';
   const parsed = tryParseAssistantJson(responseText);
-  const normalizedForLog = parsed
-    ? {
-        ...parsed,
-        entities: {
-          services: parsed.entities?.services ?? null,
-          staff: parsed.entities?.staff ?? null,
-          date: parsed.entities?.date ?? null,
-          time: parsed.entities?.time ?? null,
-        },
-      }
-    : null;
 
-  if (parsed) {
-    console.log('[assistant] parsed json:', normalizedForLog);
-    return {
-      reply: parsed.reply ?? 'Sin respuesta',
-      entities: parsed.entities,
-      action: parsed.action,
-    };
-  } else {
-    console.log('[assistant] raw response:', responseText);
-    return {
-      reply: responseText.trim().length > 0 ? responseText : 'Sin respuesta',
-      entities: undefined,
-      action: undefined,
-    };
+  if (parsed?.reply) {
+    return { reply: parsed.reply };
   }
+
+  // El modelo puede responder en texto plano pese al formato pedido; se aprovecha
+  // igual en lugar de descartar una respuesta válida.
+  const trimmed = responseText.trim();
+  return { reply: trimmed.length > 0 ? trimmed : 'Sin respuesta' };
 }
 
 function tryParseAssistantJson(text: string): AssistantParsedResponse | null {
-  if (!text || text.trim().length === 0) {
-    return null;
-  }
+  if (!text || text.trim().length === 0) return null;
+
   try {
-    const parsed = JSON.parse(text) as AssistantParsedResponse;
-    return parsed;
+    return JSON.parse(text) as AssistantParsedResponse;
   } catch {
-    // Intentar sacar un JSON válido de un texto que viene mezclado o mal formateado.
+    // El modelo a veces envuelve el JSON en backticks o lo mezcla con texto.
     const cleaned = text
       .trim()
       .replace(/```(?:json)?/gi, '')
@@ -63,10 +43,11 @@ function tryParseAssistantJson(text: string): AssistantParsedResponse | null {
     if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
       return null;
     }
-    const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+
     try {
-      const parsed = JSON.parse(candidate) as AssistantParsedResponse;
-      return parsed;
+      return JSON.parse(
+        cleaned.slice(firstBrace, lastBrace + 1),
+      ) as AssistantParsedResponse;
     } catch {
       return null;
     }

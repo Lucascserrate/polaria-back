@@ -61,8 +61,7 @@ FORMATO OBLIGATORIO:
 Responde SOLO JSON valido.
 
 {
-  "reply": "string",
-  "action": "ASK_SERVICE"
+  "reply": "string"
 }
 `.trim();
   }
@@ -170,8 +169,7 @@ FORMATO OBLIGATORIO:
 Responde SOLO JSON valido.
 
 {
-  "reply": "string",
-  "action": "ASK_SERVICE"
+  "reply": "string"
 }
 `.trim();
 };

@@ -16,9 +16,7 @@ export interface AssistantPromptContext {
     description?: string;
   }>;
   staffServices: { [staffName: string]: string[] };
-  storedEntitiesJson?: string;
   clientName?: string;
-  conversationState?: string;
   isFirstInteraction?: boolean;
   barbershopName: string;
 }
@@ -41,22 +39,19 @@ ESTILO:
 
 FORMATO JSON OBLIGATORIO:
 {
-  "reply": "string",
-  "entities"?: {
-    "services": ["string"] | null,
-    "staff": "string" | null,
-    "date": "YYYY-MM-DD" | null,
-    "time": "HH:mm" | null
-  },
-  "action": "ASK_SERVICE" | "ASK_STAFF" | "SHOW_HOURS" | "RESUMEN" | "CONFIRM_BOOKING"
+  "reply": "string"
 }
 
 REGLAS DEL JSON:
 - Responde SOLO JSON valido
-- "entities" es opcional (por ejemplo en saludos/avisos informativos)
-- Si incluyes "entities" y un valor no existe -> null
 - NUNCA uses markdown o backticks
-- NUNCA uses "action": null
+- NUNCA agregues otras claves ademas de "reply"
+
+REGLA DE AGENDAMIENTO:
+- NO agendas turnos ni tomas datos de una reserva
+- NO propongas horarios concretos ni confirmes citas
+- Si el usuario quiere reservar, el sistema abre un menu de opciones aparte
+- Limitate a conversar y responder sobre el negocio
 
 CONTEXTO DEL NEGOCIO:
 Servicios disponibles: ${services}
@@ -67,7 +62,6 @@ Dias abiertos: ${businessDaysOpen || 'no disponible'}
 Fecha actual: ${context.currentDateTime}
 Hora actual: ${context.currentTime}
 Estado actual: ${context.isClosedNow ? 'CLOSED' : 'OPEN'}
-Entities actuales: ${context.storedEntitiesJson ?? 'null'}
 
 REGLA DE CIERRE:
 - Si no hay horarios cargados o no hay dias abiertos, responde que no hay atencion en este momento.

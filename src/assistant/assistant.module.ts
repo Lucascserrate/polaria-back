@@ -11,7 +11,6 @@ import { AvailabilityModule } from '../availability/availability.module';
 import { AppointmentsModule } from '../appointments/appointments.module';
 import { AssistantController } from './assistant.controller';
 import { AssistantService } from './assistant.service';
-import { AssistantAvailabilityService } from './services/assistant-availability.service';
 import { AssistantAIService } from './services/assistant-ai.service';
 import { AssistantContextService } from './services/assistant-context.service';
 import { AssistantMessagingService } from './services/assistant-messaging.service';
@@ -39,7 +38,6 @@ import { AssistantReplyEnricherService } from './services/assistant-reply-enrich
     AssistantService,
     AssistantPromptContextService,
     AssistantIntentRouterService,
-    AssistantAvailabilityService,
     AssistantAIService,
     AssistantMessagingService,
     SettingsService,

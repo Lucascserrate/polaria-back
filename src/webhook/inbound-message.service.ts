@@ -3,7 +3,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AssistantService } from '../assistant/assistant.service';
 import { AssistantSessionService } from '../assistant/services/assistant-session.service';
 import { BookingFlowService } from '../booking-flow/booking-flow.service';
-import { detectBookingTrigger } from '../booking-flow/booking-trigger';
 import {
   BookingPromptRenderer,
   NATIVE_CHANNEL_LIMITS,
@@ -147,13 +146,17 @@ export class InboundMessageService {
       return;
     }
 
-    // 2. Intención de reservar: se arranca el flujo guiado sin pasar por la IA.
-    //    Es lo único que la detección de intención puede provocar.
-    if (detectBookingTrigger(text)) {
-      this.logger.log(
-        `Intención de reserva detectada (tenantId=${tenantId}, clientId=${client.id}).`,
-      );
+    // 2. Conversación libre. El asistente responde la pregunta o, si detecta
+    //    intención de reservar, cede el control sin redactar nada. Es lo único
+    //    que puede provocar sobre una reserva.
+    const { reply, wantsBooking } = await this.assistantService.chat({
+      tenantId,
+      phone: message.from,
+      clientName: message.contactName ?? undefined,
+      messageText: text,
+    });
 
+    if (wantsBooking) {
       const prompt = await this.bookingFlowService.start({
         tenantId,
         clientId: client.id,
@@ -167,15 +170,6 @@ export class InboundMessageService {
       });
       return;
     }
-
-    // 3. Mientras la IA esté deshabilitada, respondemos con un texto fijo para
-    //    confirmar que el canal sigue vivo.
-    const reply =
-      'Gracias por escribirnos. En este momento te podemos ayudar con reservas. Si quieres agendar una cita, dime "reservar".';
-
-    this.logger.log(
-      `Respuesta fija enviada (tenantId=${tenantId}, clientId=${client.id}).`,
-    );
 
     await this.whatsAppSenderService.sendText(credentials, {
       to: message.from,

@@ -55,8 +55,7 @@ ${servicesCatalogText || '- (no disponible)'}
 
 Formato de salida obligatorio:
 {
-  "reply": "string",
-  "action": "ASK_SERVICE"
+  "reply": "string"
 }
 `.trim();
 };

@@ -92,8 +92,8 @@ export class SettingsService {
       whatsappConnection: {
         connected: Boolean(
           readStoredCredential(tenant.whatsappAccessToken) &&
-            readStoredCredential(tenant.whatsappPhoneId) &&
-            readStoredCredential(tenant.whatsappWabaId),
+          readStoredCredential(tenant.whatsappPhoneId) &&
+          readStoredCredential(tenant.whatsappWabaId),
         ),
         businessId: tenant.whatsappBusinessId ?? null,
         wabaId: tenant.whatsappWabaId ?? null,
@@ -393,7 +393,9 @@ export class SettingsService {
     // Meta reportó en la sesión de Embedded Signup.
     const phoneNumberNode =
       (payload.phoneNumberId
-        ? wabaPhoneNumbers.data?.find((node) => node.id === payload.phoneNumberId)
+        ? wabaPhoneNumbers.data?.find(
+            (node) => node.id === payload.phoneNumberId,
+          )
         : undefined) ?? wabaPhoneNumbers.data?.[0];
 
     const discoveredPhoneNumberId =

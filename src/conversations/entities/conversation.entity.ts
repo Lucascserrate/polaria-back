@@ -16,17 +16,17 @@ export interface ConversationContext {
   [key: string]: unknown;
 }
 
+/**
+ * Estado de la conversación libre.
+ *
+ * Los estados de reserva (`ASK_SERVICE`, `ASK_STAFF`, `SUGGEST_SLOTS`,
+ * `CONFIRM_APPOINTMENT`, `BOOKING_COMPLETE`…) vivían acá cuando la IA conducía el
+ * agendamiento. Ese recorrido ahora es una máquina explícita en
+ * `booking_sessions`, con su propio estado, versión de paso y caducidad. La
+ * conversación en sí no tiene fases: o hay una reserva en curso, o no la hay.
+ */
 export enum ConversationState {
   IDLE = 'IDLE',
-  ASK_SERVICE = 'ASK_SERVICE',
-  ASK_STAFF = 'ASK_STAFF',
-  SUGGEST_SLOTS = 'SUGGEST_SLOTS',
-  ASK_SLOT = 'ASK_SLOT',
-  CONFIRM_APPOINTMENT = 'CONFIRM_APPOINTMENT',
-  BOOKING_COMPLETE = 'BOOKING_COMPLETE',
-  ASK_CLIENT_NAME = 'ASK_CLIENT_NAME',
-  CANCEL_FLOW = 'CANCEL_FLOW',
-  RESCHEDULE_FLOW = 'RESCHEDULE_FLOW',
 }
 
 @Index(['tenantId', 'clientId'])
