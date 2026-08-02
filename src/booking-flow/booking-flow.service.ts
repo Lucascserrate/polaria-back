@@ -6,6 +6,7 @@ import { SlotAlreadyTakenError } from '../appointments/slot-already-taken.error'
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import type { BookingSlot } from '../availability/booking/booking-slot.type';
 import { ServicesService } from '../services/services.service';
+import { formatPrice } from '../services/utils/price-format.util';
 import { StaffService } from '../staff/staff.service';
 import { TenantsService } from '../tenants/tenants.service';
 import {
@@ -634,6 +635,10 @@ export class BookingFlowService {
       return { kind: 'NO_AVAILABILITY', scope: 'DATE' };
     }
 
+    // La descripción muestra el precio y no la duración: los minutos son un dato
+    // nuestro, el precio es lo que el cliente necesita para elegir.
+    const currency = await this.resolveCurrency(session.tenantId);
+
     return {
       kind: 'ASK_SERVICE',
       date,
@@ -644,7 +649,7 @@ export class BookingFlowService {
             session,
             service.id,
             service.name,
-            `${service.durationMinutes} min`,
+            formatPrice(service.price, currency) ?? undefined,
           ),
         ),
         limits,
@@ -890,5 +895,10 @@ export class BookingFlowService {
   private async resolveTimezone(tenantId: string): Promise<string> {
     const tenant = await this.tenantsService.findOne(tenantId);
     return tenant?.timezone ?? DEFAULT_TIMEZONE;
+  }
+
+  private async resolveCurrency(tenantId: string): Promise<string | null> {
+    const tenant = await this.tenantsService.findOne(tenantId);
+    return tenant?.currency ?? null;
   }
 }

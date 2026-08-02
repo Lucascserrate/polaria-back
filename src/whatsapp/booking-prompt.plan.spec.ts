@@ -98,7 +98,9 @@ describe('planToTranscript', () => {
 
     const transcript = planToTranscript(plan);
 
-    expect(transcript).toContain('¿Con quién quieres atenderte?');
+    // El cuerpo es copy editable; lo que fija el test es que las opciones
+    // aparezcan en el registro.
+    expect(transcript).toContain(plan.body);
     expect(transcript).toContain('Nico · Ana · Sin preferencia · Cancelar');
   });
 

@@ -61,6 +61,16 @@ export class Tenant {
   @Column()
   timezone!: string;
 
+  /**
+   * Moneda del negocio en ISO 4217 (`BOB`, `ARS`, `USD`…).
+   *
+   * Va acá y no en cada servicio porque es un dato del negocio: una barbería no
+   * cobra un servicio en bolivianos y otro en dólares. Ponerlo por servicio
+   * duplicaría el mismo valor en cada fila y abriría la puerta a que diverjan.
+   */
+  @Column({ type: 'varchar', length: 3, default: 'BOB' })
+  currency!: string;
+
   @Column({ nullable: true })
   email?: string;
 

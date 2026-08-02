@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AppointmentsModule } from '../appointments/appointments.module';
@@ -19,7 +18,6 @@ import { BookingSession } from './entities/booking-session.entity';
 @Module({
   imports: [
     TypeOrmModule.forFeature([BookingSession]),
-    ScheduleModule.forRoot(),
     AvailabilityModule,
     AppointmentsModule,
     ServicesModule,

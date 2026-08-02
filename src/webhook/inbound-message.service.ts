@@ -1,9 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
 
-import { AssistantService } from '../assistant/assistant.service';
 import { AssistantSessionService } from '../assistant/services/assistant-session.service';
 import { BookingFlowService } from '../booking-flow/booking-flow.service';
 import type { BookingPrompt } from '../booking-flow/booking-flow.types';
+import { detectBookingTrigger } from '../booking-flow/booking-trigger';
+import { ConversationControlService } from '../conversations/conversation-control.service';
+import type { Conversation } from '../conversations/entities/conversation.entity';
+import {
+  buildHandoffAcknowledgement,
+  buildWelcomeMenu,
+  decodeMenuAction,
+  WelcomeMenuAction,
+} from '../conversations/welcome-menu';
+import { TenantsService } from '../tenants/tenants.service';
 import {
   BookingPromptRenderer,
   NATIVE_CHANNEL_LIMITS,
@@ -35,11 +44,12 @@ export class InboundMessageService {
 
   constructor(
     private readonly assistantSessionService: AssistantSessionService,
-    private readonly assistantService: AssistantService,
     private readonly bookingFlowService: BookingFlowService,
     private readonly bookingPromptRenderer: BookingPromptRenderer,
     private readonly whatsAppSenderService: WhatsAppSenderService,
     private readonly conversationRecorder: ConversationRecorderService,
+    private readonly conversationControl: ConversationControlService,
+    private readonly tenantsService: TenantsService,
   ) {}
 
   async handle(params: {
@@ -83,10 +93,12 @@ export class InboundMessageService {
   }
 
   /**
-   * Respuesta a una lista o botón: siempre va al flujo, nunca a la IA.
+   * Respuesta a una lista o botón. Nunca llega a la IA.
    *
-   * El flujo decide por sí solo si la interacción es válida, obsoleta o ajena, así
-   * que acá no hay ninguna comprobación previa.
+   * Hay dos familias de respuestas interactivas y se distinguen por el prefijo del
+   * id: las del menú (`menu|…`) y las del flujo de reserva (`b1|…`). El flujo
+   * decide por sí solo si su interacción es válida, obsoleta o ajena, así que para
+   * esa rama no hay comprobación previa acá.
    */
   private async handleSelection(params: {
     tenantId: string;
@@ -102,6 +114,29 @@ export class InboundMessageService {
         phone: message.from,
         clientName: message.contactName ?? undefined,
       });
+
+    if (this.conversationControl.isHandedOff(conversation)) {
+      await this.recordAndStayQuiet({
+        tenantId,
+        conversation,
+        client,
+        message,
+      });
+      return;
+    }
+
+    const menuAction = decodeMenuAction(selectionId);
+    if (menuAction) {
+      await this.handleMenuAction({
+        tenantId,
+        credentials,
+        message,
+        conversation,
+        clientId: client.id,
+        action: menuAction,
+      });
+      return;
+    }
 
     const prompt = await this.bookingFlowService.handleSelection({
       tenantId,
@@ -148,6 +183,18 @@ export class InboundMessageService {
         clientName: message.contactName ?? undefined,
       });
 
+    // 0. La conversación está en manos del negocio. Polaria no dice nada, pero
+    //    registra el mensaje para que el hilo quede completo.
+    if (this.conversationControl.isHandedOff(conversation)) {
+      await this.recordAndStayQuiet({
+        tenantId,
+        conversation,
+        client,
+        message,
+      });
+      return;
+    }
+
     // 1. Conversación congelada: hay una reserva en curso. El texto no se
     //    interpreta; se recuerda el paso pendiente y se reenvía el componente.
     const frozen = await this.bookingFlowService.handleFreeText({
@@ -181,18 +228,20 @@ export class InboundMessageService {
       return;
     }
 
-    // 2. Conversación libre. El asistente responde la pregunta o, si detecta
-    //    intención de reservar, cede el control sin redactar nada. Es lo único
-    //    que puede provocar sobre una reserva. El asistente ya registra por su
-    //    cuenta el mensaje del cliente y su propia respuesta.
-    const { reply, wantsBooking } = await this.assistantService.chat({
+    await this.conversationRecorder.recordIncomingText({
       tenantId,
-      phone: message.from,
-      clientName: message.contactName ?? undefined,
-      messageText: text,
+      conversationId: conversation.id,
+      clientId: client.id,
+      text,
     });
 
-    if (wantsBooking) {
+    // 2. Pedido explícito de turno: se entra al flujo sin pasar por el menú.
+    //    Mostrarle un menú a quien ya dijo lo que quiere es un paso de más.
+    if (detectBookingTrigger(text)) {
+      this.logger.log(
+        `Intención de reserva detectada (tenantId=${tenantId}, clientId=${client.id}).`,
+      );
+
       const prompt = await this.bookingFlowService.start({
         tenantId,
         clientId: client.id,
@@ -210,9 +259,146 @@ export class InboundMessageService {
       return;
     }
 
-    await this.whatsAppSenderService.sendText(credentials, {
+    // 3. Cualquier otro texto: menú de bienvenida. Polaria no simula responder
+    //    preguntas abiertas; ofrece lo que sabe hacer y la salida a una persona.
+    await this.sendWelcomeMenu({
+      tenantId,
+      credentials,
+      conversationId: conversation.id,
+      clientId: client.id,
       to: message.from,
-      body: reply,
+    });
+  }
+
+  /**
+   * Acción del menú de bienvenida.
+   *
+   * Son las dos únicas cosas que Polaria ofrece hacer: agendar, o apartarse.
+   */
+  private async handleMenuAction(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    message: IncomingWhatsAppMessage;
+    conversation: Conversation;
+    clientId: string;
+    action: WelcomeMenuAction;
+  }): Promise<void> {
+    const { tenantId, credentials, message, conversation, clientId, action } =
+      params;
+
+    await this.conversationRecorder.recordSelection({
+      tenantId,
+      conversationId: conversation.id,
+      clientId,
+      message,
+    });
+
+    if (action === WelcomeMenuAction.BOOK) {
+      const prompt = await this.bookingFlowService.start({
+        tenantId,
+        clientId,
+        conversationId: conversation.id,
+      });
+
+      await this.renderAndRecord({
+        tenantId,
+        credentials,
+        conversationId: conversation.id,
+        clientId,
+        to: message.from,
+        prompt,
+      });
+      return;
+    }
+
+    await this.conversationControl.handOff({ conversation });
+
+    const acknowledgement = buildHandoffAcknowledgement();
+    const sent = await this.whatsAppSenderService.sendText(credentials, {
+      to: message.from,
+      body: acknowledgement,
+    });
+
+    if (sent.ok) {
+      await this.conversationRecorder.recordOutgoingText({
+        tenantId,
+        conversationId: conversation.id,
+        clientId,
+        text: acknowledgement,
+        source: 'handoff',
+      });
+    }
+  }
+
+  /** Menú de bienvenida: el alcance de Polaria, dicho de forma honesta. */
+  private async sendWelcomeMenu(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversationId: string;
+    clientId: string;
+    to: string;
+  }): Promise<void> {
+    const tenant = await this.tenantsService.findOne(params.tenantId);
+    const menu = buildWelcomeMenu(tenant?.name ?? 'la barbería');
+
+    const sent = await this.whatsAppSenderService.sendButtons(
+      params.credentials,
+      {
+        to: params.to,
+        body: menu.body,
+        buttons: menu.options.map((option) => ({
+          id: option.id,
+          title: option.title,
+        })),
+      },
+    );
+
+    if (!sent.ok) return;
+
+    await this.conversationRecorder.recordOutgoingText({
+      tenantId: params.tenantId,
+      conversationId: params.conversationId,
+      clientId: params.clientId,
+      text: `${menu.body}\n\nOpciones: ${menu.options
+        .map((option) => option.title)
+        .join(' · ')}`,
+      source: 'welcome-menu',
+    });
+  }
+
+  /**
+   * Registra un mensaje entrante sin responder.
+   *
+   * Es lo que hace Polaria mientras la conversación está en manos del negocio: el
+   * hilo queda completo en el panel, pero el cliente no recibe nada automático.
+   */
+  private async recordAndStayQuiet(params: {
+    tenantId: string;
+    conversation: Conversation;
+    client: { id: string };
+    message: IncomingWhatsAppMessage;
+  }): Promise<void> {
+    const { tenantId, conversation, client, message } = params;
+
+    this.logger.log(
+      `Conversación en handoff, Polaria no responde (conversationId=${conversation.id}).`,
+    );
+
+    if (message.kind === IncomingMessageKind.TEXT) {
+      await this.conversationRecorder.recordIncomingText({
+        tenantId,
+        conversationId: conversation.id,
+        clientId: client.id,
+        text: message.text,
+      });
+      return;
+    }
+
+    await this.conversationRecorder.recordSelection({
+      tenantId,
+      conversationId: conversation.id,
+      clientId: client.id,
+      message,
     });
   }
 
@@ -235,6 +421,16 @@ export class InboundMessageService {
         phone: message.from,
         clientName: message.contactName ?? undefined,
       });
+
+    if (this.conversationControl.isHandedOff(conversation)) {
+      await this.recordAndStayQuiet({
+        tenantId,
+        conversation,
+        client,
+        message,
+      });
+      return;
+    }
 
     const frozen = await this.bookingFlowService.handleFreeText({
       tenantId,

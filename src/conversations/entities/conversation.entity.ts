@@ -27,6 +27,14 @@ export interface ConversationContext {
  */
 export enum ConversationState {
   IDLE = 'IDLE',
+  /**
+   * El cliente pidió hablar con una persona. Polaria deja de responder por
+   * completo en esta conversación, incluso a botones.
+   *
+   * Es el equivalente por conversación de `tenant.aiEnabled`, que apaga el
+   * asistente para todo el negocio.
+   */
+  HUMAN_HANDOFF = 'HUMAN_HANDOFF',
 }
 
 @Index(['tenantId', 'clientId'])
@@ -65,6 +73,19 @@ export class Conversation {
 
   @Column({ type: 'timestamp', nullable: true })
   lastMessageAt?: Date;
+
+  /**
+   * Momento en que la conversación pasó a manos de una persona.
+   *
+   * Sirve para dos cosas: mostrar la antigüedad del pedido en el panel y
+   * permitir que el barrido por inactividad devuelva la conversación a Polaria.
+   */
+  @Column({ type: 'datetime', nullable: true })
+  handoffRequestedAt?: Date | null;
+
+  /** Cómo se originó el traspaso. Hoy solo `CLIENT_REQUEST`. */
+  @Column({ type: 'varchar', length: 64, nullable: true })
+  handoffReason?: string | null;
 
   @OneToMany(() => Message, (message) => message.conversation)
   messages!: Message[];

@@ -86,6 +86,29 @@ export class ConversationRecorderService {
     });
   }
 
+  /**
+   * Registra un mensaje saliente que no vino del flujo de reservas: el menú de
+   * bienvenida o el aviso de traspaso a una persona.
+   */
+  async recordOutgoingText(params: {
+    tenantId: string;
+    conversationId: string;
+    clientId: string;
+    text: string;
+    source: string;
+  }): Promise<void> {
+    await this.save({
+      tenantId: params.tenantId,
+      conversationId: params.conversationId,
+      clientId: params.clientId,
+      role: MessageRole.ASSISTANT,
+      content: params.text,
+      rawJson: { source: params.source },
+    });
+
+    await this.touch(params.conversationId);
+  }
+
   /** Registra los mensajes del flujo que WhatsApp entregó. */
   async recordRendered(params: {
     tenantId: string;

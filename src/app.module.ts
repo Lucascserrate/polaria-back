@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 
@@ -28,6 +29,10 @@ import { BookingFlowModule } from './booking-flow/booking-flow.module';
       isGlobal: true,
       load: [dbConfig],
     }),
+
+    // Se registra una sola vez para toda la app: los `@Cron` de cualquier módulo
+    // los descubre este scheduler.
+    ScheduleModule.forRoot(),
 
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
