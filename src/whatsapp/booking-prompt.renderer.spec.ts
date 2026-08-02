@@ -27,21 +27,23 @@ type SentMessage =
   | { kind: 'list'; input: SendListInput };
 
 /** Emisor falso que solo registra lo que se le pidió enviar. */
-function fakeSender() {
+function fakeSender(options: { failListSend?: boolean } = {}) {
   const sent: SentMessage[] = [];
 
   const sender = {
     sendText: (_c: WhatsAppCredentials, input: SendTextInput) => {
       sent.push({ kind: 'text', input });
-      return Promise.resolve({ ok: true });
+      return Promise.resolve({ ok: true, metaMessageId: 'wamid.TEXT' });
     },
     sendButtons: (_c: WhatsAppCredentials, input: SendButtonsInput) => {
       sent.push({ kind: 'buttons', input });
-      return Promise.resolve({ ok: true });
+      return Promise.resolve({ ok: true, metaMessageId: 'wamid.BUTTONS' });
     },
     sendList: (_c: WhatsAppCredentials, input: SendListInput) => {
       sent.push({ kind: 'list', input });
-      return Promise.resolve({ ok: true });
+      return options.failListSend
+        ? Promise.resolve({ ok: false, error: 'boom' })
+        : Promise.resolve({ ok: true, metaMessageId: 'wamid.LIST' });
     },
   } as unknown as WhatsAppSenderService;
 
@@ -230,6 +232,60 @@ describe('BookingPromptRenderer', () => {
       expect(sent).toHaveLength(1);
       expect(sent[0].kind).toBe('text');
     }
+  });
+
+  it('informa los mensajes entregados, con su contenido y opciones', async () => {
+    const { sender } = fakeSender();
+
+    const delivered = await new BookingPromptRenderer(sender).render({
+      credentials: CREDENTIALS,
+      to: TO,
+      prompt: {
+        kind: 'ASK_STAFF',
+        options: [option('nico', 'Nico'), option('cancel', 'Cancelar')],
+      },
+    });
+
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].content).toContain('Nico · Cancelar');
+    expect(delivered[0].raw).toMatchObject({
+      source: 'booking-flow',
+      prompt: 'ASK_STAFF',
+      component: 'list',
+      metaMessageId: 'wamid.LIST',
+    });
+    expect(delivered[0].raw.options).toHaveLength(2);
+  });
+
+  it('no informa un mensaje que WhatsApp rechazó', async () => {
+    // Registrarlo mostraría en el historial algo que el cliente nunca recibió.
+    const { sender } = fakeSender({ failListSend: true });
+
+    const delivered = await new BookingPromptRenderer(sender).render({
+      credentials: CREDENTIALS,
+      to: TO,
+      prompt: {
+        kind: 'SLOT_TAKEN',
+        date: '2026-07-31',
+        options: [option('2026-07-31T16:00:00.000Z', '16:00')],
+      },
+    });
+
+    // El aviso salió; la lista no.
+    expect(delivered).toHaveLength(1);
+    expect(delivered[0].raw.component).toBe('text');
+  });
+
+  it('NONE no entrega nada', async () => {
+    const { sender } = fakeSender();
+
+    const delivered = await new BookingPromptRenderer(sender).render({
+      credentials: CREDENTIALS,
+      to: TO,
+      prompt: { kind: 'NONE' },
+    });
+
+    expect(delivered).toEqual([]);
   });
 
   it('una lista sin opciones responde por texto en vez de romper', async () => {

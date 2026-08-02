@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AssistantService } from '../assistant/assistant.service';
 import { AssistantSessionService } from '../assistant/services/assistant-session.service';
 import { BookingFlowService } from '../booking-flow/booking-flow.service';
+import type { BookingPrompt } from '../booking-flow/booking-flow.types';
 import {
   BookingPromptRenderer,
   NATIVE_CHANNEL_LIMITS,
@@ -13,6 +14,10 @@ import {
 } from '../whatsapp/types/incoming-message.type';
 import type { WhatsAppCredentials } from '../whatsapp/types/outgoing-message.type';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
+import { ConversationRecorderService } from './conversation-recorder.service';
+
+const UNSUPPORTED_MESSAGE_REPLY =
+  'Por ahora solo puedo leer mensajes de texto. Escríbeme y te ayudo.';
 
 /**
  * Reparto de los mensajes entrantes entre el flujo guiado y el asistente.
@@ -34,6 +39,7 @@ export class InboundMessageService {
     private readonly bookingFlowService: BookingFlowService,
     private readonly bookingPromptRenderer: BookingPromptRenderer,
     private readonly whatsAppSenderService: WhatsAppSenderService,
+    private readonly conversationRecorder: ConversationRecorderService,
   ) {}
 
   async handle(params: {
@@ -90,11 +96,12 @@ export class InboundMessageService {
   }): Promise<void> {
     const { tenantId, credentials, message, selectionId } = params;
 
-    const { client } = await this.assistantSessionService.getOrCreateSession({
-      tenantId,
-      phone: message.from,
-      clientName: message.contactName ?? undefined,
-    });
+    const { client, conversation } =
+      await this.assistantSessionService.getOrCreateSession({
+        tenantId,
+        phone: message.from,
+        clientName: message.contactName ?? undefined,
+      });
 
     const prompt = await this.bookingFlowService.handleSelection({
       tenantId,
@@ -104,8 +111,23 @@ export class InboundMessageService {
       limits: NATIVE_CHANNEL_LIMITS,
     });
 
-    await this.bookingPromptRenderer.render({
+    // `NONE` significa que el flujo reconoció una reentrega del mismo webhook.
+    // Registrar la selección otra vez duplicaría una línea del historial que ya
+    // existe, así que se descarta entera.
+    if (prompt.kind === 'NONE') return;
+
+    await this.conversationRecorder.recordSelection({
+      tenantId,
+      conversationId: conversation.id,
+      clientId: client.id,
+      message,
+    });
+
+    await this.renderAndRecord({
+      tenantId,
       credentials,
+      conversationId: conversation.id,
+      clientId: client.id,
       to: message.from,
       prompt,
     });
@@ -138,8 +160,21 @@ export class InboundMessageService {
       this.logger.log(
         `Texto libre durante reserva, no interpretado (tenantId=${tenantId}, clientId=${client.id}).`,
       );
-      await this.bookingPromptRenderer.render({
+
+      // El asistente no interviene, así que el mensaje del cliente lo registra
+      // este camino; si no, el hilo mostraría la respuesta sin la pregunta.
+      await this.conversationRecorder.recordIncomingText({
+        tenantId,
+        conversationId: conversation.id,
+        clientId: client.id,
+        text,
+      });
+
+      await this.renderAndRecord({
+        tenantId,
         credentials,
+        conversationId: conversation.id,
+        clientId: client.id,
         to: message.from,
         prompt: frozen,
       });
@@ -148,7 +183,8 @@ export class InboundMessageService {
 
     // 2. Conversación libre. El asistente responde la pregunta o, si detecta
     //    intención de reservar, cede el control sin redactar nada. Es lo único
-    //    que puede provocar sobre una reserva.
+    //    que puede provocar sobre una reserva. El asistente ya registra por su
+    //    cuenta el mensaje del cliente y su propia respuesta.
     const { reply, wantsBooking } = await this.assistantService.chat({
       tenantId,
       phone: message.from,
@@ -163,8 +199,11 @@ export class InboundMessageService {
         conversationId: conversation.id,
       });
 
-      await this.bookingPromptRenderer.render({
+      await this.renderAndRecord({
+        tenantId,
         credentials,
+        conversationId: conversation.id,
+        clientId: client.id,
         to: message.from,
         prompt,
       });
@@ -190,11 +229,12 @@ export class InboundMessageService {
   }): Promise<void> {
     const { tenantId, credentials, message } = params;
 
-    const { client } = await this.assistantSessionService.getOrCreateSession({
-      tenantId,
-      phone: message.from,
-      clientName: message.contactName ?? undefined,
-    });
+    const { client, conversation } =
+      await this.assistantSessionService.getOrCreateSession({
+        tenantId,
+        phone: message.from,
+        clientName: message.contactName ?? undefined,
+      });
 
     const frozen = await this.bookingFlowService.handleFreeText({
       tenantId,
@@ -203,8 +243,11 @@ export class InboundMessageService {
     });
 
     if (frozen) {
-      await this.bookingPromptRenderer.render({
+      await this.renderAndRecord({
+        tenantId,
         credentials,
+        conversationId: conversation.id,
+        clientId: client.id,
         to: message.from,
         prompt: frozen,
       });
@@ -213,7 +256,30 @@ export class InboundMessageService {
 
     await this.whatsAppSenderService.sendText(credentials, {
       to: message.from,
-      body: 'Por ahora solo puedo leer mensajes de texto. Escríbeme y te ayudo.',
+      body: UNSUPPORTED_MESSAGE_REPLY,
+    });
+  }
+
+  /** Envía el paso del flujo y deja constancia de lo que WhatsApp entregó. */
+  private async renderAndRecord(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversationId: string;
+    clientId: string;
+    to: string;
+    prompt: BookingPrompt;
+  }): Promise<void> {
+    const rendered = await this.bookingPromptRenderer.render({
+      credentials: params.credentials,
+      to: params.to,
+      prompt: params.prompt,
+    });
+
+    await this.conversationRecorder.recordRendered({
+      tenantId: params.tenantId,
+      conversationId: params.conversationId,
+      clientId: params.clientId,
+      rendered,
     });
   }
 }

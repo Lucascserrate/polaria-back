@@ -57,6 +57,13 @@ export class Message {
   @Column({ type: 'json', nullable: true })
   rawJson?: any;
 
-  @CreateDateColumn()
+  /**
+   * Precisión de milisegundos porque el historial se ordena por esta columna.
+   *
+   * El flujo guiado emite varios mensajes en el mismo turno —el aviso y la lista,
+   * por ejemplo— y con precisión de segundo caían todos en el mismo instante, con
+   * lo cual el orden en que se leían quedaba indefinido.
+   */
+  @CreateDateColumn({ type: 'datetime', precision: 3 })
   createdAt!: Date;
 }
