@@ -87,9 +87,9 @@ export class StaffService {
     return this.findOne(id);
   }
 
-  async remove(id: string) {
-    await this.staffRepository.update(id, { isActive: false });
-    await this.staffRepository.softDelete(id);
+  async remove(id: string, tenantId: string) {
+    await this.staffRepository.update({ id, tenantId }, { isActive: false });
+    await this.staffRepository.softDelete({ id, tenantId });
     return { deleted: true };
   }
 }
