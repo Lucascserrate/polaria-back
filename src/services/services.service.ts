@@ -50,6 +50,6 @@ export class ServicesService {
   async removeByTenant(id: string, tenantId: string) {
     await this.serviceRepository.update({ id, tenantId }, { isActive: false });
     await this.serviceRepository.softDelete({ id, tenantId });
-    return this.findOneByTenant(id, tenantId);
+    return { deleted: true };
   }
 }

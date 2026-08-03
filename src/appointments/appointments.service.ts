@@ -4,7 +4,7 @@
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { Appointment, blocksAgenda } from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -214,6 +214,7 @@ export class AppointmentsService {
 
     let query = this.appointmentRepository
       .createQueryBuilder('appointment')
+      .withDeleted()
       .leftJoinAndSelect('appointment.tenant', 'tenant')
       .leftJoinAndSelect('appointment.client', 'client')
       .leftJoinAndSelect('appointment.services', 'appointmentServices')
@@ -326,17 +327,17 @@ export class AppointmentsService {
   }
 
   findOneByTenant(id: string, tenantId: string) {
-    return this.appointmentRepository.findOne({
-      where: { id, tenantId },
-      relations: {
-        client: true,
-        tenant: true,
-        services: {
-          service: true,
-          staff: true,
-        },
-      },
-    });
+    return this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .withDeleted()
+      .leftJoinAndSelect('appointment.client', 'client')
+      .leftJoinAndSelect('appointment.tenant', 'tenant')
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.id = :id', { id })
+      .andWhere('appointment.tenantId = :tenantId', { tenantId })
+      .getOne();
   }
 
   async findTodayByTenant(tenantId: string): Promise<{
@@ -367,22 +368,19 @@ export class AppointmentsService {
     const timezone = normalizeTimezone(tenant?.timezone);
     const { startUtc, endUtc } = this.getDayRange(timezone, new Date());
 
-    const endInclusive = new Date(endUtc.getTime() - 1);
-    const appointments = await this.appointmentRepository.find({
-      where: {
-        tenantId,
-        startTime: Between(startUtc, endInclusive),
-      },
-      relations: {
-        client: true,
-        tenant: true,
-        services: {
-          service: true,
-          staff: true,
-        },
-      },
-      order: { startTime: 'ASC' },
-    });
+    const appointments = await this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .withDeleted()
+      .leftJoinAndSelect('appointment.client', 'client')
+      .leftJoinAndSelect('appointment.tenant', 'tenant')
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.startTime >= :startUtc', { startUtc })
+      .andWhere('appointment.startTime < :endUtc', { endUtc })
+      .orderBy('appointment.startTime', 'ASC')
+      .getMany();
 
     const items = appointments.map((a) => {
       const serviceNames = (a.services ?? [])
@@ -483,15 +481,19 @@ export class AppointmentsService {
   }
 
   async findLastByClient(tenantId: string, clientId: string) {
-    return this.appointmentRepository.findOne({
-      where: {
-        tenantId,
-        clientId,
+    return this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .withDeleted()
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.clientId = :clientId', { clientId })
+      .andWhere('appointment.status = :status', {
         status: AppointmentStatus.CONFIRMED,
-      },
-      relations: ['services', 'services.service', 'services.staff'],
-      order: { startTime: 'DESC' },
-    });
+      })
+      .orderBy('appointment.startTime', 'DESC')
+      .getOne();
   }
 
   async createFromAssistant(input: {
