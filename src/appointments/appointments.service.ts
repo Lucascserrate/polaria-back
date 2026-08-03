@@ -18,6 +18,7 @@ import {
   isDuplicateEntryError,
   SlotAlreadyTakenError,
 } from './slot-already-taken.error';
+import { normalizeTimezone } from '../common/timezone.util';
 
 @Injectable()
 export class AppointmentsService {
@@ -41,7 +42,7 @@ export class AppointmentsService {
     const tenant = await tenantRepo.findOne({
       where: { id: appointmentData.tenantId },
     });
-    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const timezone = normalizeTimezone(tenant?.timezone);
     const { date, time } = this.getDateTimeParts(startTime, timezone);
 
     const services = await this.serviceRepository.find({
@@ -280,7 +281,7 @@ export class AppointmentsService {
       }>();
 
     const items = appointments.map((a) => {
-      const timezone = a.tenant?.timezone ?? 'America/La_Paz';
+      const timezone = normalizeTimezone(a.tenant?.timezone);
       const serviceNames = (a.services ?? [])
         .map((s) => s.service?.name)
         .filter((name): name is string => !!name);
@@ -363,7 +364,7 @@ export class AppointmentsService {
   }> {
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const timezone = normalizeTimezone(tenant?.timezone);
     const { startUtc, endUtc } = this.getDayRange(timezone, new Date());
 
     const endInclusive = new Date(endUtc.getTime() - 1);
@@ -797,7 +798,7 @@ export class AppointmentsService {
         const tenantRepo =
           this.appointmentRepository.manager.getRepository(Tenant);
         const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-        const timezone = tenant?.timezone ?? 'America/La_Paz';
+        const timezone = normalizeTimezone(tenant?.timezone);
         const { date, time } = this.getDateTimeParts(
           appointment.startTime,
           timezone,
@@ -884,8 +885,9 @@ export class AppointmentsService {
   }
 
   private formatDateTime(date: Date, timezone: string): string {
+    const safeTimezone = normalizeTimezone(timezone);
     const formatter = new Intl.DateTimeFormat('es-CO', {
-      timeZone: timezone,
+      timeZone: safeTimezone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
