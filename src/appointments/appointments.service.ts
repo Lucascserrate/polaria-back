@@ -36,8 +36,6 @@ export class AppointmentsService {
     const { serviceIds, segments, ...appointmentData } = createAppointmentDto;
 
     const startTime = this.parseDate(appointmentData.startTime, 'startTime');
-    const endTimeInput = this.parseDate(appointmentData.endTime, 'endTime');
-
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({
       where: { id: appointmentData.tenantId },
@@ -73,12 +71,6 @@ export class AppointmentsService {
     const expectedEndTime = new Date(
       startTime.getTime() + expectedTotalMinutes * 60_000,
     );
-    const diffMs = Math.abs(expectedEndTime.getTime() - endTimeInput.getTime());
-    if (diffMs > 60_000) {
-      throw new BadRequestException(
-        'endTime no coincide con la duración total de los servicios',
-      );
-    }
 
     const isMultiStaff = Array.isArray(segments) && segments.length > 0;
     if (!appointmentData.staffId && !isMultiStaff) {
