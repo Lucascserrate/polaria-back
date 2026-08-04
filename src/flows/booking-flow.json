@@ -1,0 +1,234 @@
+{
+  "version": "7.3",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "BOOKING": ["SUMMARY"],
+    "SUMMARY": []
+  },
+  "screens": [
+    {
+      "id": "BOOKING",
+      "title": "Reservar turno",
+      "data": {
+        "services": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "9f1c2a80-1111-4a10-9c11-000000000001", "title": "Corte — Bs 80" },
+            { "id": "9f1c2a80-1111-4a10-9c11-000000000002", "title": "Barba — Bs 50" },
+            { "id": "9f1c2a80-1111-4a10-9c11-000000000003", "title": "Corte + Barba — Bs 120" }
+          ]
+        },
+        "staff": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "any", "title": "Sin preferencia" },
+            { "id": "5b2f0c10-2222-4b20-8d22-000000000001", "title": "Nico" },
+            { "id": "5b2f0c10-2222-4b20-8d22-000000000002", "title": "Ana" }
+          ]
+        },
+        "is_staff_enabled": { "type": "boolean", "__example__": false },
+        "dates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "2026-08-02", "title": "Hoy" },
+            { "id": "2026-08-03", "title": "Mañana" },
+            { "id": "2026-08-04", "title": "mar 4 ago" }
+          ]
+        },
+        "is_date_enabled": { "type": "boolean", "__example__": false },
+        "slots": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" }
+            }
+          },
+          "__example__": [
+            { "id": "2026-08-02T14:00:00.000Z", "title": "10:00" },
+            { "id": "2026-08-02T14:30:00.000Z", "title": "10:30", "enabled": false },
+            { "id": "2026-08-02T15:00:00.000Z", "title": "11:00" }
+          ]
+        },
+        "is_slot_enabled": { "type": "boolean", "__example__": false },
+        "has_error": { "type": "boolean", "__example__": false },
+        "error_message": {
+          "type": "string",
+          "__example__": "Ese horario ya no está disponible."
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "If",
+            "condition": "${data.has_error}",
+            "then": [
+              {
+                "type": "TextCaption",
+                "text": "${data.error_message}"
+              }
+            ]
+          },
+          {
+            "type": "Form",
+            "name": "booking_form",
+            "children": [
+              {
+                "type": "Dropdown",
+                "label": "Servicio",
+                "name": "service",
+                "data-source": "${data.services}",
+                "required": true,
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "trigger": "service_selected",
+                    "service": "${form.service}"
+                  }
+                }
+              },
+              {
+                "type": "Dropdown",
+                "label": "Profesional",
+                "name": "staff",
+                "data-source": "${data.staff}",
+                "required": "${data.is_staff_enabled}",
+                "enabled": "${data.is_staff_enabled}",
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "trigger": "staff_selected",
+                    "service": "${form.service}",
+                    "staff": "${form.staff}"
+                  }
+                }
+              },
+              {
+                "type": "Dropdown",
+                "label": "Fecha",
+                "name": "date",
+                "data-source": "${data.dates}",
+                "required": "${data.is_date_enabled}",
+                "enabled": "${data.is_date_enabled}",
+                "on-select-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "trigger": "date_selected",
+                    "service": "${form.service}",
+                    "staff": "${form.staff}",
+                    "date": "${form.date}"
+                  }
+                }
+              },
+              {
+                "type": "Dropdown",
+                "label": "Horario",
+                "name": "slot",
+                "data-source": "${data.slots}",
+                "required": "${data.is_slot_enabled}",
+                "enabled": "${data.is_slot_enabled}"
+              },
+              {
+                "type": "Footer",
+                "label": "Continuar",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "trigger": "review",
+                    "service": "${form.service}",
+                    "staff": "${form.staff}",
+                    "date": "${form.date}",
+                    "slot": "${form.slot}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "SUMMARY",
+      "title": "Confirmar turno",
+      "terminal": true,
+      "data": {
+        "summary": {
+          "type": "string",
+          "__example__": "Corte + Barba (45 min)\nHoy, 2 de agosto\n10:00\nCon Nico"
+        },
+        "service": {
+          "type": "string",
+          "__example__": "9f1c2a80-1111-4a10-9c11-000000000003"
+        },
+        "staff": {
+          "type": "string",
+          "__example__": "any"
+        },
+        "date": {
+          "type": "string",
+          "__example__": "2026-08-02"
+        },
+        "slot": {
+          "type": "string",
+          "__example__": "2026-08-02T14:00:00.000Z"
+        }
+      },
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "summary_form",
+            "children": [
+              {
+                "type": "TextHeading",
+                "text": "Revisá tu turno"
+              },
+              {
+                "type": "TextBody",
+                "text": "${data.summary}"
+              },
+              {
+                "type": "Footer",
+                "label": "Confirmar turno",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "trigger": "confirm",
+                    "service": "${data.service}",
+                    "staff": "${data.staff}",
+                    "date": "${data.date}",
+                    "slot": "${data.slot}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
