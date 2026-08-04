@@ -87,7 +87,7 @@ export class StaffController {
       if (!staff || staff.tenantId !== tenantId) {
         throw new UnauthorizedException('Missing tenant id');
       }
-      return this.staffService.remove(id);
+      return this.staffService.remove(id, tenantId);
     });
   }
 }

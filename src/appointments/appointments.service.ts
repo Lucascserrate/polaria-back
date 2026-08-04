@@ -4,7 +4,7 @@
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { Appointment, blocksAgenda } from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
@@ -18,6 +18,7 @@ import {
   isDuplicateEntryError,
   SlotAlreadyTakenError,
 } from './slot-already-taken.error';
+import { normalizeTimezone } from '../common/timezone.util';
 
 @Injectable()
 export class AppointmentsService {
@@ -35,13 +36,11 @@ export class AppointmentsService {
     const { serviceIds, segments, ...appointmentData } = createAppointmentDto;
 
     const startTime = this.parseDate(appointmentData.startTime, 'startTime');
-    const endTimeInput = this.parseDate(appointmentData.endTime, 'endTime');
-
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({
       where: { id: appointmentData.tenantId },
     });
-    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const timezone = normalizeTimezone(tenant?.timezone);
     const { date, time } = this.getDateTimeParts(startTime, timezone);
 
     const services = await this.serviceRepository.find({
@@ -72,12 +71,6 @@ export class AppointmentsService {
     const expectedEndTime = new Date(
       startTime.getTime() + expectedTotalMinutes * 60_000,
     );
-    const diffMs = Math.abs(expectedEndTime.getTime() - endTimeInput.getTime());
-    if (diffMs > 60_000) {
-      throw new BadRequestException(
-        'endTime no coincide con la duración total de los servicios',
-      );
-    }
 
     const isMultiStaff = Array.isArray(segments) && segments.length > 0;
     if (!appointmentData.staffId && !isMultiStaff) {
@@ -213,6 +206,7 @@ export class AppointmentsService {
 
     let query = this.appointmentRepository
       .createQueryBuilder('appointment')
+      .withDeleted()
       .leftJoinAndSelect('appointment.tenant', 'tenant')
       .leftJoinAndSelect('appointment.client', 'client')
       .leftJoinAndSelect('appointment.services', 'appointmentServices')
@@ -280,7 +274,7 @@ export class AppointmentsService {
       }>();
 
     const items = appointments.map((a) => {
-      const timezone = a.tenant?.timezone ?? 'America/La_Paz';
+      const timezone = normalizeTimezone(a.tenant?.timezone);
       const serviceNames = (a.services ?? [])
         .map((s) => s.service?.name)
         .filter((name): name is string => !!name);
@@ -325,17 +319,17 @@ export class AppointmentsService {
   }
 
   findOneByTenant(id: string, tenantId: string) {
-    return this.appointmentRepository.findOne({
-      where: { id, tenantId },
-      relations: {
-        client: true,
-        tenant: true,
-        services: {
-          service: true,
-          staff: true,
-        },
-      },
-    });
+    return this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .withDeleted()
+      .leftJoinAndSelect('appointment.client', 'client')
+      .leftJoinAndSelect('appointment.tenant', 'tenant')
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.id = :id', { id })
+      .andWhere('appointment.tenantId = :tenantId', { tenantId })
+      .getOne();
   }
 
   async findTodayByTenant(tenantId: string): Promise<{
@@ -363,25 +357,22 @@ export class AppointmentsService {
   }> {
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const timezone = normalizeTimezone(tenant?.timezone);
     const { startUtc, endUtc } = this.getDayRange(timezone, new Date());
 
-    const endInclusive = new Date(endUtc.getTime() - 1);
-    const appointments = await this.appointmentRepository.find({
-      where: {
-        tenantId,
-        startTime: Between(startUtc, endInclusive),
-      },
-      relations: {
-        client: true,
-        tenant: true,
-        services: {
-          service: true,
-          staff: true,
-        },
-      },
-      order: { startTime: 'ASC' },
-    });
+    const appointments = await this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .withDeleted()
+      .leftJoinAndSelect('appointment.client', 'client')
+      .leftJoinAndSelect('appointment.tenant', 'tenant')
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.startTime >= :startUtc', { startUtc })
+      .andWhere('appointment.startTime < :endUtc', { endUtc })
+      .orderBy('appointment.startTime', 'ASC')
+      .getMany();
 
     const items = appointments.map((a) => {
       const serviceNames = (a.services ?? [])
@@ -482,15 +473,19 @@ export class AppointmentsService {
   }
 
   async findLastByClient(tenantId: string, clientId: string) {
-    return this.appointmentRepository.findOne({
-      where: {
-        tenantId,
-        clientId,
+    return this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .withDeleted()
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.clientId = :clientId', { clientId })
+      .andWhere('appointment.status = :status', {
         status: AppointmentStatus.CONFIRMED,
-      },
-      relations: ['services', 'services.service', 'services.staff'],
-      order: { startTime: 'DESC' },
-    });
+      })
+      .orderBy('appointment.startTime', 'DESC')
+      .getOne();
   }
 
   async createFromAssistant(input: {
@@ -797,7 +792,7 @@ export class AppointmentsService {
         const tenantRepo =
           this.appointmentRepository.manager.getRepository(Tenant);
         const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-        const timezone = tenant?.timezone ?? 'America/La_Paz';
+        const timezone = normalizeTimezone(tenant?.timezone);
         const { date, time } = this.getDateTimeParts(
           appointment.startTime,
           timezone,
@@ -884,8 +879,9 @@ export class AppointmentsService {
   }
 
   private formatDateTime(date: Date, timezone: string): string {
+    const safeTimezone = normalizeTimezone(timezone);
     const formatter = new Intl.DateTimeFormat('es-CO', {
-      timeZone: timezone,
+      timeZone: safeTimezone,
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

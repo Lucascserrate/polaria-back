@@ -13,6 +13,7 @@ import {
   makeDateInTimeZone,
 } from './utils/availability.helpers';
 import { normalizeSlots } from './utils/availability-formatter';
+import { normalizeTimezone } from '../common/timezone.util';
 
 @Injectable()
 export class AvailabilityService {
@@ -40,10 +41,7 @@ export class AvailabilityService {
       return { isAvailable: false, suggestedSlots: [] };
     }
 
-    const timeZone = tenant.timezone;
-    if (!timeZone) {
-      return { isAvailable: false, suggestedSlots: [] };
-    }
+    const timeZone = normalizeTimezone(tenant.timezone);
 
     const nowFormatted = new Intl.DateTimeFormat('en-CA', {
       timeZone,
@@ -316,4 +314,5 @@ export class AvailabilityService {
       friendlySlots,
     };
   }
+
 }
