@@ -3,9 +3,12 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsNumber,
   IsOptional,
   IsString,
   IsUUID,
+  Max,
+  Min,
 } from 'class-validator';
 
 export class CreateStaffDto {
@@ -32,6 +35,16 @@ export class CreateStaffDto {
   @IsOptional()
   @IsBoolean()
   isActive?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Comisión en porcentaje sobre lo facturado (0-100)',
+    example: 40,
+  })
+  @IsOptional()
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0)
+  @Max(100)
+  commissionRate?: number;
 
   @ApiPropertyOptional({
     type: [String],

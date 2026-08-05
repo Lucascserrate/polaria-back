@@ -218,6 +218,10 @@ export class AppointmentsService {
       .leftJoinAndSelect('appointment.services', 'appointmentServices')
       .leftJoinAndSelect('appointmentServices.service', 'service')
       .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      // Sin esto el join descartaría al staff dado de baja y las citas viejas
+      // aparecerían sin profesional. Solo afecta a `staff`: es la única entidad
+      // de esta consulta con borrado lógico.
+      .withDeleted()
       .where('appointment.tenantId = :tenantId', { tenantId: tenantId });
 
     if (filters?.search && filters.search.trim()) {
@@ -335,6 +339,9 @@ export class AppointmentsService {
           staff: true,
         },
       },
+      // Conserva el profesional aunque haya sido dado de baja: la cita ya
+      // ocurrió y su historial no debe perder el dato.
+      withDeleted: true,
     });
   }
 
@@ -380,6 +387,7 @@ export class AppointmentsService {
           staff: true,
         },
       },
+      withDeleted: true,
       order: { startTime: 'ASC' },
     });
 

@@ -87,8 +87,12 @@ export class StaffService {
     return this.findOne(id);
   }
 
+  /**
+   * Baja lógica. Ver `Staff.deletedAt`: un `delete()` físico arrastraría en
+   * cascada los segmentos de sus citas y borraría el historial del negocio.
+   */
   async remove(id: string) {
-    await this.staffRepository.delete(id);
+    await this.staffRepository.softDelete(id);
     return { deleted: true };
   }
 }

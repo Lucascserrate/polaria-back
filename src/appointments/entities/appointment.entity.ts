@@ -37,7 +37,24 @@ export const BLOCKING_APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
 export function blocksAgenda(status: AppointmentStatus): boolean {
   return BLOCKING_APPOINTMENT_STATUSES.includes(status);
 }
+
+/**
+ * Estados en los que la cita sigue abierta: ya no se puede cambiar nada de ella
+ * pero todavía no se resolvió en atendida ni en cancelada. Es lo que los
+ * reportes cuentan como "pendiente".
+ */
+export const OPEN_APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
+  AppointmentStatus.PENDING,
+  AppointmentStatus.BOOKED,
+  AppointmentStatus.CONFIRMED,
+];
 @Index(['tenantId', 'startTime'])
+/**
+ * Los reportes filtran siempre por negocio + estado + rango de fechas. Con el
+ * índice de arriba MySQL leería todas las citas del período para después
+ * descartar por estado; con este resuelve el filtro completo desde el índice.
+ */
+@Index(['tenantId', 'status', 'startTime'])
 @Entity('appointments')
 export class Appointment {
   @PrimaryGeneratedColumn('uuid')
