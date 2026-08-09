@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import type { BusinessHour } from '../business_hours/entities/business_hour.entity';
 import type {
   SlotRange,
   StaffSlot,
@@ -9,8 +8,6 @@ import {
   addMinutes,
   findClosestSlots,
   isOverlapping,
-  makeDateInTimeZone,
-  normalizeTime,
   toSuggestedSlot,
 } from './utils/availability.helpers';
 
@@ -23,10 +20,15 @@ export class AvailabilityCalculator {
     );
   }
 
+  /**
+   * Grilla de horarios posibles dentro de las franjas de trabajo recibidas.
+   *
+   * Las franjas ya vienen resueltas a instantes absolutos por
+   * `resolveWorkingRanges`, así que acá no se conoce la zona horaria ni de quién
+   * es el horario: puede ser el del negocio o la cobertura combinada del equipo.
+   */
   generateCandidateSlots(
-    businessHours: BusinessHour[],
-    desiredDate: string,
-    timeZone: string,
+    workingRanges: SlotRange[],
     durationMinutes: number,
     // El flujo guiado usa un paso más grueso; el conversacional necesitaba 5
     // para poder buscar el horario más cercano al que pedía el usuario.
@@ -34,22 +36,9 @@ export class AvailabilityCalculator {
   ): SlotRange[] {
     const slots: SlotRange[] = [];
 
-    for (const hours of businessHours) {
-      const startTime = makeDateInTimeZone(
-        desiredDate,
-        normalizeTime(hours.startTime),
-        timeZone,
-      );
-      const endTime = makeDateInTimeZone(
-        desiredDate,
-        normalizeTime(hours.endTime),
-        timeZone,
-      );
-
-      if (endTime <= startTime) continue;
-
-      let slotStart = startTime;
-      while (addMinutes(slotStart, durationMinutes) <= endTime) {
+    for (const range of workingRanges) {
+      let slotStart = range.startTime;
+      while (addMinutes(slotStart, durationMinutes) <= range.endTime) {
         const slotEnd = addMinutes(slotStart, durationMinutes);
         slots.push({ startTime: slotStart, endTime: slotEnd });
         slotStart = addMinutes(slotStart, stepMinutes);

@@ -1,4 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
@@ -9,7 +10,9 @@ import {
   IsUUID,
   Max,
   Min,
+  ValidateNested,
 } from 'class-validator';
+import { StaffScheduleDto } from './staff-schedule.dto';
 
 export class CreateStaffDto {
   @ApiPropertyOptional()
@@ -54,4 +57,23 @@ export class CreateStaffDto {
   @IsArray()
   @IsUUID('4', { each: true })
   serviceIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Si es true, la jornada del profesional es `schedules` y no el horario del negocio.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  usesCustomSchedule?: boolean;
+
+  @ApiPropertyOptional({
+    type: [StaffScheduleDto],
+    description:
+      'Jornada semanal completa. Reemplaza a la anterior; solo se aplica si usesCustomSchedule es true.',
+  })
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => StaffScheduleDto)
+  schedules?: StaffScheduleDto[];
 }

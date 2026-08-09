@@ -9,6 +9,7 @@ import { AppointmentService as AppointmentServiceEntity } from '../appointments/
 import { BusinessHour } from '../business_hours/entities/business_hour.entity';
 import { Service } from '../services/entities/service.entity';
 import { Staff } from '../staff/entities/staff.entity';
+import { StaffSchedule } from '../staff/entities/staff_schedule.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { makeDateInTimeZone, addMinutes } from './utils/availability.helpers';
 
@@ -23,6 +24,8 @@ export class AvailabilityRepository {
     private readonly businessHourRepository: Repository<BusinessHour>,
     @InjectRepository(Staff)
     private readonly staffRepository: Repository<Staff>,
+    @InjectRepository(StaffSchedule)
+    private readonly staffScheduleRepository: Repository<StaffSchedule>,
     @InjectRepository(Appointment)
     private readonly appointmentRepository: Repository<Appointment>,
     @InjectRepository(AppointmentServiceEntity)
@@ -55,17 +58,49 @@ export class AvailabilityRepository {
     });
   }
 
-  async getBusinessHours(
-    tenantId: string,
-    dayOfWeek: number,
-  ): Promise<BusinessHour[]> {
+  /**
+   * Todas las franjas del negocio, de los siete días.
+   *
+   * No se filtra por día en SQL a propósito: quien decide qué franjas aplican es
+   * `resolveWorkingRanges`, que recibe la fecha completa para poder contemplar
+   * más adelante las excepciones por fecha. Filtrar acá obligaría al llamador a
+   * derivar el día de la semana, que es justamente la parte que no debe salir
+   * del resolvedor. Son siete filas: traerlas enteras no cuesta nada.
+   */
+  async getBusinessHours(tenantId: string): Promise<BusinessHour[]> {
     return this.businessHourRepository.find({
-      where: {
-        tenantId,
-        dayOfWeek,
-      },
-      order: { startTime: 'ASC' },
+      where: { tenantId },
+      order: { dayOfWeek: 'ASC', startTime: 'ASC' },
     });
+  }
+
+  /**
+   * Jornadas propias de varios profesionales, agrupadas por `staffId`.
+   *
+   * Una sola consulta para todo el equipo. Los profesionales sin jornada propia
+   * quedan con un array vacío, que es lo que `resolveWorkingRanges` espera.
+   */
+  async getStaffSchedules(
+    staffIds: string[],
+  ): Promise<Record<string, StaffSchedule[]>> {
+    const uniqueStaffIds = Array.from(new Set(staffIds)).filter(Boolean);
+
+    const grouped: Record<string, StaffSchedule[]> = {};
+    for (const id of uniqueStaffIds) grouped[id] = [];
+
+    if (!uniqueStaffIds.length) return grouped;
+
+    const schedules = await this.staffScheduleRepository.find({
+      where: { staffId: In(uniqueStaffIds) },
+      order: { dayOfWeek: 'ASC', startTime: 'ASC' },
+    });
+
+    for (const schedule of schedules) {
+      grouped[schedule.staffId] ??= [];
+      grouped[schedule.staffId].push(schedule);
+    }
+
+    return grouped;
   }
 
   async getStaffList(
@@ -162,40 +197,5 @@ export class AvailabilityRepository {
       });
     }
     return grouped;
-  }
-
-  async getAppointments(
-    tenantId: string,
-    desiredDate: string,
-    timeZone: string,
-    staffId?: string,
-  ): Promise<Array<{ startTime: Date; endTime: Date }>> {
-    const dayStart = makeDateInTimeZone(desiredDate, '00:00', timeZone);
-    const nextDayStart = addMinutes(dayStart, 24 * 60);
-    const dayEnd = new Date(nextDayStart.getTime() - 1);
-
-    const qb = this.appointmentServiceRepository
-      .createQueryBuilder('as')
-      .select(['as.startTime', 'as.endTime', 'as.staffId'])
-      .innerJoin('as.appointment', 'a')
-      .where('a.tenantId = :tenantId', { tenantId })
-      .andWhere('a.status IN (:...statuses)', {
-        statuses: [...BLOCKING_APPOINTMENT_STATUSES],
-      })
-      .andWhere('as.startTime BETWEEN :dayStart AND :dayEnd', {
-        dayStart,
-        dayEnd,
-      })
-      .orderBy('as.startTime', 'ASC');
-
-    if (staffId) {
-      qb.andWhere('as.staffId = :staffId', { staffId });
-    }
-
-    const segments = await qb.getMany();
-    return segments.map((s) => ({
-      startTime: s.startTime,
-      endTime: s.endTime,
-    }));
   }
 }

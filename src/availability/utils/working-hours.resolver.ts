@@ -80,6 +80,49 @@ export const resolveWorkingRanges = (
 };
 
 /**
+ * Resuelve las franjas de varios profesionales de una vez.
+ *
+ * Existe para que los dos motores de disponibilidad —el conversacional y el del
+ * flujo guiado— compartan exactamente el mismo criterio en vez de repetir el
+ * bucle cada uno por su lado.
+ */
+export const resolveWorkingRangesByStaff = (input: {
+  date: string;
+  timeZone: string;
+  businessHours: WeeklyTimeRange[];
+  staff: Array<{ id: string; usesCustomSchedule: boolean }>;
+  /** Jornadas propias por `staffId`, tal como las agrupa el repositorio. */
+  schedulesByStaff: Record<string, WeeklyTimeRange[]>;
+}): Record<string, SlotRange[]> => {
+  const rangesByStaff: Record<string, SlotRange[]> = {};
+
+  for (const member of input.staff) {
+    rangesByStaff[member.id] = resolveWorkingRanges({
+      date: input.date,
+      timeZone: input.timeZone,
+      businessHours: input.businessHours,
+      usesCustomSchedule: member.usesCustomSchedule,
+      staffSchedules: input.schedulesByStaff[member.id] ?? [],
+    });
+  }
+
+  return rangesByStaff;
+};
+
+/**
+ * Cobertura combinada del equipo, para generar una única grilla de candidatos.
+ *
+ * Con Julio de 09:00 a 17:00 y Marco de 13:00 a 21:00 la grilla va de 09:00 a
+ * 21:00, y después cada profesional se filtra contra su propia franja. Generar
+ * una grilla por persona produciría horarios desalineados entre sí.
+ */
+export const unionWorkingRanges = (
+  rangesByStaff: Record<string, SlotRange[]>,
+  staffIds: string[],
+): SlotRange[] =>
+  mergeRanges(staffIds.flatMap((staffId) => rangesByStaff[staffId] ?? []));
+
+/**
  * Indica si un slot candidato entra completo en alguna de las franjas.
  *
  * Exige que quepa dentro de **una sola** franja: como vienen fusionadas, un slot

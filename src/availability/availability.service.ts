@@ -8,10 +8,14 @@ import type {
 } from './utils/availability.types';
 import {
   addMinutes,
-  getDayOfWeek,
   isOverlapping,
   makeDateInTimeZone,
 } from './utils/availability.helpers';
+import {
+  isWithinWorkingRanges,
+  resolveWorkingRangesByStaff,
+  unionWorkingRanges,
+} from './utils/working-hours.resolver';
 import { normalizeSlots } from './utils/availability-formatter';
 
 @Injectable()
@@ -60,23 +64,11 @@ export class AvailabilityService {
     const desiredTime = input.desiredTime || nowTime;
     const hasDesiredTime = Boolean(input.desiredTime);
 
-    const dayOfWeek = getDayOfWeek(desiredDate, timeZone);
     const businessHours = await this.availabilityRepository.getBusinessHours(
       input.tenantId,
-      dayOfWeek,
     );
-    if (businessHours.length === 0) {
-      return { isAvailable: false, suggestedSlots: [] };
-    }
 
     const desiredStart = makeDateInTimeZone(desiredDate, desiredTime, timeZone);
-
-    const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
-      businessHours,
-      desiredDate,
-      timeZone,
-      totalDuration,
-    );
 
     const allAvailableSlots: StaffSlot[] = [];
 
@@ -87,17 +79,54 @@ export class AvailabilityService {
     );
 
     if (staffList.length > 0) {
-      for (const staff of staffList) {
-        const appointments = await this.availabilityRepository.getAppointments(
+      const schedulesByStaff =
+        await this.availabilityRepository.getStaffSchedules(
+          staffList.map((staff) => staff.id),
+        );
+
+      const workingRangesByStaff = resolveWorkingRangesByStaff({
+        date: desiredDate,
+        timeZone,
+        businessHours,
+        staff: staffList,
+        schedulesByStaff,
+      });
+
+      const workingStaff = staffList.filter(
+        (staff) => workingRangesByStaff[staff.id].length > 0,
+      );
+      if (workingStaff.length === 0) {
+        return { isAvailable: false, suggestedSlots: [] };
+      }
+
+      const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
+        unionWorkingRanges(
+          workingRangesByStaff,
+          workingStaff.map((staff) => staff.id),
+        ),
+        totalDuration,
+      );
+
+      // Una sola consulta para todo el equipo: antes las citas se pedían dentro
+      // del bucle, una por profesional.
+      const appointmentsByStaff =
+        await this.availabilityRepository.getAppointmentsByStaff(
           input.tenantId,
           desiredDate,
           timeZone,
-          staff.id,
+          workingStaff.map((staff) => staff.id),
+        );
+
+      for (const staff of workingStaff) {
+        // La grilla es la cobertura del equipo; cada uno solo puede tomar los
+        // horarios que caen dentro de su propia jornada.
+        const ownCandidates = candidateSlots.filter((slot) =>
+          isWithinWorkingRanges(workingRangesByStaff[staff.id], slot),
         );
 
         const availableSlots = this.availabilityCalculator.filterAvailableSlots(
-          candidateSlots,
-          appointments,
+          ownCandidates,
+          appointmentsByStaff[staff.id] ?? [],
         );
 
         for (const slot of availableSlots) {
@@ -110,13 +139,41 @@ export class AvailabilityService {
         }
       }
     } else if (!input.staffId && input.serviceIds.length > 1) {
-      const staffCandidates =
+      const activeStaff =
         await this.availabilityRepository.getActiveStaffWithServices(
           input.tenantId,
         );
+      if (activeStaff.length === 0) {
+        return { isAvailable: false, suggestedSlots: [] };
+      }
+
+      const schedulesByStaff =
+        await this.availabilityRepository.getStaffSchedules(
+          activeStaff.map((s) => s.id),
+        );
+
+      const workingRangesByStaff = resolveWorkingRangesByStaff({
+        date: desiredDate,
+        timeZone,
+        businessHours,
+        staff: activeStaff,
+        schedulesByStaff,
+      });
+
+      const staffCandidates = activeStaff.filter(
+        (s) => workingRangesByStaff[s.id].length > 0,
+      );
       if (staffCandidates.length === 0) {
         return { isAvailable: false, suggestedSlots: [] };
       }
+
+      const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
+        unionWorkingRanges(
+          workingRangesByStaff,
+          staffCandidates.map((s) => s.id),
+        ),
+        totalDuration,
+      );
 
       const appointmentsByStaff =
         await this.availabilityRepository.getAppointmentsByStaff(
@@ -164,6 +221,10 @@ export class AvailabilityService {
           const staffForSegment = staffCandidates.find(
             (s) =>
               canStaffDoService(s, serviceId) &&
+              isWithinWorkingRanges(workingRangesByStaff[s.id], {
+                startTime: currentStart,
+                endTime: segmentEnd,
+              }) &&
               isStaffFree(s.id, currentStart, segmentEnd),
           );
 

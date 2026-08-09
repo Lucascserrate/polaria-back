@@ -22,6 +22,21 @@ function candidates(...ranges: SlotRange[]): SlotRange[] {
   return ranges;
 }
 
+/** Jornada de `fromHour` a `toHour` del día de prueba. */
+function shift(fromHour: number, toHour: number): SlotRange[] {
+  return [
+    {
+      startTime: new Date(Date.UTC(2026, 6, 31, fromHour, 0, 0)),
+      endTime: new Date(Date.UTC(2026, 6, 31, toHour, 0, 0)),
+    },
+  ];
+}
+
+/** Jornada completa, para los casos que no ejercitan el horario. */
+function allDay(...staffIds: string[]): Record<string, SlotRange[]> {
+  return Object.fromEntries(staffIds.map((id) => [id, shift(0, 24)]));
+}
+
 describe('buildBookingSlots', () => {
   it('devuelve todos los slots libres, sin recortar a N ni exigir separación', () => {
     const slots = buildBookingSlots({
@@ -33,6 +48,7 @@ describe('buildBookingSlots', () => {
         at(10),
       ),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: { [NICO]: [] },
     });
 
@@ -46,6 +62,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(15)),
       staffIds: [NICO, ANA],
+      workingRangesByStaff: allDay(NICO, ANA),
       appointmentsByStaff: { [NICO]: [], [ANA]: [] },
     });
 
@@ -57,6 +74,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(15)),
       staffIds: [NICO, ANA],
+      workingRangesByStaff: allDay(NICO, ANA),
       appointmentsByStaff: {
         [NICO]: [at(15)],
         [ANA]: [],
@@ -71,6 +89,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(15)),
       staffIds: [NICO, ANA],
+      workingRangesByStaff: allDay(NICO, ANA),
       appointmentsByStaff: {
         [NICO]: [at(15)],
         [ANA]: [at(15)],
@@ -85,6 +104,7 @@ describe('buildBookingSlots', () => {
       // Slot de 15:00 a 15:30 contra una cita de 15:15 a 15:45.
       candidateSlots: candidates(at(15, 0, 30)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: { [NICO]: [at(15, 15, 30)] },
     });
 
@@ -95,6 +115,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(15, 30, 30)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: { [NICO]: [at(15, 0, 30)] },
     });
 
@@ -105,6 +126,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(9), at(10), at(11)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: { [NICO]: [] },
       minStartTime: new Date(Date.UTC(2026, 6, 31, 10, 0, 0)),
     });
@@ -116,6 +138,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(9)),
       staffIds: [],
+      workingRangesByStaff: {},
       appointmentsByStaff: {},
     });
 
@@ -126,6 +149,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(9)),
       staffIds: [RAUL, NICO, ANA],
+      workingRangesByStaff: allDay(RAUL, NICO, ANA),
       appointmentsByStaff: {},
     });
 
@@ -136,6 +160,7 @@ describe('buildBookingSlots', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(16), at(9), at(12)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: {},
     });
 
@@ -144,14 +169,88 @@ describe('buildBookingSlots', () => {
     ]);
   });
 
-  it('trata un profesional sin entrada en el mapa como libre', () => {
+  it('trata un profesional sin entrada en el mapa de citas como libre', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(9)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: {},
     });
 
     expect(slots[0].eligibleStaffIds).toEqual([NICO]);
+  });
+
+  describe('jornada de cada profesional', () => {
+    it('ofrece en cada horario solo a quien está en el local a esa hora', () => {
+      const input = {
+        staffIds: [NICO, ANA],
+        // Turno de mañana y turno de tarde.
+        workingRangesByStaff: { [NICO]: shift(9, 17), [ANA]: shift(13, 21) },
+        appointmentsByStaff: {},
+      };
+
+      const morning = buildBookingSlots({
+        ...input,
+        candidateSlots: candidates(at(9)),
+      });
+      const overlap = buildBookingSlots({
+        ...input,
+        candidateSlots: candidates(at(14)),
+      });
+      const evening = buildBookingSlots({
+        ...input,
+        candidateSlots: candidates(at(19)),
+      });
+
+      expect(morning[0].eligibleStaffIds).toEqual([NICO]);
+      expect(overlap[0].eligibleStaffIds).toEqual([NICO, ANA]);
+      expect(evening[0].eligibleStaffIds).toEqual([ANA]);
+    });
+
+    it('descarta el horario que no cubre nadie', () => {
+      const slots = buildBookingSlots({
+        candidateSlots: candidates(at(8)),
+        staffIds: [NICO, ANA],
+        workingRangesByStaff: { [NICO]: shift(9, 17), [ANA]: shift(13, 21) },
+        appointmentsByStaff: {},
+      });
+
+      expect(slots).toEqual([]);
+    });
+
+    it('no ofrece un servicio que terminaría después del fin de la jornada', () => {
+      const slots = buildBookingSlots({
+        // Corte de 60 minutos arrancando a las 16:45, con salida a las 17:00.
+        candidateSlots: candidates(at(16, 45, 60)),
+        staffIds: [NICO],
+        workingRangesByStaff: { [NICO]: shift(9, 17) },
+        appointmentsByStaff: {},
+      });
+
+      expect(slots).toEqual([]);
+    });
+
+    it('no ofrece a un profesional ausente del mapa de jornadas', () => {
+      const slots = buildBookingSlots({
+        candidateSlots: candidates(at(10)),
+        staffIds: [NICO],
+        workingRangesByStaff: {},
+        appointmentsByStaff: {},
+      });
+
+      expect(slots).toEqual([]);
+    });
+
+    it('no ofrece a un profesional que no trabaja ese día', () => {
+      const slots = buildBookingSlots({
+        candidateSlots: candidates(at(10)),
+        staffIds: [NICO, ANA],
+        workingRangesByStaff: { [NICO]: [], [ANA]: shift(9, 17) },
+        appointmentsByStaff: {},
+      });
+
+      expect(slots[0].eligibleStaffIds).toEqual([ANA]);
+    });
   });
 });
 
@@ -160,6 +259,7 @@ describe('hasAnyBookingSlot', () => {
     const input = {
       candidateSlots: candidates(at(15)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: { [NICO]: [at(15)] },
     };
 
@@ -173,6 +273,7 @@ describe('findBookingSlotAt', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(9), at(10)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: {},
     });
 
@@ -188,6 +289,7 @@ describe('findBookingSlotAt', () => {
     const slots = buildBookingSlots({
       candidateSlots: candidates(at(9)),
       staffIds: [NICO],
+      workingRangesByStaff: allDay(NICO),
       appointmentsByStaff: {},
     });
 
