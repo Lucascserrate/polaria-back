@@ -14,6 +14,7 @@ import {
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
 import { Service } from '../../services/entities/service.entity';
+import { StaffSchedule } from './staff_schedule.entity';
 
 @Entity('staff')
 export class Staff {
@@ -29,6 +30,10 @@ export class Staff {
 
   @OneToMany(() => AppointmentService, (as) => as.staff)
   appointmentServices!: AppointmentService[];
+
+  /** Jornada propia. Solo se lee si `usesCustomSchedule` está encendido. */
+  @OneToMany(() => StaffSchedule, (schedule) => schedule.staff)
+  schedules!: StaffSchedule[];
 
   @ManyToMany(() => Service, (service) => service.staff, { cascade: false })
   @JoinTable({
@@ -54,6 +59,19 @@ export class Staff {
    */
   @Column({ default: true })
   isActive!: boolean;
+
+  /**
+   * Apagado (por defecto): el profesional atiende en el horario del negocio y
+   * sus filas de `staff_schedules` se ignoran.
+   *
+   * Encendido: `staff_schedules` es la verdad completa de su jornada, y **la
+   * ausencia de fila para un día significa que ese día no trabaja**. El flag
+   * existe justamente para que eso sea una declaración explícita del negocio y
+   * no una inferencia a partir de una tabla vacía, que no permitiría distinguir
+   * "no trabaja el jueves" de "todavía no cargué el jueves".
+   */
+  @Column({ default: false })
+  usesCustomSchedule!: boolean;
 
   /**
    * Comisión del profesional como porcentaje de lo que factura (0–100).
