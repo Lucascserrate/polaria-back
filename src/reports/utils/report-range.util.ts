@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
-import { makeDateInTimeZone } from '../../availability/utils/availability.helpers';
+import {
+  currentDateInTimeZone,
+  makeDateInTimeZone,
+} from '../../availability/utils/availability.helpers';
 
 export const REPORT_PRESETS = ['today', 'week', 'month', 'custom'] as const;
 export type ReportPreset = (typeof REPORT_PRESETS)[number];
@@ -20,15 +23,6 @@ export interface ReportRange {
    */
   endUtc: Date;
 }
-
-/** Fecha de calendario que el negocio está viviendo ahora mismo. */
-export const currentDateInTimeZone = (timeZone: string, now: Date): string =>
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).format(now);
 
 /**
  * Corre una fecha de calendario N días.

@@ -62,6 +62,24 @@ export const makeDateInTimeZone = (
   return new Date(utcDate.getTime() - offsetMinutes * 60_000);
 };
 
+/** Fecha de calendario (`YYYY-MM-DD`) que se está viviendo en esa zona horaria. */
+export const currentDateInTimeZone = (timeZone: string, now: Date): string =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(now);
+
+/** Hora local `HH:MM` de un instante, en la zona horaria del negocio. */
+export const formatTimeInTimeZone = (date: Date, timeZone: string): string =>
+  new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+
 export const getDayOfWeek = (date: string, timeZone: string): number => {
   const reference = makeDateInTimeZone(date, '12:00', timeZone);
   const day = new Intl.DateTimeFormat('en-US', {

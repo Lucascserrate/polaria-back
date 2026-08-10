@@ -8,6 +8,7 @@ import type {
 } from './utils/availability.types';
 import {
   addMinutes,
+  formatTimeInTimeZone,
   isOverlapping,
   makeDateInTimeZone,
 } from './utils/availability.helpers';
@@ -18,12 +19,41 @@ import {
 } from './utils/working-hours.resolver';
 import { normalizeSlots } from './utils/availability-formatter';
 
+const DEFAULT_TIMEZONE = 'America/La_Paz';
+
+type WorkingRangesInput = Parameters<typeof resolveWorkingRangesByStaff>[0];
+type StaffSchedules = WorkingRangesInput['schedulesByStaff'];
+
+const currentDateInTimeZone = (timeZone: string, date: Date): string => {
+  const nowFormatted = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(date);
+
+  return nowFormatted.split(', ')[0];
+};
+
 @Injectable()
 export class AvailabilityService {
   constructor(
     private readonly availabilityRepository: AvailabilityRepository,
     private readonly availabilityCalculator: AvailabilityCalculator,
   ) {}
+
+  private async getStaffSchedulesFor(
+    staffIds: string[],
+  ): Promise<StaffSchedules> {
+    const getStaffSchedules = this.availabilityRepository.getStaffSchedules as (
+      staffIds: string[],
+    ) => Promise<StaffSchedules>;
+
+    return getStaffSchedules(staffIds);
+  }
 
   async findAvailableSlots(
     input: FindAvailableSlotsInput,
@@ -350,6 +380,69 @@ export class AvailabilityService {
     };
   }
 
+  /**
+   * Profesionales que efectivamente trabajan una fecha, con su jornada ya
+   * resuelta contra el horario del negocio.
+   *
+   * No es lo mismo que "staff activo": `isActive` dice que la persona forma
+   * parte del equipo, no que hoy le toque. Un profesional con jornada propia que
+   * no atiende los domingos está activo y aun así no aparece acá.
+   *
+   * No mira la agenda: responde quién está en el local, no quién tiene huecos.
+   */
+  async getWorkingStaff(
+    tenantId: string,
+    date?: string,
+  ): Promise<{
+    date: string;
+    timezone: string;
+    staff: Array<{
+      id: string;
+      name: string;
+      ranges: Array<{ from: string; to: string }>;
+    }>;
+  }> {
+    const tenant = await this.availabilityRepository.getTenant(tenantId);
+    const timeZone = tenant?.timezone || DEFAULT_TIMEZONE;
+    const targetDate = date || currentDateInTimeZone(timeZone, new Date());
+
+    const staffList =
+      await this.availabilityRepository.getActiveStaffWithServices(tenantId);
+
+    if (staffList.length === 0) {
+      return { date: targetDate, timezone: timeZone, staff: [] };
+    }
+
+    const businessHours =
+      await this.availabilityRepository.getBusinessHours(tenantId);
+    const schedulesByStaff = await this.getStaffSchedulesFor(
+      staffList.map((staff) => staff.id),
+    );
+
+    const rangesByStaff = resolveWorkingRangesByStaff({
+      date: targetDate,
+      timeZone,
+      businessHours,
+      staff: staffList,
+      schedulesByStaff,
+    });
+
+    return {
+      date: targetDate,
+      timezone: timeZone,
+      staff: staffList
+        .filter((staff) => rangesByStaff[staff.id].length > 0)
+        .map((staff) => ({
+          id: staff.id,
+          name: staff.name,
+          ranges: rangesByStaff[staff.id].map((range) => ({
+            from: formatTimeInTimeZone(range.startTime, timeZone),
+            to: formatTimeInTimeZone(range.endTime, timeZone),
+          })),
+        })),
+    };
+  }
+
   async getFriendlySlots(input: FindAvailableSlotsInput): Promise<{
     isAvailable: boolean;
     friendlySlots: string[];
@@ -366,7 +459,7 @@ export class AvailabilityService {
     friendlySlots: string[];
   }> {
     const tenant = await this.availabilityRepository.getTenant(tenantId);
-    const timeZone = tenant?.timezone ?? 'America/La_Paz';
+    const timeZone = tenant?.timezone ?? DEFAULT_TIMEZONE;
 
     const friendlySlots = normalizeSlots(availability.suggestedSlots, timeZone);
     console.log('[availability] friendlySlots count:', friendlySlots.length);
