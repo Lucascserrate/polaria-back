@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
 
 export class CreateTenantDto {
   @ApiProperty()
@@ -40,9 +40,26 @@ export class CreateTenantDto {
   @IsString()
   whatsappVerifiedName?: string;
 
+  @ApiPropertyOptional({
+    description:
+      'Id del Flow de reservas publicado en la WABA de este tenant. Con Flow se reserva por formulario; sin él, con listas y botones nativos.',
+  })
+  @IsOptional()
+  @IsString()
+  whatsappFlowId?: string;
+
   @ApiProperty()
   @IsString()
   timezone!: string;
+
+  @ApiPropertyOptional({
+    description: 'Moneda del negocio en ISO 4217: BOB, ARS, USD…',
+    example: 'BOB',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(3, 3)
+  currency?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
