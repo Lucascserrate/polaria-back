@@ -115,15 +115,23 @@ export class FlowEndpointController {
   /**
    * La firma se valida sobre el cuerpo crudo.
    *
-   * Sin `APP_SECRET` configurado no se puede verificar. Se deja pasar con una
-   * advertencia para no bloquear el desarrollo local, pero en producción esto
-   * significa aceptar peticiones de cualquiera.
+   * Distingue los motivos en el log a propósito: los tres terminan en el mismo
+   * 401 con cuerpo vacío, y sin el detalle no hay forma de saber si falta el
+   * secreto, si el cuerpo crudo no llegó o si el HMAC no coincide.
    */
   private hasValidSignature(request: RawBodyRequest): boolean {
-    const appSecret = this.configService.get<string>('WHATSAPP_APP_SECRET');
+    const appSecret = this.readAppSecret();
+
+    if (this.skipsSignatureCheck()) {
+      this.logger.error(
+        'WHATSAPP_FLOWS_SKIP_SIGNATURE activo: se acepta la petición SIN validar la firma. Solo para diagnóstico.',
+      );
+      return true;
+    }
+
     if (!appSecret) {
       this.logger.warn(
-        'WHATSAPP_APP_SECRET no configurado: no se valida la firma del Flow.',
+        'Sin app secret configurado: no se valida la firma del Flow.',
       );
       return true;
     }
@@ -131,15 +139,62 @@ export class FlowEndpointController {
     const rawBody = request.rawBody;
     if (!rawBody) {
       this.logger.error(
-        'No hay cuerpo crudo disponible; falta habilitar rawBody en el bootstrap.',
+        'Firma no verificable: no llegó el cuerpo crudo. Falta `rawBody: true` en NestFactory.create.',
       );
       return false;
     }
 
-    return isValidSignature({
-      rawBody,
-      signatureHeader: request.header('x-hub-signature-256'),
-      appSecret,
-    });
+    const signatureHeader = request.header('x-hub-signature-256');
+    if (!signatureHeader) {
+      this.logger.error(
+        'Firma no verificable: Meta no envió el header x-hub-signature-256 en esta petición.',
+      );
+      return false;
+    }
+
+    const valid = isValidSignature({ rawBody, signatureHeader, appSecret });
+    if (!valid) {
+      // El largo del cuerpo y el prefijo del header alcanzan para descartar un
+      // problema de codificación sin exponer el secreto.
+      this.logger.error(
+        `Firma inválida: el HMAC no coincide (rawBodyBytes=${rawBody.length}, secretoChars=${appSecret.length}, headerPrefix=${signatureHeader.slice(0, 14)}…). Revisar que el app secret sea el de la app dueña del Flow.`,
+      );
+    }
+
+    return valid;
+  }
+
+  /**
+   * App secret de la aplicación de Meta (Configuración → Básica → Clave secreta).
+   *
+   * No existe un secreto propio de WhatsApp: la firma `X-Hub-Signature-256` la
+   * calcula Meta con el secreto de la app dueña del Flow. Se acepta el nombre
+   * `META_APP_SECRET`, que es el correcto, y también el histórico
+   * `WHATSAPP_APP_SECRET` para no romper despliegues existentes.
+   *
+   * Se recorta porque un salto de línea pegado sin querer cambia el HMAC por
+   * completo y produce exactamente el mismo error que un secreto equivocado.
+   */
+  private readAppSecret(): string | undefined {
+    const raw =
+      this.configService.get<string>('META_APP_SECRET') ??
+      this.configService.get<string>('WHATSAPP_APP_SECRET');
+
+    const trimmed = raw?.trim();
+    return trimmed && trimmed.length > 0 ? trimmed : undefined;
+  }
+
+  /**
+   * Escotilla para aislar el problema cuando la firma bloquea la integración.
+   *
+   * Deja pasar peticiones sin verificar quién las manda, así que loguea un error
+   * en cada llamada para que sea imposible olvidársela encendida. El cifrado
+   * sigue actuando: sin la clave pública registrada nadie puede armar un payload
+   * que nuestra clave privada descifre.
+   */
+  private skipsSignatureCheck(): boolean {
+    return (
+      this.configService.get<string>('WHATSAPP_FLOWS_SKIP_SIGNATURE') === 'true'
+    );
   }
 }
