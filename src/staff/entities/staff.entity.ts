@@ -8,7 +8,6 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   UpdateDateColumn,
-  DeleteDateColumn,
   JoinColumn,
   JoinTable,
 } from 'typeorm';

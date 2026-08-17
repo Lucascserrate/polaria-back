@@ -147,6 +147,47 @@ export class StaffService {
     return { deleted: true };
   }
 
+  /**
+   * Reemplaza la jornada completa. `undefined` significa "no se tocó"; un array
+   * vacío significa "borrar todas", que solo es válido con el flag apagado.
+   */
+  private async replaceSchedules(
+    manager: EntityManager,
+    staffId: string,
+    schedules: StaffScheduleDto[] | undefined,
+  ): Promise<StaffSchedule[]> {
+    if (!Array.isArray(schedules)) return [];
+
+    await manager.delete(StaffSchedule, { staffId });
+
+    if (!schedules.length) return [];
+
+    return manager.save(
+      StaffSchedule,
+      schedules.map((schedule) =>
+        manager.create(StaffSchedule, { staffId, ...schedule }),
+      ),
+    );
+  }
+
+  private async resolveServices(
+    serviceIds: string[],
+    tenantId: string,
+  ): Promise<Service[]> {
+    const services = await this.serviceRepository.find({
+      where: { id: In(serviceIds), tenantId },
+      order: { name: 'ASC' },
+    });
+
+    if (services.length !== serviceIds.length) {
+      throw new BadRequestException(
+        'One or more services are invalid for this tenant',
+      );
+    }
+
+    return services;
+  }
+
   private getCurrentDateTimeInTimezone(timezone: string): Date {
     const now = new Date();
     const parts = new Intl.DateTimeFormat('en-US', {
