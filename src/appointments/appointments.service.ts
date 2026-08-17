@@ -190,6 +190,7 @@ export class AppointmentsService {
   ): Promise<{
     items: Array<{
       id: string;
+      startTime: string;
       startTimeFormatted: string;
       endTimeFormatted: string;
       status: AppointmentStatus;
@@ -297,6 +298,7 @@ export class AppointmentsService {
       }, 0);
       return {
         id: a.id,
+        startTime: a.startTime.toISOString(),
         startTimeFormatted: this.formatDateTime(a.startTime, timezone),
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
@@ -352,6 +354,7 @@ export class AppointmentsService {
   async findTodayByTenant(tenantId: string): Promise<{
     items: Array<{
       id: string;
+      startTime: string;
       startTimeFormatted: string;
       endTimeFormatted: string;
       status: AppointmentStatus;
@@ -404,6 +407,7 @@ export class AppointmentsService {
       }, 0);
       return {
         id: a.id,
+        startTime: a.startTime.toISOString(),
         startTimeFormatted: this.formatDateTime(a.startTime, timezone),
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
