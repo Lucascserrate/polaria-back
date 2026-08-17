@@ -44,6 +44,16 @@ export class Tenant {
   @Column({ type: 'text', nullable: true })
   whatsappVerifiedName?: string;
 
+  /**
+   * Id del Flow de reservas publicado en la WABA de este tenant.
+   *
+   * Es lo que decide por qué canal se reserva: con un Flow publicado se abre el
+   * formulario; sin él, se usan las listas y botones nativos. Un Flow pertenece a
+   * una WABA, así que cada barbería necesita el suyo y no se puede compartir.
+   */
+  @Column({ type: 'text', nullable: true })
+  whatsappFlowId?: string;
+
   @Column({ type: 'timestamp', nullable: true })
   whatsappConnectedAt?: Date;
 

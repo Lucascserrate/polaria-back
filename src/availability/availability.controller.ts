@@ -27,20 +27,11 @@ export class AvailabilityController {
 
   @UseGuards(AuthGuard('jwt'))
   @Get('working-staff')
-  getWorkingStaff(
-    @Req() req: Request,
-    @Query() query: WorkingStaffQueryDto,
-  ): unknown {
+  getWorkingStaff(@Req() req: Request, @Query() query: WorkingStaffQueryDto) {
     const tenantId = (req.user as { sub?: string }).sub;
     if (!tenantId) {
       throw new UnauthorizedException('Missing tenant id');
     }
-
-    const getWorkingStaff = this.availabilityService.getWorkingStaff as (
-      tenantId: string,
-      date: string | undefined,
-    ) => unknown;
-
-    return getWorkingStaff(tenantId, query.date);
+    return this.availabilityService.getWorkingStaff(tenantId, query.date);
   }
 }

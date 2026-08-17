@@ -462,6 +462,9 @@ export class AppointmentsService {
         cancelled: string;
       }>();
 
+    // Solo lo atendido, igual que el módulo de reportes. Sin este filtro sumaba
+    // también las canceladas y las que todavía no ocurrieron, y el mismo día
+    // mostraba dos cifras distintas según qué pantalla lo preguntara.
     const rawRevenue = await this.appointmentServiceRepository
       .createQueryBuilder('appointmentService')
       .select('SUM(appointmentService.priceAtBooking)', 'revenue')
@@ -471,6 +474,9 @@ export class AppointmentsService {
         'appointment.id = appointmentService.appointmentId',
       )
       .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.status = :completed', {
+        completed: AppointmentStatus.COMPLETED,
+      })
       .andWhere('appointment.startTime >= :startUtc', { startUtc })
       .andWhere('appointment.startTime < :endUtc', { endUtc })
       .getRawOne<{ revenue: string | null }>();

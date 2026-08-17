@@ -3,12 +3,14 @@ import { ConfigService } from '@nestjs/config';
 
 import {
   buildButtonsPayload,
+  buildFlowPayload,
   buildListPayload,
   buildTextPayload,
   type BuiltMessage,
 } from './outgoing-message.builder';
 import {
   type SendButtonsInput,
+  type SendFlowInput,
   type SendListInput,
   type SendTextInput,
   type WhatsAppCredentials,
@@ -57,6 +59,14 @@ export class WhatsAppSenderService {
     input: SendListInput,
   ): Promise<SendResult> {
     return this.send(credentials, input.to, 'list', buildListPayload(input));
+  }
+
+  /** Abre un WhatsApp Flow. El resto de la conversación ocurre en su endpoint. */
+  sendFlow(
+    credentials: WhatsAppCredentials,
+    input: SendFlowInput,
+  ): Promise<SendResult> {
+    return this.send(credentials, input.to, 'flow', buildFlowPayload(input));
   }
 
   private async send(

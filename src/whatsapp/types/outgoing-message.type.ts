@@ -23,6 +23,11 @@ export const WHATSAPP_LIMITS = {
   LIST_BUTTON_TEXT_MAX: 20,
   LIST_SECTION_TITLE_MAX: 24,
 
+  /** Versión del protocolo del mensaje que abre un Flow. */
+  FLOW_MESSAGE_VERSION: '3',
+  /** Etiqueta del botón que abre el Flow. */
+  FLOW_CTA_MAX: 20,
+
   /** El body de una lista admite más texto que el de un mensaje con botones. */
   BUTTONS_BODY_MAX: 1024,
   LIST_BODY_MAX: 4096,
@@ -63,6 +68,23 @@ export type SendButtonsInput = {
   to: string;
   body: string;
   buttons: OutgoingButton[];
+  header?: string;
+  footer?: string;
+};
+
+/**
+ * Apertura de un WhatsApp Flow.
+ *
+ * `flowToken` es lo que ata la sesión de reserva a este Flow: vuelve en cada
+ * `data_exchange` del endpoint y en el `nfm_reply` del cierre.
+ */
+export type SendFlowInput = {
+  to: string;
+  body: string;
+  /** Etiqueta del botón que abre el Flow (ej. "Reservar turno"). */
+  cta: string;
+  flowId: string;
+  flowToken: string;
   header?: string;
   footer?: string;
 };

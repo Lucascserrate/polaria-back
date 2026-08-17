@@ -8,6 +8,7 @@ import type {
 } from './utils/availability.types';
 import {
   addMinutes,
+  currentDateInTimeZone,
   formatTimeInTimeZone,
   isOverlapping,
   makeDateInTimeZone,
@@ -21,39 +22,12 @@ import { normalizeSlots } from './utils/availability-formatter';
 
 const DEFAULT_TIMEZONE = 'America/La_Paz';
 
-type WorkingRangesInput = Parameters<typeof resolveWorkingRangesByStaff>[0];
-type StaffSchedules = WorkingRangesInput['schedulesByStaff'];
-
-const currentDateInTimeZone = (timeZone: string, date: Date): string => {
-  const nowFormatted = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date);
-
-  return nowFormatted.split(', ')[0];
-};
-
 @Injectable()
 export class AvailabilityService {
   constructor(
     private readonly availabilityRepository: AvailabilityRepository,
     private readonly availabilityCalculator: AvailabilityCalculator,
   ) {}
-
-  private async getStaffSchedulesFor(
-    staffIds: string[],
-  ): Promise<StaffSchedules> {
-    const getStaffSchedules = this.availabilityRepository.getStaffSchedules as (
-      staffIds: string[],
-    ) => Promise<StaffSchedules>;
-
-    return getStaffSchedules(staffIds);
-  }
 
   async findAvailableSlots(
     input: FindAvailableSlotsInput,
@@ -413,11 +387,12 @@ export class AvailabilityService {
       return { date: targetDate, timezone: timeZone, staff: [] };
     }
 
-    const businessHours =
-      await this.availabilityRepository.getBusinessHours(tenantId);
-    const schedulesByStaff = await this.getStaffSchedulesFor(
-      staffList.map((staff) => staff.id),
-    );
+    const [businessHours, schedulesByStaff] = await Promise.all([
+      this.availabilityRepository.getBusinessHours(tenantId),
+      this.availabilityRepository.getStaffSchedules(
+        staffList.map((staff) => staff.id),
+      ),
+    ]);
 
     const rangesByStaff = resolveWorkingRangesByStaff({
       date: targetDate,
