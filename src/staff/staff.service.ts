@@ -4,11 +4,14 @@ import {
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 
 import { Staff } from './entities/staff.entity';
+import { StaffSchedule } from './entities/staff_schedule.entity';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
+import { StaffScheduleDto } from './dto/staff-schedule.dto';
+import { assertValidStaffSchedules } from './utils/staff-schedule.util';
 import { Service } from '../services/entities/service.entity';
 import { Appointment } from '../appointments/entities/appointment.entity';
 import { AppointmentService as AppointmentServiceEntity } from '../appointments/entities/appointment_service.entity';
@@ -29,33 +32,40 @@ export class StaffService {
   ) {}
 
   async create(createStaffDto: CreateStaffDto): Promise<Staff> {
-    const { serviceIds, ...rest } = createStaffDto;
+    const { serviceIds, schedules, ...rest } = createStaffDto;
+
+    assertValidStaffSchedules({
+      usesCustomSchedule: rest.usesCustomSchedule ?? false,
+      schedules: schedules ?? [],
+    });
+
     const staff = this.staffRepository.create(rest);
 
     if (Array.isArray(serviceIds) && serviceIds.length) {
-      const services = await this.serviceRepository.find({
-        where: { id: In(serviceIds), tenantId: staff.tenantId },
-        order: { name: 'ASC' },
-      });
-      if (services.length !== serviceIds.length) {
-        throw new BadRequestException(
-          'One or more services are invalid for this tenant',
-        );
-      }
-      staff.services = services;
+      staff.services = await this.resolveServices(serviceIds, staff.tenantId);
     }
 
-    return this.staffRepository.save(staff);
+    return this.staffRepository.manager.transaction(async (manager) => {
+      const saved = await manager.save(Staff, staff);
+      saved.schedules = await this.replaceSchedules(
+        manager,
+        saved.id,
+        schedules,
+      );
+      return saved;
+    });
   }
 
   findAll(): Promise<Staff[]> {
-    return this.staffRepository.find({ relations: { services: true } });
+    return this.staffRepository.find({
+      relations: { services: true, schedules: true },
+    });
   }
 
   findOne(id: string): Promise<Staff | null> {
     return this.staffRepository.findOne({
       where: { id },
-      relations: { services: true },
+      relations: { services: true, schedules: true },
     });
   }
 
@@ -63,39 +73,47 @@ export class StaffService {
     return this.staffRepository
       .createQueryBuilder('staff')
       .leftJoinAndSelect('staff.services', 'service')
+      .leftJoinAndSelect('staff.schedules', 'schedule')
       .where('staff.tenantId = :tenantId', { tenantId })
       .orderBy('staff.name', 'ASC')
+      .addOrderBy('schedule.dayOfWeek', 'ASC')
+      .addOrderBy('schedule.startTime', 'ASC')
       .getMany();
   }
 
   async update(id: string, updateStaffDto: UpdateStaffDto) {
     const staff = await this.staffRepository.findOne({
       where: { id },
-      relations: { services: true },
+      relations: { services: true, schedules: true },
     });
     if (!staff) return null;
 
-    const { serviceIds, ...rest } = updateStaffDto;
+    const { serviceIds, schedules, ...rest } = updateStaffDto;
+
+    // Se valida el estado resultante, no el payload: encender el flag sin
+    // mandar franjas y vaciar las franjas con el flag ya encendido terminan en
+    // el mismo lugar, y los dos dejarían al profesional fuera de la agenda.
+    assertValidStaffSchedules({
+      usesCustomSchedule: rest.usesCustomSchedule ?? staff.usesCustomSchedule,
+      schedules: schedules ?? staff.schedules ?? [],
+    });
+
     this.staffRepository.merge(staff, rest);
 
     if (Array.isArray(serviceIds)) {
-      if (!serviceIds.length) {
-        staff.services = [];
-      } else {
-        const services = await this.serviceRepository.find({
-          where: { id: In(serviceIds), tenantId: staff.tenantId },
-          order: { name: 'ASC' },
-        });
-        if (services.length !== serviceIds.length) {
-          throw new BadRequestException(
-            'One or more services are invalid for this tenant',
-          );
-        }
-        staff.services = services;
-      }
+      staff.services = serviceIds.length
+        ? await this.resolveServices(serviceIds, staff.tenantId)
+        : [];
     }
 
-    await this.staffRepository.save(staff);
+    // El flag y las franjas viajan juntos: guardarlos por separado abriría una
+    // ventana con la jornada propia encendida y sin franjas, que la
+    // disponibilidad lee como "no trabaja ningún día".
+    await this.staffRepository.manager.transaction(async (manager) => {
+      await manager.save(Staff, staff);
+      await this.replaceSchedules(manager, id, schedules);
+    });
+
     return this.findOne(id);
   }
 

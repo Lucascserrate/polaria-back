@@ -9,7 +9,12 @@ const { CLIENT_BASE_URL, ADMIN_CLIENT_BASE_URL } = process.env;
 const logger = new Logger('Bootstrap');
 
 async function bootstrap() {
-  const app: NestApplication = await NestFactory.create(AppModule);
+  // `rawBody` es necesario para validar la firma del endpoint de WhatsApp Flows:
+  // el HMAC se calcula sobre los bytes tal como llegaron, y reserializar el JSON
+  // cambia el resultado.
+  const app: NestApplication = await NestFactory.create(AppModule, {
+    rawBody: true,
+  });
 
   const allowedOrigins = [CLIENT_BASE_URL, ADMIN_CLIENT_BASE_URL].filter(
     (origin): origin is string => Boolean(origin),

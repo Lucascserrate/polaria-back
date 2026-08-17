@@ -5,6 +5,7 @@ import { AppointmentService as AppointmentServiceEntity } from '../appointments/
 import { BusinessHour } from '../business_hours/entities/business_hour.entity';
 import { Service } from '../services/entities/service.entity';
 import { Staff } from '../staff/entities/staff.entity';
+import { StaffSchedule } from '../staff/entities/staff_schedule.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { AvailabilityController } from './availability.controller';
 import { AvailabilityCalculator } from './availability.calculator';
@@ -20,6 +21,7 @@ import { BookingAvailabilityService } from './booking/booking-availability.servi
       BusinessHour,
       Service,
       Staff,
+      StaffSchedule,
       Tenant,
     ]),
   ],

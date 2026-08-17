@@ -4,6 +4,7 @@ import { AssistantSessionService } from '../assistant/services/assistant-session
 import { BookingFlowService } from '../booking-flow/booking-flow.service';
 import type { BookingPrompt } from '../booking-flow/booking-flow.types';
 import { detectBookingTrigger } from '../booking-flow/booking-trigger';
+import { BookingSessionService } from '../booking-flow/booking-session.service';
 import { ConversationControlService } from '../conversations/conversation-control.service';
 import type { Conversation } from '../conversations/entities/conversation.entity';
 import {
@@ -24,11 +25,37 @@ import {
   type IncomingWhatsAppMessage,
 } from '../whatsapp/types/incoming-message.type';
 import type { WhatsAppCredentials } from '../whatsapp/types/outgoing-message.type';
+import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
 import { ConversationRecorderService } from './conversation-recorder.service';
 
 const UNSUPPORTED_MESSAGE_REPLY =
   'Por ahora solo puedo leer mensajes de texto. Escríbeme y te ayudo.';
+
+/** Desenlace que el endpoint del Flow devuelve al cerrar. */
+function readFlowStatus(response: Record<string, unknown> | null): string {
+  const status = response?.status;
+  return typeof status === 'string' ? status : 'unknown';
+}
+
+/**
+ * Mensaje de cierre según cómo terminó el Flow.
+ *
+ * El formulario ya mostró lo suyo, pero se confirma igual por chat: es el hilo
+ * que el cliente vuelve a mirar cuando quiere recordar su turno.
+ */
+function flowClosingText(status: string): string {
+  switch (status) {
+    case 'completed':
+      return '¡Listo! Tu turno quedó agendado. Cualquier cosa escribime por acá.';
+    case 'slot_taken':
+      return 'Justo tomaron ese horario mientras confirmabas. Escribime "reservar" y buscamos otro.';
+    case 'incomplete':
+      return 'Quedó a medias la reserva. Escribime "reservar" y la retomamos.';
+    default:
+      return 'Cerré el formulario sin agendar nada. Escribime "reservar" cuando quieras.';
+  }
+}
 
 /**
  * Reparto de los mensajes entrantes entre el flujo guiado y el asistente.
@@ -52,6 +79,7 @@ export class InboundMessageService {
     private readonly conversationRecorder: ConversationRecorderService,
     private readonly conversationControl: ConversationControlService,
     private readonly tenantsService: TenantsService,
+    private readonly bookingSessionService: BookingSessionService,
   ) {}
 
   async handle(params: {
@@ -82,10 +110,7 @@ export class InboundMessageService {
         return;
 
       case IncomingMessageKind.FLOW_REPLY:
-        // Los Flows se cablearán con su propio renderizador; hoy no se envían.
-        this.logger.log(
-          `FLOW_REPLY recibido sin manejador (tenantId=${tenantId}, flowToken=${String(message.flowToken)}).`,
-        );
+        await this.handleFlowReply({ tenantId, credentials, message });
         return;
 
       case IncomingMessageKind.UNSUPPORTED:
@@ -244,19 +269,12 @@ export class InboundMessageService {
         `Intención de reserva detectada (tenantId=${tenantId}, clientId=${client.id}).`,
       );
 
-      const prompt = await this.bookingFlowService.start({
-        tenantId,
-        clientId: client.id,
-        conversationId: conversation.id,
-      });
-
-      await this.renderAndRecord({
+      await this.startBooking({
         tenantId,
         credentials,
-        conversationId: conversation.id,
+        conversation,
         clientId: client.id,
         to: message.from,
-        prompt,
       });
       return;
     }
@@ -296,19 +314,12 @@ export class InboundMessageService {
     });
 
     if (action === WelcomeMenuAction.BOOK) {
-      const prompt = await this.bookingFlowService.start({
-        tenantId,
-        clientId,
-        conversationId: conversation.id,
-      });
-
-      await this.renderAndRecord({
+      await this.startBooking({
         tenantId,
         credentials,
-        conversationId: conversation.id,
+        conversation,
         clientId,
         to: message.from,
-        prompt,
       });
       return;
     }
@@ -475,6 +486,144 @@ export class InboundMessageService {
       to: message.from,
       body: UNSUPPORTED_MESSAGE_REPLY,
     });
+  }
+
+  /**
+   * Cierre de un WhatsApp Flow.
+   *
+   * La reserva ya se creó dentro del endpoint, así que acá no se decide nada: se
+   * lee el desenlace que el endpoint puso en `extension_message_response.params`
+   * y se le confirma al cliente por chat, que es donde va a buscarlo después.
+   */
+  private async handleFlowReply(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    message: IncomingWhatsAppMessage;
+  }): Promise<void> {
+    const { tenantId, credentials, message } = params;
+    if (message.kind !== IncomingMessageKind.FLOW_REPLY) return;
+
+    const status = readFlowStatus(message.response);
+    this.logger.log(
+      `Flow cerrado (tenantId=${tenantId}, status=${String(status)}).`,
+    );
+
+    const { client, conversation } =
+      await this.assistantSessionService.getOrCreateSession({
+        tenantId,
+        phone: message.from,
+        clientName: message.contactName ?? undefined,
+      });
+
+    const reply = flowClosingText(status);
+    const sent = await this.whatsAppSenderService.sendText(credentials, {
+      to: message.from,
+      body: reply,
+    });
+
+    if (!sent.ok) return;
+
+    await this.conversationRecorder.recordOutgoingText({
+      tenantId,
+      conversationId: conversation.id,
+      clientId: client.id,
+      text: reply,
+      source: 'booking-flow-whatsapp-flow',
+    });
+  }
+
+  /**
+   * Abre una reserva por el canal que corresponda a este tenant.
+   *
+   * Con un Flow publicado se manda el formulario y el resto de la conversación
+   * ocurre dentro de él, contra el endpoint cifrado. Sin Flow —o si el envío
+   * falla— se cae a las listas y botones nativos, que no dependen de ninguna
+   * configuración en Meta.
+   */
+  private async startBooking(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversation: Conversation;
+    clientId: string;
+    to: string;
+  }): Promise<void> {
+    const { tenantId, credentials, conversation, clientId, to } = params;
+
+    const tenant = await this.tenantsService.findOne(tenantId);
+    const flowId = readStoredCredential(tenant?.whatsappFlowId);
+
+    const prompt = await this.bookingFlowService.start({
+      tenantId,
+      clientId,
+      conversationId: conversation.id,
+      limits: flowId ? {} : NATIVE_CHANNEL_LIMITS,
+    });
+
+    if (flowId) {
+      const opened = await this.openBookingFlow({
+        tenantId,
+        credentials,
+        conversation,
+        clientId,
+        to,
+        flowId,
+      });
+      if (opened) return;
+
+      this.logger.warn(
+        `No se pudo abrir el Flow (tenantId=${tenantId}); se cae al canal nativo.`,
+      );
+    }
+
+    await this.renderAndRecord({
+      tenantId,
+      credentials,
+      conversationId: conversation.id,
+      clientId,
+      to,
+      prompt,
+    });
+  }
+
+  /** Manda el mensaje que abre el Flow. Devuelve si WhatsApp lo aceptó. */
+  private async openBookingFlow(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversation: Conversation;
+    clientId: string;
+    to: string;
+    flowId: string;
+  }): Promise<boolean> {
+    const session = await this.bookingSessionService.findActive({
+      tenantId: params.tenantId,
+      clientId: params.clientId,
+    });
+
+    if (!session) return false;
+
+    const body = 'Elegí tu servicio y horario y te lo agendo.';
+
+    // El token de la sesión viaja como `flow_token`: es lo que ata cada
+    // `data_exchange` del endpoint a esta reserva.
+    const sent = await this.whatsAppSenderService.sendFlow(params.credentials, {
+      to: params.to,
+      body,
+      cta: 'Reservar turno',
+      flowId: params.flowId,
+      flowToken: session.token,
+    });
+
+    if (!sent.ok) return false;
+
+    await this.conversationRecorder.recordOutgoingText({
+      tenantId: params.tenantId,
+      conversationId: params.conversation.id,
+      clientId: params.clientId,
+      text: `${body}\n\n[Formulario de reserva]`,
+      source: 'booking-flow-whatsapp-flow',
+    });
+
+    return true;
   }
 
   /** Envía el paso del flujo y deja constancia de lo que WhatsApp entregó. */

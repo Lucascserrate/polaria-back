@@ -45,24 +45,32 @@ export class ClientsService {
     return this.findOne(id);
   }
 
+  /**
+   * Sin teléfono no se reutiliza ningún cliente: siempre se crea uno nuevo.
+   * Buscar por nombre fusionaría a dos personas distintas que se llaman igual, y
+   * en una barbería eso pasa.
+   */
   async findOrCreateByPhone(
     tenantId: string,
     name: string,
-    phone?: string,
+    phone?: string | null,
   ): Promise<Client> {
-    if (phone) {
-      // Buscar cliente por teléfono
+    // La cadena vacía se guarda como `NULL`: dos vacías chocarían en el índice
+    // único `(tenantId, phone)`, y la segunda carga a mano fallaría.
+    const normalizedPhone = phone?.trim() || null;
+
+    if (normalizedPhone) {
       const existingClient = await this.clientRepository.findOne({
-        where: { tenantId, phone },
+        where: { tenantId, phone: normalizedPhone },
       });
       if (existingClient) {
         return existingClient;
       }
     }
-    // Crear nuevo cliente
+
     const newClient = this.clientRepository.create({
       name,
-      phone,
+      phone: normalizedPhone,
       tenantId,
     });
     return this.clientRepository.save(newClient);

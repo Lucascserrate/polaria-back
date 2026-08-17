@@ -1,14 +1,23 @@
 import { isOverlapping } from '../utils/availability.helpers';
+import { isWithinWorkingRanges } from '../utils/working-hours.resolver';
 import type { SlotRange } from '../utils/availability.types';
 import type { BookingSlot } from './booking-slot.type';
 
 export type StaffBusyMap = Record<string, SlotRange[]>;
 
 export type BuildBookingSlotsInput = {
-  /** Slots candidatos generados a partir del horario del negocio. */
+  /** Slots candidatos generados a partir de la cobertura del equipo. */
   candidateSlots: SlotRange[];
   /** Profesionales habilitados para el servicio elegido. */
   staffIds: string[];
+  /**
+   * Franjas de trabajo de cada profesional en la fecha, según
+   * `resolveWorkingRangesByStaff`.
+   *
+   * Es obligatorio: un profesional ausente del mapa no recibe reservas. Estar
+   * habilitado para el servicio no implica estar en el local a esa hora.
+   */
+  workingRangesByStaff: Record<string, SlotRange[]>;
   /** Citas ya agendadas por profesional, para la fecha en cuestión. */
   appointmentsByStaff: StaffBusyMap;
   /** Ningún slot que empiece antes de este momento se ofrece. */
@@ -30,7 +39,13 @@ export type BuildBookingSlotsInput = {
 export function buildBookingSlots(
   input: BuildBookingSlotsInput,
 ): BookingSlot[] {
-  const { candidateSlots, staffIds, appointmentsByStaff, minStartTime } = input;
+  const {
+    candidateSlots,
+    staffIds,
+    workingRangesByStaff,
+    appointmentsByStaff,
+    minStartTime,
+  } = input;
 
   if (staffIds.length === 0) return [];
 
@@ -41,8 +56,10 @@ export function buildBookingSlots(
   for (const candidate of candidateSlots) {
     if (minStartTime && candidate.startTime < minStartTime) continue;
 
-    const eligibleStaffIds = orderedStaffIds.filter((staffId) =>
-      isStaffFree(appointmentsByStaff[staffId], candidate),
+    const eligibleStaffIds = orderedStaffIds.filter(
+      (staffId) =>
+        isWithinWorkingRanges(workingRangesByStaff[staffId], candidate) &&
+        isStaffFree(appointmentsByStaff[staffId], candidate),
     );
 
     if (eligibleStaffIds.length === 0) continue;

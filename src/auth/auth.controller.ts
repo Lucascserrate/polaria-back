@@ -1,6 +1,9 @@
 import {
+  Body,
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Logger,
   Post,
   Req,
@@ -11,6 +14,7 @@ import { AuthGuard } from '@nestjs/passport';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
 import type { GoogleUserDto } from './dto/google-user.dto';
+import { LocalLoginDto } from './dto/local-login.dto';
 
 type GoogleAuthRequest = Request & { user: GoogleUserDto };
 type JwtAuthRequest = Request & {
@@ -44,6 +48,23 @@ export class AuthController {
       `Google callback hit origin=${headerValue(req.headers.origin)} host=${headerValue(req.headers.host)} proto=${headerValue(req.headers['x-forwarded-proto'])} userAgent=${headerValue(req.headers['user-agent'])}`,
     );
     return this.authService.OAuthCallback(req.user, res);
+  }
+
+  /**
+   * Endpoint temporal para la revisión de Meta (App Review): permite entrar
+   * solo con el correo, sin pasar por OAuth. Valida contra la misma whitelist
+   * y crea la misma sesión por cookies que `google/callback`.
+   *
+   * TODO: eliminar junto con `AuthService.localLogin` al terminar la revisión.
+   */
+  @Post('local-login')
+  @HttpCode(HttpStatus.OK)
+  localLogin(
+    @Body() localLoginDto: LocalLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    this.logger.log(`local-login called email=${localLoginDto.email}`);
+    return this.authService.localLogin(localLoginDto.email, res);
   }
 
   @Post('refreshToken')

@@ -212,6 +212,10 @@ export class AppointmentsService {
       .leftJoinAndSelect('appointment.services', 'appointmentServices')
       .leftJoinAndSelect('appointmentServices.service', 'service')
       .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      // Sin esto el join descartaría al staff dado de baja y las citas viejas
+      // aparecerían sin profesional. Solo afecta a `staff`: es la única entidad
+      // de esta consulta con borrado lógico.
+      .withDeleted()
       .where('appointment.tenantId = :tenantId', { tenantId: tenantId });
 
     if (filters?.search && filters.search.trim()) {
@@ -445,6 +449,9 @@ export class AppointmentsService {
         cancelled: string;
       }>();
 
+    // Solo lo atendido, igual que el módulo de reportes. Sin este filtro sumaba
+    // también las canceladas y las que todavía no ocurrieron, y el mismo día
+    // mostraba dos cifras distintas según qué pantalla lo preguntara.
     const rawRevenue = await this.appointmentServiceRepository
       .createQueryBuilder('appointmentService')
       .select('SUM(appointmentService.priceAtBooking)', 'revenue')
@@ -454,6 +461,9 @@ export class AppointmentsService {
         'appointment.id = appointmentService.appointmentId',
       )
       .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.status = :completed', {
+        completed: AppointmentStatus.COMPLETED,
+      })
       .andWhere('appointment.startTime >= :startUtc', { startUtc })
       .andWhere('appointment.startTime < :endUtc', { endUtc })
       .getRawOne<{ revenue: string | null }>();

@@ -22,6 +22,8 @@ import { SettingsModule } from './settings/settings.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { BookingFlowModule } from './booking-flow/booking-flow.module';
+import { FlowsModule } from './flows/flows.module';
+import { ReportsModule } from './reports/reports.module';
 
 @Module({
   imports: [
@@ -60,6 +62,8 @@ import { BookingFlowModule } from './booking-flow/booking-flow.module';
     WebhookModule,
     WhatsAppModule,
     BookingFlowModule,
+    FlowsModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

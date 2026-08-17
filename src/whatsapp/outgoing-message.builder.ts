@@ -2,6 +2,7 @@ import {
   WHATSAPP_LIMITS,
   WhatsAppMessageBuildError,
   type SendButtonsInput,
+  type SendFlowInput,
   type SendListInput,
   type SendTextInput,
 } from './types/outgoing-message.type';
@@ -99,6 +100,57 @@ export function buildButtonsPayload(input: SendButtonsInput): BuiltMessage {
               ),
             },
           })),
+        },
+      },
+    },
+    warnings,
+  };
+}
+
+/**
+ * Mensaje que abre un WhatsApp Flow.
+ *
+ * `flow_action` va en `data_exchange` porque la primera pantalla necesita datos
+ * del servidor —el catálogo de servicios—, así que Meta llama al endpoint con
+ * `INIT` antes de mostrar nada. Con `navigate` habría que precargar esos datos
+ * en el propio mensaje.
+ */
+export function buildFlowPayload(input: SendFlowInput): BuiltMessage {
+  const warnings: string[] = [];
+
+  const body = requireNonEmpty(input.body, 'body');
+  requireNonEmpty(input.flowId, 'flowId');
+  requireNonEmpty(input.flowToken, 'flowToken');
+
+  return {
+    payload: {
+      type: 'interactive',
+      interactive: {
+        type: 'flow',
+        ...buildHeader(input.header, warnings),
+        body: {
+          text: clamp(
+            body,
+            WHATSAPP_LIMITS.BUTTONS_BODY_MAX,
+            'el cuerpo del mensaje',
+            warnings,
+          ),
+        },
+        ...buildFooter(input.footer, warnings),
+        action: {
+          name: 'flow',
+          parameters: {
+            flow_message_version: WHATSAPP_LIMITS.FLOW_MESSAGE_VERSION,
+            flow_id: input.flowId,
+            flow_token: input.flowToken,
+            flow_cta: clamp(
+              requireNonEmpty(input.cta, 'cta'),
+              WHATSAPP_LIMITS.FLOW_CTA_MAX,
+              'la etiqueta del botón del Flow',
+              warnings,
+            ),
+            flow_action: 'data_exchange',
+          },
         },
       },
     },

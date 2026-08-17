@@ -4,11 +4,11 @@ import type { Service } from '../../services/entities/service.entity';
 import type { Staff } from '../../staff/entities/staff.entity';
 import { AvailabilityCalculator } from '../availability.calculator';
 import { AvailabilityRepository } from '../availability.repository';
+import { addMinutes, makeDateInTimeZone } from '../utils/availability.helpers';
 import {
-  addMinutes,
-  getDayOfWeek,
-  makeDateInTimeZone,
-} from '../utils/availability.helpers';
+  resolveWorkingRangesByStaff,
+  unionWorkingRanges,
+} from '../utils/working-hours.resolver';
 import type { SlotRange } from '../utils/availability.types';
 import {
   DEFAULT_SLOT_STEP_MINUTES,
@@ -71,6 +71,7 @@ export class BookingAvailabilityService {
     return buildBookingSlots({
       candidateSlots: context.candidateSlots,
       staffIds: context.staffIds,
+      workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
       minStartTime: context.minStartTime,
     });
@@ -99,12 +100,6 @@ export class BookingAvailabilityService {
     const timeZone = tenant?.timezone;
     if (!timeZone) return [];
 
-    const businessHours = await this.availabilityRepository.getBusinessHours(
-      tenantId,
-      getDayOfWeek(date, timeZone),
-    );
-    if (businessHours.length === 0) return [];
-
     const services =
       await this.availabilityRepository.getActiveServices(tenantId);
     if (services.length === 0) return [];
@@ -112,6 +107,21 @@ export class BookingAvailabilityService {
     const staffList =
       await this.availabilityRepository.getActiveStaffWithServices(tenantId);
     if (staffList.length === 0) return [];
+
+    const [businessHours, schedulesByStaff] = await Promise.all([
+      this.availabilityRepository.getBusinessHours(tenantId),
+      this.availabilityRepository.getStaffSchedules(
+        staffList.map((staff) => staff.id),
+      ),
+    ]);
+
+    const workingRangesByStaff = resolveWorkingRangesByStaff({
+      date,
+      timeZone,
+      businessHours,
+      staff: staffList,
+      schedulesByStaff,
+    });
 
     const appointmentsByStaff =
       await this.availabilityRepository.getAppointmentsByStaff(
@@ -126,13 +136,15 @@ export class BookingAvailabilityService {
     return services.filter((service) => {
       if (service.durationMinutes <= 0) return false;
 
-      const staffIds = staffIdsForService(staffList, service.id);
+      // La grilla se arma con la cobertura de quienes hacen este servicio y
+      // trabajan ese día, no con la del equipo entero.
+      const staffIds = staffIdsForService(staffList, service.id).filter(
+        (id) => workingRangesByStaff[id].length > 0,
+      );
       if (staffIds.length === 0) return false;
 
       const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
-        businessHours,
-        date,
-        timeZone,
+        unionWorkingRanges(workingRangesByStaff, staffIds),
         service.durationMinutes,
         DEFAULT_SLOT_STEP_MINUTES,
       );
@@ -141,6 +153,7 @@ export class BookingAvailabilityService {
         buildBookingSlots({
           candidateSlots,
           staffIds,
+          workingRangesByStaff,
           appointmentsByStaff,
           minStartTime,
         }).length > 0
@@ -182,6 +195,7 @@ export class BookingAvailabilityService {
     const slots = buildBookingSlots({
       candidateSlots: context.candidateSlots,
       staffIds: context.staffIds,
+      workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
       minStartTime: context.minStartTime,
     });
@@ -214,6 +228,7 @@ export class BookingAvailabilityService {
   private async loadContext(query: BookingSlotsQuery): Promise<{
     candidateSlots: SlotRange[];
     staffIds: string[];
+    workingRangesByStaff: Record<string, SlotRange[]>;
     appointmentsByStaff: StaffBusyMap;
     minStartTime: Date;
   } | null> {
@@ -232,12 +247,6 @@ export class BookingAvailabilityService {
     const service = services[0];
     if (!service || service.durationMinutes <= 0) return null;
 
-    const businessHours = await this.availabilityRepository.getBusinessHours(
-      tenantId,
-      getDayOfWeek(date, timeZone),
-    );
-    if (businessHours.length === 0) return null;
-
     const staffList = await this.availabilityRepository.getStaffList(
       tenantId,
       [serviceId],
@@ -245,7 +254,27 @@ export class BookingAvailabilityService {
     );
     if (staffList.length === 0) return null;
 
-    const staffIds = staffList.map((staff) => staff.id);
+    const [businessHours, schedulesByStaff] = await Promise.all([
+      this.availabilityRepository.getBusinessHours(tenantId),
+      this.availabilityRepository.getStaffSchedules(
+        staffList.map((staff) => staff.id),
+      ),
+    ]);
+
+    const workingRangesByStaff = resolveWorkingRangesByStaff({
+      date,
+      timeZone,
+      businessHours,
+      staff: staffList,
+      schedulesByStaff,
+    });
+
+    // Solo siguen los que efectivamente trabajan esa fecha. Esto también cubre
+    // el negocio cerrado: con el local sin franjas, nadie queda en pie.
+    const staffIds = staffList
+      .map((staff) => staff.id)
+      .filter((id) => workingRangesByStaff[id].length > 0);
+    if (staffIds.length === 0) return null;
 
     const appointmentsByStaff =
       await this.availabilityRepository.getAppointmentsByStaff(
@@ -256,9 +285,7 @@ export class BookingAvailabilityService {
       );
 
     const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
-      businessHours,
-      date,
-      timeZone,
+      unionWorkingRanges(workingRangesByStaff, staffIds),
       service.durationMinutes,
       DEFAULT_SLOT_STEP_MINUTES,
     );
@@ -266,6 +293,7 @@ export class BookingAvailabilityService {
     return {
       candidateSlots,
       staffIds,
+      workingRangesByStaff,
       appointmentsByStaff,
       minStartTime: this.calculateMinStartTime(timeZone),
     };

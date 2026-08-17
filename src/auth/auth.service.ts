@@ -1,9 +1,11 @@
 import { HttpException, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { CookieOptions, Response } from 'express';
+import { Response } from 'express';
 import { TenantsService } from '../tenants/tenants.service';
+import { Tenant } from '../tenants/entities/tenant.entity';
 import { GoogleUserDto } from './dto/google-user.dto';
 import { createJwtToken } from './utils/jwt-token.util';
+import { AUTH_COOKIE_OPTIONS, setAuthCookies } from './utils/auth-cookies.util';
 import { AuthError } from './domain/enums/auth.enum';
 import { TenantError } from '../tenants/enums/tenant.enum';
 
@@ -53,21 +55,49 @@ export class AuthService {
         };
       }
 
-      const tokens = createJwtToken(tenant, this.jwtService);
-      return {
-        statusCode: HttpStatus.OK,
-        data: {
-          user: tenant,
-          tokens,
-        },
-        notFound: false as const,
-      };
+      return this.createSession(tenant);
     } catch {
       throw new HttpException(
         AuthError.LOGIN_FAILED,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  /**
+   * Login temporal por correo para la revisión de Meta (App Review).
+   *
+   * Comparte la misma whitelist que OAuth (existir como tenant) y el mismo
+   * mecanismo de sesión (`createSession` + cookies). La única diferencia es
+   * el origen del correo: llega en el body en vez de venir del proveedor.
+   *
+   * TODO: eliminar junto con `POST /auth/local-login` al terminar la revisión.
+   */
+  async localLogin(email: string, res: Response) {
+    const tenant = await this.tenantsService.findByEmail(email);
+
+    if (!tenant) {
+      this.logger.warn(`localLogin rejected, email not whitelisted: ${email}`);
+      throw new HttpException(AuthError.UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
+    }
+
+    const { data } = this.createSession(tenant);
+    setAuthCookies(res, data.tokens);
+
+    this.logger.log(`localLogin succeeded tenantId=${tenant.id}`);
+
+    return this.authenticatedResponse(tenant);
+  }
+
+  private createSession(tenant: Tenant) {
+    return {
+      statusCode: HttpStatus.OK,
+      data: {
+        user: tenant,
+        tokens: createJwtToken(tenant, this.jwtService),
+      },
+      notFound: false as const,
+    };
   }
 
   async OAuthCallback(user: GoogleUserDto, res: Response) {
@@ -84,18 +114,11 @@ export class AuthService {
         res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
         return;
       }
-      const cookieOptions: CookieOptions = {
-        secure: true,
-        sameSite: 'none',
-        path: '/',
-      };
-
       this.logger.log(
-        `Setting auth cookies secure=${cookieOptions.secure} sameSite=${cookieOptions.sameSite} path=${cookieOptions.path} domain=${cookieOptions.domain ?? 'host-only'}`,
+        `Setting auth cookies secure=${AUTH_COOKIE_OPTIONS.secure} sameSite=${AUTH_COOKIE_OPTIONS.sameSite} path=${AUTH_COOKIE_OPTIONS.path} domain=${AUTH_COOKIE_OPTIONS.domain ?? 'host-only'}`,
       );
 
-      res.cookie('accessToken', data.tokens.accessToken, cookieOptions);
-      res.cookie('refreshToken', data.tokens.refreshToken, cookieOptions);
+      setAuthCookies(res, data.tokens);
 
       this.logger.log(
         `Set-Cookie header=${JSON.stringify(res.getHeader('Set-Cookie'))}`,
@@ -151,6 +174,10 @@ export class AuthService {
       );
     }
 
+    return this.authenticatedResponse(tenant);
+  }
+
+  private authenticatedResponse(tenant: Tenant) {
     return {
       statusCode: HttpStatus.OK,
       message: 'Tenant is authenticated',
