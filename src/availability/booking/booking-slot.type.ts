@@ -17,12 +17,18 @@ export type BookingSlot = SlotRange & {
 /**
  * Paso entre horarios ofrecidos, en minutos.
  *
+ * Define cada cuánto se **ofrece** un horario, no cuánto dura el servicio.
+ *
  * El cálculo legado usa 5 minutos porque generaba candidatos para buscar "el más
- * cercano a lo que pidió el usuario". Un flujo guiado en cambio ofrece una lista
- * finita, así que conviene un paso más grueso: produce horarios legibles y menos
- * candidatos que descartar.
+ * cercano a lo que pidió el usuario". Un flujo guiado ofrece una lista finita, y
+ * ahí un paso fino se paga caro: con 15 minutos, una jornada de 9 a 19 produce 40
+ * horarios, que en un componente de 10 filas son cinco páginas. Llegar a las 17:00
+ * costaba cuatro toques de "Ver más".
+ *
+ * Media hora es la granularidad natural de una barbería y deja la jornada en 20
+ * horarios. Ofrecer 9:00, 9:15, 9:30 y 9:45 era sobre todo ruido.
  */
-export const DEFAULT_SLOT_STEP_MINUTES = 15;
+export const DEFAULT_SLOT_STEP_MINUTES = 30;
 
 /**
  * Margen mínimo entre "ahora" y el primer horario ofrecible. Evita ofrecer un

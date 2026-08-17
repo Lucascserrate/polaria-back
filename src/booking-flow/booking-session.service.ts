@@ -62,6 +62,8 @@ export class BookingSessionService {
     tenantId: string;
     clientId: string;
     conversationId?: string;
+    /** Cita a reemplazar cuando la reserva nace de un pedido de reagenda. */
+    replacesAppointmentId?: string;
     now: Date;
   }): Promise<BookingSession> {
     const existing = await this.findActive(params);
@@ -79,6 +81,7 @@ export class BookingSessionService {
         tenantId: params.tenantId,
         clientId: params.clientId,
         conversationId: params.conversationId,
+        replacesAppointmentId: params.replacesAppointmentId ?? null,
         token: generateSessionToken(),
         state: BookingSessionState.ASK_SERVICE,
         stepVersion: 1,
