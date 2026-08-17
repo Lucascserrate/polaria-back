@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { AppointmentsModule } from '../appointments/appointments.module';
 import { AssistantModule } from '../assistant/assistant.module';
 import { BookingFlowModule } from '../booking-flow/booking-flow.module';
 import { ConversationsModule } from '../conversations/conversations.module';
@@ -23,6 +24,7 @@ import { WebhookService } from './webhook.service';
     AssistantModule,
     MessagesModule,
     ConversationsModule,
+    AppointmentsModule,
   ],
   controllers: [WebhookController],
   providers: [

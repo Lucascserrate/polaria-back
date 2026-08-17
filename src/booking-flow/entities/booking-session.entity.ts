@@ -127,6 +127,16 @@ export class BookingSession {
   appointmentId?: string | null;
 
   /**
+   * Cita que esta reserva viene a reemplazar, cuando el cliente pidió reagendar.
+   *
+   * La vieja se cancela **al confirmar la nueva**, no antes: si se cancelara
+   * primero y el cliente abandonara el flujo a mitad, se quedaría sin turno por
+   * haber intentado moverlo.
+   */
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  replacesAppointmentId?: string | null;
+
+  /**
    * `id` del último mensaje de Meta procesado. Meta reintenta los webhooks, y
    * sin esta comprobación un reintento se leería como una segunda interacción.
    */

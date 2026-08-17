@@ -1,6 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import { AppointmentsService } from '../appointments/appointments.service';
+import type { Appointment } from '../appointments/entities/appointment.entity';
 import { AssistantSessionService } from '../assistant/services/assistant-session.service';
+import {
+  AppointmentAction,
+  buildAppointmentGoneText,
+  buildAppointmentListPrompt,
+  buildCancelConfirmPrompt,
+  buildCancelledText,
+  buildDismissedText,
+  buildSingleAppointmentPrompt,
+  decodeAppointmentAction,
+  type AppointmentPrompt,
+  type AppointmentSelection,
+  type AppointmentSummary,
+} from '../booking-flow/appointment-actions';
 import { BookingFlowService } from '../booking-flow/booking-flow.service';
 import type { BookingPrompt } from '../booking-flow/booking-flow.types';
 import { detectBookingTrigger } from '../booking-flow/booking-trigger';
@@ -24,13 +39,36 @@ import {
   IncomingMessageKind,
   type IncomingWhatsAppMessage,
 } from '../whatsapp/types/incoming-message.type';
-import type { WhatsAppCredentials } from '../whatsapp/types/outgoing-message.type';
+import {
+  WHATSAPP_LIMITS,
+  type WhatsAppCredentials,
+} from '../whatsapp/types/outgoing-message.type';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
 import { ConversationRecorderService } from './conversation-recorder.service';
 
 const UNSUPPORTED_MESSAGE_REPLY =
   'Por ahora solo puedo leer mensajes de texto. Escríbeme y te ayudo.';
+
+/**
+ * Reduce una cita a lo que hace falta para mostrarla y operarla.
+ *
+ * Un servicio por reserva, así que se toma el primer segmento; el nombre del
+ * profesional puede faltar si la relación no vino cargada.
+ */
+function toAppointmentSummary(appointment: Appointment): AppointmentSummary {
+  const segment = appointment.services?.[0];
+
+  return {
+    id: appointment.id,
+    serviceName: segment?.service?.name ?? 'Turno',
+    staffName: segment?.staff?.name ?? null,
+    startTime:
+      appointment.startTime instanceof Date
+        ? appointment.startTime
+        : new Date(appointment.startTime as unknown as string),
+  };
+}
 
 /** Desenlace que el endpoint del Flow devuelve al cerrar. */
 function readFlowStatus(response: Record<string, unknown> | null): string {
@@ -80,6 +118,7 @@ export class InboundMessageService {
     private readonly conversationControl: ConversationControlService,
     private readonly tenantsService: TenantsService,
     private readonly bookingSessionService: BookingSessionService,
+    private readonly appointmentsService: AppointmentsService,
   ) {}
 
   async handle(params: {
@@ -161,6 +200,19 @@ export class InboundMessageService {
         conversation,
         clientId: client.id,
         action: menuAction,
+      });
+      return;
+    }
+
+    const appointmentSelection = decodeAppointmentAction(selectionId);
+    if (appointmentSelection) {
+      await this.handleAppointmentAction({
+        tenantId,
+        credentials,
+        message,
+        conversation,
+        clientId: client.id,
+        selection: appointmentSelection,
       });
       return;
     }
@@ -533,6 +585,288 @@ export class InboundMessageService {
   }
 
   /**
+   * Acciones sobre citas que el cliente ya tiene.
+   *
+   * Es un flujo separado del de reserva: no crea nada, opera sobre lo existente.
+   */
+  private async handleAppointmentAction(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    message: IncomingWhatsAppMessage;
+    conversation: Conversation;
+    clientId: string;
+    selection: AppointmentSelection;
+  }): Promise<void> {
+    const {
+      tenantId,
+      credentials,
+      message,
+      conversation,
+      clientId,
+      selection,
+    } = params;
+
+    await this.conversationRecorder.recordSelection({
+      tenantId,
+      conversationId: conversation.id,
+      clientId,
+      message,
+    });
+
+    // Sacar otro turno: reserva normal, sin tocar las que ya tiene.
+    if (selection.action === AppointmentAction.NEW) {
+      await this.startBooking({
+        tenantId,
+        credentials,
+        conversation,
+        clientId,
+        to: message.from,
+        skipExistingCheck: true,
+      });
+      return;
+    }
+
+    if (selection.action === AppointmentAction.DISMISS) {
+      await this.replyAndRecord({
+        tenantId,
+        credentials,
+        conversation,
+        clientId,
+        to: message.from,
+        text: buildDismissedText(),
+      });
+      return;
+    }
+
+    // El id viene de un componente de WhatsApp, así que se comprueba que la cita
+    // sea de este cliente antes de hacer nada con ella.
+    const appointmentId =
+      typeof selection.appointmentId === 'string' &&
+      selection.appointmentId.length > 0
+        ? selection.appointmentId
+        : null;
+
+    let appointment: Appointment | null = null;
+    if (appointmentId) {
+      const appointmentsApi = this.appointmentsService as {
+        findUpcomingByClientAndId: (params: {
+          tenantId: string;
+          clientId: string;
+          appointmentId: string;
+        }) => Promise<Appointment | null>;
+      };
+
+      try {
+        appointment = await appointmentsApi
+          .findUpcomingByClientAndId({
+            tenantId,
+            clientId,
+            appointmentId,
+          })
+          .catch(() => null);
+      } catch {
+        appointment = null;
+      }
+    }
+
+    if (!appointment) {
+      await this.replyAndRecord({
+        tenantId,
+        credentials,
+        conversation,
+        clientId,
+        to: message.from,
+        text: buildAppointmentGoneText(),
+      });
+      return;
+    }
+
+    const timezone = await this.resolveTimezone(tenantId);
+    const summary = toAppointmentSummary(appointment);
+
+    switch (selection.action) {
+      case AppointmentAction.PICK:
+        await this.sendAppointmentPrompt({
+          tenantId,
+          credentials,
+          conversation,
+          clientId,
+          to: message.from,
+          prompt: buildSingleAppointmentPrompt(summary, timezone),
+        });
+        return;
+
+      case AppointmentAction.CANCEL:
+        await this.sendAppointmentPrompt({
+          tenantId,
+          credentials,
+          conversation,
+          clientId,
+          to: message.from,
+          prompt: buildCancelConfirmPrompt(summary, timezone),
+        });
+        return;
+
+      case AppointmentAction.CANCEL_CONFIRM: {
+        const appointmentsApi = this.appointmentsService as {
+          cancelByClient: (params: {
+            tenantId: string;
+            clientId: string;
+            appointmentId: string;
+          }) => Promise<unknown>;
+        };
+
+        await appointmentsApi.cancelByClient({
+          tenantId,
+          clientId,
+          appointmentId: appointment.id,
+        });
+        await this.replyAndRecord({
+          tenantId,
+          credentials,
+          conversation,
+          clientId,
+          to: message.from,
+          text: buildCancelledText(summary, timezone),
+        });
+        return;
+      }
+
+      case AppointmentAction.RESCHEDULE:
+        await this.startBooking({
+          tenantId,
+          credentials,
+          conversation,
+          clientId,
+          to: message.from,
+          skipExistingCheck: true,
+          replacesAppointmentId: appointment.id,
+        });
+        return;
+
+      default:
+        return;
+    }
+  }
+
+  /**
+   * Ofrece qué hacer con las citas que el cliente ya tiene.
+   *
+   * Devuelve si intervino. Con una sola cita se saltea el paso de elegir cuál,
+   * igual que se saltea el de profesional cuando hay uno solo.
+   */
+  private async offerExistingAppointments(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversation: Conversation;
+    clientId: string;
+    to: string;
+  }): Promise<boolean> {
+    const { tenantId, clientId } = params;
+
+    const appointmentsApi = this.appointmentsService as {
+      findUpcomingByClient: (query: {
+        tenantId: string;
+        clientId: string;
+      }) => Promise<Appointment[]>;
+    };
+
+    const upcoming: Appointment[] = await appointmentsApi.findUpcomingByClient({
+      tenantId,
+      clientId,
+    });
+
+    if (upcoming.length === 0) return false;
+
+    const timezone = await this.resolveTimezone(tenantId);
+    const summaries = upcoming.map(toAppointmentSummary);
+
+    const prompt =
+      summaries.length === 1
+        ? buildSingleAppointmentPrompt(summaries[0], timezone)
+        : buildAppointmentListPrompt(summaries, timezone);
+
+    await this.sendAppointmentPrompt({ ...params, prompt });
+    return true;
+  }
+
+  /**
+   * Envía un prompt de citas: botones si son pocas opciones, lista si no entran.
+   */
+  private async sendAppointmentPrompt(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversation: Conversation;
+    clientId: string;
+    to: string;
+    prompt: AppointmentPrompt;
+  }): Promise<void> {
+    const { prompt } = params;
+
+    const fitsInButtons =
+      prompt.options.length <= WHATSAPP_LIMITS.BUTTONS_MAX_COUNT &&
+      prompt.options.every((option) => !option.description);
+
+    const sent = fitsInButtons
+      ? await this.whatsAppSenderService.sendButtons(params.credentials, {
+          to: params.to,
+          body: prompt.body,
+          buttons: prompt.options.map((option) => ({
+            id: option.id,
+            title: option.title,
+          })),
+        })
+      : await this.whatsAppSenderService.sendList(params.credentials, {
+          to: params.to,
+          body: prompt.body,
+          buttonText: 'Ver turnos',
+          sections: [{ rows: prompt.options }],
+        });
+
+    if (!sent.ok) return;
+
+    await this.conversationRecorder.recordOutgoingText({
+      tenantId: params.tenantId,
+      conversationId: params.conversation.id,
+      clientId: params.clientId,
+      text: `${prompt.body}\n\nOpciones: ${prompt.options
+        .map((option) => option.title)
+        .join(' · ')}`,
+      source: 'appointment-actions',
+    });
+  }
+
+  /** Manda un texto y lo deja en el historial. */
+  private async replyAndRecord(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversation: Conversation;
+    clientId: string;
+    to: string;
+    text: string;
+  }): Promise<void> {
+    const sent = await this.whatsAppSenderService.sendText(params.credentials, {
+      to: params.to,
+      body: params.text,
+    });
+
+    if (!sent.ok) return;
+
+    await this.conversationRecorder.recordOutgoingText({
+      tenantId: params.tenantId,
+      conversationId: params.conversation.id,
+      clientId: params.clientId,
+      text: params.text,
+      source: 'appointment-actions',
+    });
+  }
+
+  private async resolveTimezone(tenantId: string): Promise<string> {
+    const tenant = await this.tenantsService.findOne(tenantId);
+    return tenant?.timezone ?? 'America/La_Paz';
+  }
+
+  /**
    * Abre una reserva por el canal que corresponda a este tenant.
    *
    * Con un Flow publicado se manda el formulario y el resto de la conversación
@@ -546,8 +880,24 @@ export class InboundMessageService {
     conversation: Conversation;
     clientId: string;
     to: string;
+    /** Salta la detección de turnos existentes: ya se decidió sacar otro. */
+    skipExistingCheck?: boolean;
+    replacesAppointmentId?: string;
   }): Promise<void> {
     const { tenantId, credentials, conversation, clientId, to } = params;
+
+    // Si ya tiene turno, se pregunta qué quiere hacer en lugar de abrir otro
+    // flujo sin más. No se impide sacar otro: es una de las opciones.
+    if (!params.skipExistingCheck) {
+      const intervened = await this.offerExistingAppointments({
+        tenantId,
+        credentials,
+        conversation,
+        clientId,
+        to,
+      });
+      if (intervened) return;
+    }
 
     const tenant = await this.tenantsService.findOne(tenantId);
     const flowId = readStoredCredential(tenant?.whatsappFlowId);
@@ -556,6 +906,7 @@ export class InboundMessageService {
       tenantId,
       clientId,
       conversationId: conversation.id,
+      replacesAppointmentId: params.replacesAppointmentId,
       limits: flowId ? {} : NATIVE_CHANNEL_LIMITS,
     });
 

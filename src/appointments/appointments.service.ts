@@ -4,9 +4,13 @@
   Injectable,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, Repository } from 'typeorm';
+import { Between, In, MoreThanOrEqual, Repository } from 'typeorm';
 
-import { Appointment, blocksAgenda } from './entities/appointment.entity';
+import {
+  Appointment,
+  blocksAgenda,
+  BLOCKING_APPOINTMENT_STATUSES,
+} from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { AvailabilityService } from '../availability/availability.service';
@@ -493,6 +497,73 @@ export class AppointmentsService {
       },
       revenueTotal: Number(rawRevenue?.revenue ?? 0),
     };
+  }
+
+  /**
+   * Citas futuras de un cliente, la más próxima primero.
+   *
+   * Solo las que ocupan agenda: una cancelada o completada no es algo que el
+   * cliente pueda reagendar. El corte es por hora de inicio, así que un turno en
+   * curso ya no aparece.
+   */
+  findUpcomingByClient(params: {
+    tenantId: string;
+    clientId: string;
+    now?: Date;
+    limit?: number;
+  }): Promise<Appointment[]> {
+    return this.appointmentRepository.find({
+      where: {
+        tenantId: params.tenantId,
+        clientId: params.clientId,
+        status: In([...BLOCKING_APPOINTMENT_STATUSES]),
+        startTime: MoreThanOrEqual(params.now ?? new Date()),
+      },
+      relations: { services: { service: true, staff: true } },
+      order: { startTime: 'ASC' },
+      take: params.limit,
+    });
+  }
+
+  findUpcomingByClientAndId(params: {
+    tenantId: string;
+    clientId: string;
+    appointmentId: string;
+  }): Promise<Appointment | null> {
+    return this.appointmentRepository.findOne({
+      where: {
+        id: params.appointmentId,
+        tenantId: params.tenantId,
+        clientId: params.clientId,
+      },
+      relations: { services: { service: true, staff: true } },
+    });
+  }
+
+  /**
+   * Cancelación pedida por el cliente.
+   *
+   * Libera el horario para otro cliente vía `syncActiveSlot`, que es lo que anula
+   * `activeStartTime` y saca la fila de la disputa por el índice único.
+   *
+   * Comprueba que la cita sea de ese cliente y de ese tenant: el id viaja en un
+   * componente de WhatsApp y no alcanza con que esté bien formado.
+   */
+  async cancelByClient(params: {
+    tenantId: string;
+    clientId: string;
+    appointmentId: string;
+  }): Promise<Appointment | null> {
+    const appointment = await this.findUpcomingByClientAndId(params);
+    if (!appointment) return null;
+
+    if (!blocksAgenda(appointment.status)) return appointment;
+
+    appointment.status = AppointmentStatus.CANCELLED;
+    await this.appointmentRepository.save(appointment);
+    await this.syncActiveSlot(appointment.id, AppointmentStatus.CANCELLED);
+
+    return appointment;
   }
 
   async findLastByClient(tenantId: string, clientId: string) {

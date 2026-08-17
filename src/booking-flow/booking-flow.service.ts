@@ -87,6 +87,11 @@ export class BookingFlowService {
     tenantId: string;
     clientId: string;
     conversationId?: string;
+    /**
+     * Cita a reemplazar. La reserva corre igual que cualquier otra; lo único que
+     * cambia es que al confirmarse cancela la anterior.
+     */
+    replacesAppointmentId?: string;
     limits?: BookingChannelLimits;
     now?: Date;
   }): Promise<BookingPrompt> {
@@ -98,6 +103,7 @@ export class BookingFlowService {
       tenantId: params.tenantId,
       clientId: params.clientId,
       conversationId: params.conversationId,
+      replacesAppointmentId: params.replacesAppointmentId,
       now,
     });
 
@@ -532,6 +538,20 @@ export class BookingFlowService {
         return this.slotTakenPrompt({ session, metaMessageId, limits, now });
       }
       throw error;
+    }
+
+    // Reagenda: la cita vieja se cancela recién ahora, con la nueva ya creada.
+    // Hacerlo antes dejaría al cliente sin turno si abandonaba a mitad.
+    if (session.replacesAppointmentId) {
+      const appointmentsService: AppointmentsService = this.appointmentsService;
+      await appointmentsService.cancelByClient({
+        tenantId: session.tenantId,
+        clientId: session.clientId,
+        appointmentId: session.replacesAppointmentId,
+      });
+      this.logger.log(
+        `Turno reagendado (sessionId=${session.id}, anterior=${session.replacesAppointmentId}, nuevo=${appointment.id}).`,
+      );
     }
 
     const completed = await this.bookingSessionService.complete({
