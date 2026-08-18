@@ -90,6 +90,16 @@ export class Tenant {
   @Column({ default: 'active' })
   status?: string;
 
+  /**
+   * Interruptor general de Polaria para todo el negocio.
+   *
+   * Es el plan de contingencia del negocio: si algo sale mal o decide que
+   * Polaria no le sirve, tiene que poder callarla al instante y sin depender de
+   * nadie. Por eso corta en el borde de entrada del webhook y no capa por capa.
+   *
+   * Es el equivalente para todo el negocio de `ConversationState.HUMAN_HANDOFF`,
+   * que hace lo mismo en una sola conversación.
+   */
   @Column({ default: true })
   aiEnabled!: boolean;
 

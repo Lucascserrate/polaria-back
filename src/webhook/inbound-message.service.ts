@@ -105,6 +105,20 @@ function flowClosingText(status: string): string {
  * La IA conserva un único poder sobre las reservas: detectar la intención y
  * arrancar el flujo. No aporta ningún dato.
  */
+/**
+ * Por qué Polaria se queda callada ante un mensaje entrante.
+ *
+ * Los dos apagados guardan y no responden, pero tienen alcance y dueño
+ * distintos, y el log necesita distinguirlos para que una barbería que apagó el
+ * bot no parezca un traspaso masivo a atención humana.
+ */
+enum QuietReason {
+  /** El negocio apagó Polaria entera desde Configuración. */
+  BOT_OFF = 'BOT_OFF',
+  /** Esta conversación está en manos de una persona. */
+  HANDOFF = 'HANDOFF',
+}
+
 @Injectable()
 export class InboundMessageService {
   private readonly logger = new Logger(InboundMessageService.name);
@@ -181,12 +195,14 @@ export class InboundMessageService {
         clientName: message.contactName ?? undefined,
       });
 
-    if (this.conversationControl.isHandedOff(conversation)) {
+    const quiet = await this.quietReason({ tenantId, conversation });
+    if (quiet) {
       await this.recordAndStayQuiet({
         tenantId,
         conversation,
         client,
         message,
+        reason: quiet,
       });
       return;
     }
@@ -264,12 +280,14 @@ export class InboundMessageService {
 
     // 0. La conversación está en manos del negocio. Polaria no dice nada, pero
     //    registra el mensaje para que el hilo quede completo.
-    if (this.conversationControl.isHandedOff(conversation)) {
+    const quiet = await this.quietReason({ tenantId, conversation });
+    if (quiet) {
       await this.recordAndStayQuiet({
         tenantId,
         conversation,
         client,
         message,
+        reason: quiet,
       });
       return;
     }
@@ -451,21 +469,45 @@ export class InboundMessageService {
   }
 
   /**
+   * Por qué Polaria no debe responder, o `null` si puede hacerlo.
+   *
+   * Son dos apagados distintos y conviene no confundirlos: `BOT_OFF` es el
+   * interruptor del negocio entero, que se maneja desde Configuración, y
+   * `HANDOFF` es esta conversación puntual en manos de una persona, que pide el
+   * propio cliente desde el menú.
+   */
+  private async quietReason(params: {
+    tenantId: string;
+    conversation: Conversation;
+  }): Promise<QuietReason | null> {
+    if (this.conversationControl.isHandedOff(params.conversation)) {
+      return QuietReason.HANDOFF;
+    }
+
+    const tenant = await this.tenantsService.findOne(params.tenantId);
+    // Un tenant que no aparece no es motivo para callar: el mensaje entró por
+    // sus credenciales, y quedarse mudo escondería ese problema en vez de
+    // dejarlo a la vista.
+    return tenant && !tenant.aiEnabled ? QuietReason.BOT_OFF : null;
+  }
+
+  /**
    * Registra un mensaje entrante sin responder.
    *
-   * Es lo que hace Polaria mientras la conversación está en manos del negocio: el
-   * hilo queda completo en el panel, pero el cliente no recibe nada automático.
+   * Es lo que hace Polaria mientras no le toca hablar: el hilo queda completo en
+   * el panel, pero el cliente no recibe nada automático.
    */
   private async recordAndStayQuiet(params: {
     tenantId: string;
     conversation: Conversation;
     client: { id: string };
     message: IncomingWhatsAppMessage;
+    reason: QuietReason;
   }): Promise<void> {
     const { tenantId, conversation, client, message } = params;
 
     this.logger.log(
-      `Conversación en handoff, Polaria no responde (conversationId=${conversation.id}).`,
+      `Polaria no responde (conversationId=${conversation.id}, motivo=${params.reason}).`,
     );
 
     if (message.kind === IncomingMessageKind.TEXT) {
@@ -506,12 +548,14 @@ export class InboundMessageService {
         clientName: message.contactName ?? undefined,
       });
 
-    if (this.conversationControl.isHandedOff(conversation)) {
+    const quiet = await this.quietReason({ tenantId, conversation });
+    if (quiet) {
       await this.recordAndStayQuiet({
         tenantId,
         conversation,
         client,
         message,
+        reason: quiet,
       });
       return;
     }
@@ -566,6 +610,18 @@ export class InboundMessageService {
         phone: message.from,
         clientName: message.contactName ?? undefined,
       });
+
+    const quiet = await this.quietReason({ tenantId, conversation });
+    if (quiet) {
+      await this.recordAndStayQuiet({
+        tenantId,
+        conversation,
+        client,
+        message,
+        reason: quiet,
+      });
+      return;
+    }
 
     const reply = flowClosingText(status);
     const sent = await this.whatsAppSenderService.sendText(credentials, {
