@@ -9,6 +9,25 @@ import { UpdateStaffDto } from './dto/update-staff.dto';
 import { StaffScheduleDto } from './dto/staff-schedule.dto';
 import { assertValidStaffSchedules } from './utils/staff-schedule.util';
 import { Service } from '../services/entities/service.entity';
+import { normalizePhoneNumber } from '../webhook/webhook-meta.util';
+
+/**
+ * Deja el teléfono como lo espera la API de Meta: solo `+` y dígitos.
+ *
+ * Se normaliza al guardar y no al enviar para que la columna tenga una sola
+ * forma posible; si no, el mismo número cargado como `+591 700-00000` y como
+ * `+59170000000` conviviría en la tabla y habría que limpiarlo en cada uso.
+ *
+ * Los tres valores de retorno son tres intenciones distintas: `undefined` es
+ * "no se tocó el campo" —lo que `merge` ignora—, `null` es "borrarlo" y el
+ * string es el número nuevo.
+ */
+function normalizeStaffPhone(
+  phone: string | undefined,
+): string | null | undefined {
+  if (phone === undefined) return undefined;
+  return normalizePhoneNumber(phone.trim()) || null;
+}
 
 @Injectable()
 export class StaffService {
@@ -27,7 +46,10 @@ export class StaffService {
       schedules: schedules ?? [],
     });
 
-    const staff = this.staffRepository.create(rest);
+    const staff = this.staffRepository.create({
+      ...rest,
+      phone: normalizeStaffPhone(rest.phone),
+    });
 
     if (Array.isArray(serviceIds) && serviceIds.length) {
       staff.services = await this.resolveServices(serviceIds, staff.tenantId);
@@ -86,7 +108,12 @@ export class StaffService {
       schedules: schedules ?? staff.schedules ?? [],
     });
 
-    this.staffRepository.merge(staff, rest);
+    // `merge` saltea las columnas en `undefined`, así que mandar el teléfono
+    // sin normalizar no pisaría nada cuando el patch no lo trae.
+    this.staffRepository.merge(staff, {
+      ...rest,
+      phone: normalizeStaffPhone(rest.phone),
+    });
 
     if (Array.isArray(serviceIds)) {
       staff.services = serviceIds.length

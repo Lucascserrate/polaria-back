@@ -49,6 +49,21 @@ export class Staff {
   @Column({ nullable: true })
   email?: string;
 
+  /**
+   * WhatsApp del profesional, en formato internacional (`+59170000000`).
+   *
+   * Es el destinatario del aviso cuando un cliente le agenda una cita, así que
+   * se guarda ya normalizado —solo `+` y dígitos— para poder pasarlo a la API
+   * de Meta sin volver a limpiarlo en cada envío.
+   *
+   * `NULL` significa que el profesional no recibe avisos, y es el estado por
+   * defecto: el negocio puede tener cargado a alguien que no usa WhatsApp. Por
+   * eso nunca se guarda cadena vacía, que sería un destinatario roto disfrazado
+   * de número configurado.
+   */
+  @Column({ type: 'varchar', nullable: true })
+  phone?: string | null;
+
   @Column({ nullable: true })
   calendarId?: string;
 

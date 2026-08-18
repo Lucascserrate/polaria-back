@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
   Min,
   ValidateNested,
@@ -28,6 +29,23 @@ export class CreateStaffDto {
   @IsOptional()
   @IsEmail()
   email?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'WhatsApp del profesional, para avisarle cuando le agendan una cita. ' +
+      'Se guarda normalizado y la cadena vacía lo borra.',
+    example: '+59170000000',
+  })
+  @IsOptional()
+  @IsString()
+  // El formato acepta separadores porque el número se escribe a mano en el
+  // panel; la normalización posterior los saca. La cadena vacía pasa a
+  // propósito: es la forma que tiene el panel de dejar al profesional sin
+  // número.
+  @Matches(/^$|^\+?[\d\s()-]{7,20}$/, {
+    message: 'phone must be a valid phone number',
+  })
+  phone?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
