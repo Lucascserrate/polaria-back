@@ -6,7 +6,7 @@ import { Staff } from './entities/staff.entity';
 import { StaffSchedule } from './entities/staff_schedule.entity';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
-import { StaffScheduleDto } from './dto/staff-schedule.dto';
+import { WeeklyRangeDto } from '../schedule/weekly-range.dto';
 import { assertValidStaffSchedules } from './utils/staff-schedule.util';
 import { Service } from '../services/entities/service.entity';
 import { normalizePhoneNumber } from '../webhook/webhook-meta.util';
@@ -148,7 +148,7 @@ export class StaffService {
   private async replaceSchedules(
     manager: EntityManager,
     staffId: string,
-    schedules: StaffScheduleDto[] | undefined,
+    schedules: WeeklyRangeDto[] | undefined,
   ): Promise<StaffSchedule[]> {
     if (!Array.isArray(schedules)) return [];
 

@@ -4,7 +4,6 @@ import { AIService } from '../../ai/ai.service';
 import type { AssistantPromptContext } from '../prompts/assistant.system';
 import { buildAssistantSystemPrompt } from '../prompts/assistant.system';
 import { ServicesService } from '../../services/services.service';
-import { SettingsService } from '../../settings/settings.service';
 
 type EnrichmentNeeds = {
   prices?: boolean;
@@ -19,7 +18,6 @@ export class AssistantReplyEnricherService {
   constructor(
     private readonly aiService: AIService,
     private readonly servicesService: ServicesService,
-    private readonly settingsService: SettingsService,
   ) {}
 
   private detectNeedsHeuristic(params: {
@@ -69,8 +67,9 @@ export class AssistantReplyEnricherService {
   private async loadFacts(params: {
     tenantId: string;
     needs: EnrichmentNeeds;
+    promptContext: AssistantPromptContext;
   }): Promise<Record<string, unknown>> {
-    const { tenantId, needs } = params;
+    const { tenantId, needs, promptContext } = params;
     const facts: Record<string, unknown> = {};
 
     if (needs.prices) {
@@ -83,10 +82,14 @@ export class AssistantReplyEnricherService {
     }
 
     if (needs.hours) {
-      const settings = await this.settingsService.getSettings(tenantId);
-      facts.openingHours = settings.openingHours;
-      facts.workingDays = settings.workingDays;
-      facts.polariaName = settings.polariaName;
+      // El horario sale del contexto del prompt, que ya lo trae desglosado por
+      // día. Antes se pedía a `getSettings`, que devolvía un único rango para
+      // toda la semana: con sábados más cortos, el modelo anunciaba una hora de
+      // cierre que no era la de ese día.
+      facts.businessHours =
+        promptContext.businessHoursHuman ?? promptContext.businessHours;
+      facts.businessDaysOpen = promptContext.businessDaysOpen ?? [];
+      facts.polariaName = promptContext.barbershopName;
     }
 
     if (needs.discounts) facts.discounts = null;
@@ -114,7 +117,7 @@ export class AssistantReplyEnricherService {
     );
     if (!hasAnyNeed) return baseReply;
 
-    const facts = await this.loadFacts({ tenantId, needs });
+    const facts = await this.loadFacts({ tenantId, needs, promptContext });
 
     const rewritePrompt = `
       Reescribe el reply del asistente manteniendo el tono conversacional y el contexto.

@@ -5,21 +5,19 @@ import { Repository } from 'typeorm';
 import { BusinessHour } from './entities/business_hour.entity';
 import { CreateBusinessHourDto } from './dto/create-business_hour.dto';
 import { UpdateBusinessHourDto } from './dto/update-business_hour.dto';
+import {
+  assertValidWeeklySchedule,
+  type WeeklyScheduleRange,
+} from '../schedule/weekly-schedule.util';
 
-type BusinessHoursSettingsResponse = {
-  workingDays: boolean[];
-  openingHours: { from: string; to: string } | null;
-};
-
-type UpdateTenantHoursSettingsPayload = {
-  workingDays?: boolean[];
-  openingHours?: { from: string; to: string };
-};
-
+/** MySQL devuelve las columnas `time` como `HH:MM:SS`; afuera se usa `HH:MM`. */
 const normalizeTime = (value: string): string => {
   if (!value) return '00:00';
   return value.length >= 5 ? value.slice(0, 5) : value;
 };
+
+const byDayThenStart = (a: WeeklyScheduleRange, b: WeeklyScheduleRange) =>
+  a.dayOfWeek - b.dayOfWeek || a.startTime.localeCompare(b.startTime);
 
 @Injectable()
 export class BusinessHoursService {
@@ -46,79 +44,70 @@ export class BusinessHoursService {
   findByTenant(tenantId: string): Promise<BusinessHour[]> {
     return this.businessHourRepository.find({
       where: { tenantId },
-      order: { dayOfWeek: 'ASC' },
+      order: { dayOfWeek: 'ASC', startTime: 'ASC' },
     });
   }
 
-  async getTenantHoursSettings(
-    tenantId: string,
-  ): Promise<BusinessHoursSettingsResponse> {
+  /**
+   * El horario del negocio tal como se edita: una franja por fila, con el día
+   * adentro. Un día sin franjas es un día cerrado, la misma convención que usa
+   * `staff_schedules`.
+   */
+  async getTenantSchedule(tenantId: string): Promise<WeeklyScheduleRange[]> {
     const businessHours = await this.findByTenant(tenantId);
 
-    const workingDays = Array.from({ length: 7 }, () => false);
-    let openingHours: { from: string; to: string } | null = null;
-
-    if (businessHours.length > 0) {
-      const first = businessHours[0];
-      openingHours = {
-        from: normalizeTime(first.startTime),
-        to: normalizeTime(first.endTime),
-      };
-
-      for (const hour of businessHours) {
-        workingDays[hour.dayOfWeek] = true;
-      }
-    }
-
-    return { workingDays, openingHours };
+    return businessHours
+      .map((hour) => ({
+        dayOfWeek: hour.dayOfWeek,
+        startTime: normalizeTime(hour.startTime),
+        endTime: normalizeTime(hour.endTime),
+      }))
+      .sort(byDayThenStart);
   }
 
-  async updateTenantHoursSettings(
+  /**
+   * Reemplaza la semana completa.
+   *
+   * Es un reemplazo y no un merge porque la pantalla edita la jornada entera:
+   * un día que dejó de venir es un día que el negocio cerró, y no hay forma de
+   * expresar eso con altas y bajas parciales.
+   *
+   * Va en una transacción porque el estado intermedio —las filas viejas ya
+   * borradas y las nuevas todavía no— es un negocio cerrado toda la semana, y
+   * cualquier reserva que consulte disponibilidad en esa ventana no encontraría
+   * un solo turno.
+   */
+  async replaceTenantSchedule(
     tenantId: string,
-    dto: UpdateTenantHoursSettingsPayload,
-  ): Promise<BusinessHoursSettingsResponse> {
-    if (dto.workingDays || dto.openingHours) {
-      if (!dto.workingDays || !dto.openingHours) {
-        throw new BadRequestException(
-          'workingDays and openingHours are required together',
-        );
-      }
-
-      const existing = await this.findByTenant(tenantId);
-      const byDay = new Map(existing.map((item) => [item.dayOfWeek, item]));
-      const startTime = normalizeTime(dto.openingHours.from);
-      const endTime = normalizeTime(dto.openingHours.to);
-
-      for (let day = 0; day < 7; day += 1) {
-        const shouldOpen = dto.workingDays[day];
-        const current = byDay.get(day);
-
-        if (shouldOpen) {
-          if (current) {
-            if (
-              normalizeTime(current.startTime) !== startTime ||
-              normalizeTime(current.endTime) !== endTime
-            ) {
-              await this.update(current.id, {
-                startTime,
-                endTime,
-              });
-            }
-          } else {
-            await this.create({
-              tenantId,
-              dayOfWeek: day,
-              startTime,
-              endTime,
-            });
-          }
-        } else if (current) {
-          await this.remove(current.id);
-        }
-      }
+    ranges: WeeklyScheduleRange[],
+  ): Promise<WeeklyScheduleRange[]> {
+    // Sin esto, destildar todos los días deja al negocio sin un solo turno
+    // disponible y sin ninguna señal de por qué. Cerrar por vacaciones es otra
+    // cosa: son excepciones por fecha, no el horario semanal.
+    if (ranges.length === 0) {
+      throw new BadRequestException(
+        'El negocio necesita al menos un día con horario de atención.',
+      );
     }
 
-    return this.getTenantHoursSettings(tenantId);
+    assertValidWeeklySchedule(ranges);
+
+    await this.businessHourRepository.manager.transaction(async (manager) => {
+      await manager.delete(BusinessHour, { tenantId });
+      await manager.save(
+        BusinessHour,
+        ranges.map((range) =>
+          manager.create(BusinessHour, {
+            tenantId,
+            dayOfWeek: range.dayOfWeek,
+            startTime: normalizeTime(range.startTime),
+            endTime: normalizeTime(range.endTime),
+          }),
+        ),
+      );
+    });
+
+    return this.getTenantSchedule(tenantId);
   }
 
   async update(id: string, updateBusinessHourDto: UpdateBusinessHourDto) {

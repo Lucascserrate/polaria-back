@@ -11,6 +11,7 @@ import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { DataSource } from 'typeorm';
 import axios, { AxiosError } from 'axios';
@@ -43,8 +44,11 @@ const isMetaAxiosError = (
 
 type SettingsResponse = {
   polariaName: string;
-  workingDays: boolean[];
-  openingHours: { from: string; to: string } | null;
+  /**
+   * Horario semanal del negocio, una entrada por franja. Un día sin entradas
+   * está cerrado; varias entradas en un mismo día son un turno partido.
+   */
+  businessHours: WeeklyScheduleRange[];
   aiEnabled: boolean;
   whatsappConnection: {
     connected: boolean;
@@ -81,13 +85,12 @@ export class SettingsService {
       `Loading settings tenantId=${tenantId} tenantName=${tenant.name} hasWhatsappToken=${Boolean(readStoredCredential(tenant.whatsappAccessToken))} hasPhoneId=${Boolean(tenant.whatsappPhoneId)} hasWabaId=${Boolean(tenant.whatsappWabaId)}`,
     );
 
-    const { workingDays, openingHours } =
-      await this.businessHoursService.getTenantHoursSettings(tenantId);
+    const businessHours =
+      await this.businessHoursService.getTenantSchedule(tenantId);
 
     return {
       polariaName: tenant.name,
-      workingDays,
-      openingHours,
+      businessHours,
       aiEnabled: tenant.aiEnabled,
       whatsappConnection: {
         connected: Boolean(
@@ -119,7 +122,7 @@ export class SettingsService {
     }
 
     this.logger.log(
-      `Updating settings tenantId=${tenantId} hasPolariaName=${Boolean(dto.polariaName)} hasAiEnabled=${typeof dto.aiEnabled === 'boolean'} hasWorkingDays=${Boolean(dto.workingDays)} hasOpeningHours=${Boolean(dto.openingHours)}`,
+      `Updating settings tenantId=${tenantId} hasPolariaName=${Boolean(dto.polariaName)} hasAiEnabled=${typeof dto.aiEnabled === 'boolean'} businessHoursRanges=${dto.businessHours?.length ?? 'sin cambios'}`,
     );
 
     if (dto.polariaName && dto.polariaName !== tenant.name) {
@@ -175,10 +178,15 @@ export class SettingsService {
       }
     }
 
-    await this.businessHoursService.updateTenantHoursSettings(tenantId, {
-      workingDays: dto.workingDays,
-      openingHours: dto.openingHours,
-    });
+    // Ausente significa "no se tocó el horario". Un array vacío no llega hasta
+    // acá: lo rechaza `replaceTenantSchedule`, porque un negocio sin ningún día
+    // abierto no puede recibir reservas.
+    if (dto.businessHours) {
+      await this.businessHoursService.replaceTenantSchedule(
+        tenantId,
+        dto.businessHours,
+      );
+    }
 
     return this.getSettings(tenantId);
   }

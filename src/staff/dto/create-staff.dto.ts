@@ -13,7 +13,7 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { StaffScheduleDto } from './staff-schedule.dto';
+import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
 
 export class CreateStaffDto {
   @ApiPropertyOptional()
@@ -85,13 +85,13 @@ export class CreateStaffDto {
   usesCustomSchedule?: boolean;
 
   @ApiPropertyOptional({
-    type: [StaffScheduleDto],
+    type: [WeeklyRangeDto],
     description:
       'Jornada semanal completa. Reemplaza a la anterior; solo se aplica si usesCustomSchedule es true.',
   })
   @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
-  @Type(() => StaffScheduleDto)
-  schedules?: StaffScheduleDto[];
+  @Type(() => WeeklyRangeDto)
+  schedules?: WeeklyRangeDto[];
 }

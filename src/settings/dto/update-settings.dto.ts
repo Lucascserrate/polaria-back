@@ -1,6 +1,4 @@
 import {
-  ArrayMaxSize,
-  ArrayMinSize,
   IsArray,
   IsBoolean,
   IsOptional,
@@ -8,14 +6,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-
-class OpeningHoursDto {
-  @IsString()
-  from!: string;
-
-  @IsString()
-  to!: string;
-}
+import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
 
 class WhatsappConnectionDto {
   @IsString()
@@ -47,17 +38,15 @@ export class UpdateSettingsDto {
   @IsString()
   polariaName?: string;
 
+  /**
+   * Horario semanal completo. Reemplaza al anterior: un día que no viene es un
+   * día cerrado. Admite varias franjas por día para el turno partido.
+   */
   @IsOptional()
   @IsArray()
-  @ArrayMinSize(7)
-  @ArrayMaxSize(7)
-  @IsBoolean({ each: true })
-  workingDays?: boolean[];
-
-  @IsOptional()
-  @ValidateNested()
-  @Type(() => OpeningHoursDto)
-  openingHours?: OpeningHoursDto;
+  @ValidateNested({ each: true })
+  @Type(() => WeeklyRangeDto)
+  businessHours?: WeeklyRangeDto[];
 
   @IsOptional()
   @IsBoolean()

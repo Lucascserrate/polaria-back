@@ -1,12 +1,13 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsInt, Matches, Max, Min } from 'class-validator';
-import { TIME_PATTERN } from '../utils/staff-schedule.util';
+import { TIME_PATTERN } from './weekly-schedule.util';
 
 /**
- * Una franja de la jornada semanal. Las reglas que cruzan varias franjas
- * (solapamientos, jornada vacía) viven en `assertValidStaffSchedules`.
+ * Una franja de una jornada semanal, tanto la del negocio como la de un
+ * profesional. Las reglas que cruzan varias franjas (solapamientos, jornada
+ * vacía) viven en `assertValidWeeklySchedule` y en cada llamador.
  */
-export class StaffScheduleDto {
+export class WeeklyRangeDto {
   @ApiProperty({ minimum: 0, maximum: 6, description: '0 = domingo' })
   @IsInt()
   @Min(0)
