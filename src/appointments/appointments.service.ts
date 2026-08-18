@@ -351,7 +351,16 @@ export class AppointmentsService {
     });
   }
 
-  async findTodayByTenant(tenantId: string): Promise<{
+  /**
+   * La agenda de un día completo del negocio, con sus totales.
+   *
+   * `date` ausente significa hoy, que es lo que abre el panel; con una fecha se
+   * mira otro día del calendario sin cambiar nada más de la respuesta.
+   */
+  async findDayByTenant(
+    tenantId: string,
+    date?: string,
+  ): Promise<{
     items: Array<{
       id: string;
       startTime: string;
@@ -378,7 +387,7 @@ export class AppointmentsService {
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
     const timezone = tenant?.timezone ?? 'America/La_Paz';
-    const { startUtc, endUtc } = this.getDayRange(timezone, new Date());
+    const { startUtc, endUtc } = this.resolveDayRange(timezone, date);
 
     const endInclusive = new Date(endUtc.getTime() - 1);
     const appointments = await this.appointmentRepository.find({
@@ -985,6 +994,37 @@ export class AppointmentsService {
     return formatter.format(date);
   }
 
+  /**
+   * Rango del día pedido, o del día en curso si no vino ninguno.
+   *
+   * La fecha se interpreta en la zona del negocio y no en la de quien mira la
+   * pantalla: a las 21:00 del lunes en Bolivia ya es martes en Europa, y la
+   * agenda que corresponde mostrar es la del local.
+   */
+  private resolveDayRange(timezone: string, date?: string) {
+    if (!date) return this.getDayRange(timezone, new Date());
+
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    if (!match) {
+      throw new BadRequestException('date debe tener formato YYYY-MM-DD');
+    }
+
+    const [year, month, day] = match.slice(1).map(Number);
+
+    // `Date.UTC` acomoda en silencio un 31 de febrero al 3 de marzo, así que la
+    // única forma de detectar una fecha inexistente es ver si sobrevivió igual.
+    const parsed = new Date(Date.UTC(year, month - 1, day));
+    if (
+      parsed.getUTCFullYear() !== year ||
+      parsed.getUTCMonth() !== month - 1 ||
+      parsed.getUTCDate() !== day
+    ) {
+      throw new BadRequestException(`La fecha ${date} no existe`);
+    }
+
+    return this.getDayRangeForDate(timezone, year, month, day);
+  }
+
   private getDayRange(timezone: string, now: Date) {
     const parts = new Intl.DateTimeFormat('en-CA', {
       timeZone: timezone,
@@ -996,6 +1036,22 @@ export class AppointmentsService {
     const month = Number(parts.find((p) => p.type === 'month')?.value ?? '1');
     const day = Number(parts.find((p) => p.type === 'day')?.value ?? '1');
 
+    return this.getDayRangeForDate(timezone, year, month, day);
+  }
+
+  /**
+   * Medianoche a medianoche de un día del calendario del negocio, en UTC.
+   *
+   * El offset se pide dos veces, una por cada borde, porque un cambio de horario
+   * de verano en el medio los deja con offsets distintos y ese día dura 23 o 25
+   * horas.
+   */
+  private getDayRangeForDate(
+    timezone: string,
+    year: number,
+    month: number,
+    day: number,
+  ) {
     const startLocalUtcGuess = new Date(
       Date.UTC(year, month - 1, day, 0, 0, 0),
     );
