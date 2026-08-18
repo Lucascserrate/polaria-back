@@ -20,8 +20,11 @@ export class ConversationsService {
     return this.conversationRepository.save(conversation);
   }
 
-  findAll(): Promise<Conversation[]> {
-    return this.conversationRepository.find();
+  findByTenant(tenantId: string): Promise<Conversation[]> {
+    return this.conversationRepository.find({
+      where: { tenantId },
+      order: { lastMessageAt: 'DESC' },
+    });
   }
 
   findOne(id: string): Promise<Conversation | null> {
