@@ -191,6 +191,8 @@ export class AppointmentsService {
     items: Array<{
       id: string;
       startTime: string;
+      /** Instante de fin. La agenda calcula la altura de la cita con estos dos. */
+      endTime: string;
       startTimeFormatted: string;
       endTimeFormatted: string;
       status: AppointmentStatus;
@@ -299,6 +301,9 @@ export class AppointmentsService {
       return {
         id: a.id,
         startTime: a.startTime.toISOString(),
+        // El fin sale de la cita y no de sumar `totalDuration`, que es la suma de
+        // `durationAtBooking` y queda en 0 si algún servicio no la tiene cargada.
+        endTime: a.endTime.toISOString(),
         startTimeFormatted: this.formatDateTime(a.startTime, timezone),
         endTimeFormatted: this.formatDateTime(a.endTime, timezone),
         status: a.status,
