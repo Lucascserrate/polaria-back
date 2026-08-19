@@ -43,7 +43,7 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
       return [
         list(
           prompt.kind,
-          `¿Qué servicio queres para el ${formatDate(prompt.date)}?`,
+          `¿Qué servicio te gustaría agendar?`,
           'Ver servicios',
           prompt.options,
         ),
