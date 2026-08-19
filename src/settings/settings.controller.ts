@@ -4,6 +4,7 @@ import {
   Get,
   Logger,
   Patch,
+  Post,
   Req,
   UnauthorizedException,
   UseGuards,
@@ -81,5 +82,23 @@ export class SettingsController {
         );
         throw error;
       });
+  }
+
+  /**
+   * Suelta la conexión de WhatsApp del lado de Polaria.
+   *
+   * No hace ninguna llamada a Meta: el número, la WABA y el portfolio quedan
+   * intactos, y el negocio puede volver a conectarlos con Embedded Signup.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Post('whatsapp/disconnect')
+  disconnectWhatsapp(@Req() req: Request) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+
+    this.logger.log(`WhatsApp disconnect requested tenantId=${tenantId}`);
+    return this.settingsService.disconnectWhatsapp(tenantId);
   }
 }

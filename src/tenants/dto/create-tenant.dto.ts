@@ -13,7 +13,7 @@ export class CreateTenantDto {
 
   @ApiProperty()
   @IsString()
-  whatsappPhoneNumber!: string;
+  whatsappPhoneNumber?: string;
 
   @ApiPropertyOptional()
   @IsOptional()

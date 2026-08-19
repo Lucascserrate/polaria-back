@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomBytes } from 'crypto';
-import { In, LessThan, Not, Repository } from 'typeorm';
+import { EntityManager, In, LessThan, Not, Repository } from 'typeorm';
 
 import {
   BOOKING_SESSION_TTL_MINUTES,
@@ -198,6 +198,46 @@ export class BookingSessionService {
 
   expire(session: BookingSession, now: Date): Promise<BookingSession> {
     return this.close(session, BookingSessionState.EXPIRED, 'TTL', now);
+  }
+
+  /**
+   * Cierra las reservas en curso de un negocio que se quedó sin WhatsApp.
+   *
+   * Una sesión abierta espera la próxima interacción del cliente por un canal
+   * que ya no existe: no puede avanzar ni cancelarse sola hasta que venza el
+   * TTL, y mientras tanto bloquea el inicio de una reserva nueva. Cerrarlas deja
+   * el terreno limpio para cuando el negocio vuelva a conectar.
+   *
+   * Solo toca sesiones. Las citas ya creadas son del negocio y siguen en la
+   * agenda: perder WhatsApp no cancela a nadie el turno del jueves.
+   *
+   * Acepta un `manager` para poder correr dentro de la misma transacción que
+   * limpia el tenant, y que no quede un estado intermedio con el negocio
+   * desconectado y sus sesiones todavía abiertas.
+   */
+  async cancelOpenByTenant(params: {
+    tenantId: string;
+    now: Date;
+    reason: string;
+    manager?: EntityManager;
+  }): Promise<number> {
+    const repository = params.manager
+      ? params.manager.getRepository(BookingSession)
+      : this.bookingSessionRepository;
+
+    const result = await repository.update(
+      {
+        tenantId: params.tenantId,
+        state: notTerminal(),
+      },
+      {
+        state: BookingSessionState.CANCELLED,
+        closedAt: params.now,
+        closedReason: params.reason,
+      },
+    );
+
+    return result.affected ?? 0;
   }
 
   /**

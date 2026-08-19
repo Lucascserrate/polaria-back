@@ -9,9 +9,12 @@ import { InboundMessageService } from './inbound-message.service';
 import {
   asObject,
   getArrayField,
+  getObjectField,
   getStringField,
   normalizePhoneNumber,
+  type JsonObject,
 } from './webhook-meta.util';
+import { AccountUpdateService } from './account-update.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 
 /**
@@ -22,6 +25,9 @@ import type { Tenant } from '../tenants/entities/tenant.entity';
  * traen `value.messages`. Se listan para poder distinguir en los logs un evento
  * de Coexistence de un webhook malformado.
  */
+/** Eventos de la cuenta: conexión caída o restablecida desde el lado de Meta. */
+const ACCOUNT_UPDATE_FIELD = 'account_update';
+
 const COEXISTENCE_WEBHOOK_FIELDS = new Set([
   'history',
   'smb_app_state_sync',
@@ -41,65 +47,112 @@ export class WebhookService {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly inboundMessageService: InboundMessageService,
+    private readonly accountUpdateService: AccountUpdateService,
   ) {}
 
+  /**
+   * Recorre todas las `entry` y todas sus `changes`.
+   *
+   * Meta agrupa varios eventos en un mismo POST. Mirando solo el primero, un
+   * `account_update` que llegara segundo se perdía entero, y con él la única
+   * señal de que la integración se cayó.
+   */
   async handleIncomingWhatsAppWebhook(body: unknown): Promise<void> {
-    let metaMessageId: string | null = null;
+    const data = asObject(body);
+    if (!data) return;
+
+    const entries = getArrayField(data, 'entry') ?? [];
+
+    for (const rawEntry of entries) {
+      const entry = asObject(rawEntry);
+      if (!entry) continue;
+
+      const entryId = getStringField(entry, 'id');
+      const entryTime = typeof entry.time === 'number' ? entry.time : null;
+      const changes = getArrayField(entry, 'changes') ?? [];
+
+      for (const rawChange of changes) {
+        const change = asObject(rawChange);
+        if (!change) continue;
+
+        await this.handleChange({ data, entry, entryId, entryTime, change });
+      }
+    }
+  }
+
+  private async handleChange(params: {
+    data: JsonObject;
+    entry: JsonObject;
+    entryId: string | null;
+    entryTime: number | null;
+    change: JsonObject;
+  }): Promise<void> {
+    const { data, entry, entryId, entryTime, change } = params;
+    const field = getStringField(change, 'field');
 
     try {
-      const coexistenceField = this.readCoexistenceField(body);
-      if (coexistenceField) {
-        this.logger.log(
-          `Webhook de Coexistence ignorado (field=${coexistenceField}).`,
-        );
+      if (field === ACCOUNT_UPDATE_FIELD) {
+        const value = getObjectField(change, 'value');
+        if (!value) return;
+
+        await this.accountUpdateService.handle({ entryId, entryTime, value });
         return;
       }
 
-      const message = parseIncomingWhatsAppMessage(body);
-      if (!message) return;
+      if (field && COEXISTENCE_WEBHOOK_FIELDS.has(field)) {
+        this.logger.log(`Webhook de Coexistence ignorado (field=${field}).`);
+        return;
+      }
 
-      metaMessageId = message.metaMessageId;
-
-      const tenant = await this.resolveTenant(message);
-      if (!tenant) return;
-
-      const credentials = this.resolveCredentials(tenant, message);
-      if (!credentials) return;
-
-      this.logger.log(
-        `Mensaje entrante (metaMessageId=${String(metaMessageId)}, tenantId=${
-          tenant.id
-        }, from=${message.from}, kind=${message.kind}).`,
-      );
-
-      await this.inboundMessageService.handle({
-        tenantId: tenant.id,
-        credentials,
-        message,
-      });
+      await this.handleMessageChange({ data, entry, change });
     } catch (error: unknown) {
+      // Un cambio que falla no puede llevarse puestos a los demás del mismo POST.
       const errorMessage =
         error instanceof Error ? (error.stack ?? error.message) : String(error);
       this.logger.error(
-        `Webhook processing error (metaMessageId=${String(
-          metaMessageId,
-        )}): ${errorMessage}`,
+        `Webhook processing error (field=${String(field)}): ${errorMessage}`,
       );
     }
   }
 
-  private readCoexistenceField(body: unknown): string | null {
-    const data = asObject(body);
-    if (!data) return null;
+  /**
+   * El parser lee `entry[0].changes[0]`, así que se le arma un cuerpo con este
+   * único cambio.
+   *
+   * Reconstruirlo es más barato que cambiarle la firma: el parser está cubierto
+   * por sus propias pruebas con cuerpos completos de Meta, y tocarlo para
+   * soportar el reparto habría mezclado dos cambios en uno.
+   */
+  private async handleMessageChange(params: {
+    data: JsonObject;
+    entry: JsonObject;
+    change: JsonObject;
+  }): Promise<void> {
+    const { data, entry, change } = params;
 
-    const entry = asObject(getArrayField(data, 'entry')?.[0]);
-    if (!entry) return null;
+    const message = parseIncomingWhatsAppMessage({
+      ...data,
+      entry: [{ ...entry, changes: [change] }],
+    });
+    if (!message) return;
 
-    const change = asObject(getArrayField(entry, 'changes')?.[0]);
-    if (!change) return null;
+    const tenant = await this.resolveTenant(message);
+    if (!tenant) return;
 
-    const field = getStringField(change, 'field');
-    return field && COEXISTENCE_WEBHOOK_FIELDS.has(field) ? field : null;
+    const credentials = this.resolveCredentials(tenant, message);
+    if (!credentials) return;
+
+    this.logger.log(
+      `Mensaje entrante (metaMessageId=${String(
+        message.metaMessageId,
+      )}, tenantId=${tenant.id}, from=${message.from}, kind=${message.kind}).`,
+    );
+
+    await this.inboundMessageService.handle({
+      tenantId: tenant.id,
+      credentials,
+      message,
+    });
   }
 
   private async resolveTenant(

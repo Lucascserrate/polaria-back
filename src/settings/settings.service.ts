@@ -11,6 +11,7 @@ import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
+import { BookingSessionService } from '../booking-flow/booking-session.service';
 import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { DataSource } from 'typeorm';
@@ -51,7 +52,14 @@ type SettingsResponse = {
   businessHours: WeeklyScheduleRange[];
   aiEnabled: boolean;
   whatsappConnection: {
+    /**
+     * Hay credenciales guardadas. No implica que Meta la considere sana: para
+     * eso está `unavailableSince`.
+     */
     connected: boolean;
+    /** Cuándo Meta reportó la caída, o `null` si la conexión está sana. */
+    unavailableSince: string | null;
+    unavailableReason: string | null;
     businessId: string | null;
     wabaId: string | null;
     phoneNumberId: string | null;
@@ -73,6 +81,7 @@ export class SettingsService {
     private readonly businessHoursService: BusinessHoursService,
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
+    private readonly bookingSessionService: BookingSessionService,
   ) {}
 
   async getSettings(tenantId: string): Promise<SettingsResponse> {
@@ -108,6 +117,10 @@ export class SettingsService {
           : null,
         isOnBusinessApp: Boolean(tenant.whatsappIsOnBusinessApp),
         platformType: tenant.whatsappPlatformType ?? null,
+        unavailableSince: tenant.whatsappUnavailableSince
+          ? tenant.whatsappUnavailableSince.toISOString()
+          : null,
+        unavailableReason: tenant.whatsappUnavailableReason ?? null,
       },
     };
   }
@@ -163,11 +176,14 @@ export class SettingsService {
       const updatedTenant = await this.tenantsService.update(tenantId, {
         whatsappBusinessId:
           whatsappConnection.businessId ?? tenant.whatsappBusinessId,
-        whatsappWabaId: whatsappConnection.wabaId ?? tenant.whatsappWabaId,
+        whatsappWabaId:
+          whatsappConnection.wabaId ?? tenant.whatsappWabaId ?? undefined,
         whatsappPhoneId:
           whatsappConnection.phoneNumberId ?? tenant.whatsappPhoneId,
         whatsappPhoneNumber:
-          whatsappConnection.phoneNumber ?? tenant.whatsappPhoneNumber,
+          whatsappConnection.phoneNumber ??
+          tenant.whatsappPhoneNumber ??
+          undefined,
         whatsappAccessToken:
           incomingAccessToken ??
           readStoredCredential(tenant.whatsappAccessToken),
@@ -533,6 +549,11 @@ export class SettingsService {
       lockedTenant.whatsappPlatformType = discoveredPlatformType ?? undefined;
       lockedTenant.whatsappAccessToken = systemUserAccessToken;
       lockedTenant.whatsappConnectedAt = new Date();
+      // Reconectar cierra cualquier caída que Meta hubiera reportado: si el
+      // negocio acaba de completar el signup, la conexión que estaba caída ya no
+      // es la que tiene.
+      lockedTenant.whatsappUnavailableSince = null;
+      lockedTenant.whatsappUnavailableReason = null;
 
       const savedTenant = await tenantRepository.save(lockedTenant);
       this.logger.log(`Embedded signup tenant updated tenantId=${tenantId}`);
@@ -543,6 +564,82 @@ export class SettingsService {
     if (!updatedTenant) {
       throw new NotFoundException('Tenant not found');
     }
+
+    return this.getSettings(tenantId);
+  }
+
+  /**
+   * Desconecta WhatsApp del lado de Polaria.
+   *
+   * **No toca nada en Meta.** El número sigue existiendo en su WABA, la WABA en
+   * su portfolio y nuestra app sigue suscrita a sus webhooks. Lo único que
+   * cambia es que Polaria deja de considerar esa conexión como suya, y el
+   * negocio puede volver a conectarla cuando quiera con Embedded Signup.
+   *
+   * Se limpian los campos en vez de marcar un flag porque limpiarlos es lo que
+   * hace efectiva la desconexión: el webhook resuelve el tenant por
+   * `whatsappPhoneId` con respaldo en `whatsappPhoneNumber`, y sin ninguno de
+   * los dos deja de encontrarlo. Un flag habría exigido comprobarlo en el ruteo,
+   * en la resolución de credenciales y en cada lugar futuro; el primero que se
+   * olvidara dejaría a Polaria contestando en un número "desconectado".
+   *
+   * Y hay una razón que no es técnica: el número y la WABA participan de
+   * chequeos de exclusividad —el índice único y los 409 del signup—. Un tenant
+   * desconectado que los retuviera impediría para siempre que ese mismo número
+   * se conectara en otra cuenta, que es justo el caso del número personal de una
+   * empleada conectado por error.
+   */
+  async disconnectWhatsapp(tenantId: string): Promise<SettingsResponse> {
+    const tenant = await this.tenantsService.findOne(tenantId);
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    const now = new Date();
+
+    await this.dataSource.transaction(async (manager) => {
+      const tenantRepository = manager.getRepository(Tenant);
+
+      const lockedTenant = await tenantRepository.findOne({
+        where: { id: tenantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!lockedTenant) {
+        throw new NotFoundException('Tenant not found');
+      }
+
+      lockedTenant.whatsappBusinessId = undefined;
+      lockedTenant.whatsappWabaId = null;
+      lockedTenant.whatsappPhoneId = undefined;
+      lockedTenant.whatsappPhoneNumber = null;
+      lockedTenant.whatsappVerifiedName = undefined;
+      lockedTenant.whatsappAccessToken = undefined;
+      // El Flow pertenece a la WABA que se está soltando.
+      lockedTenant.whatsappFlowId = undefined;
+      lockedTenant.whatsappConnectedAt = null;
+      lockedTenant.whatsappIsOnBusinessApp = false;
+      lockedTenant.whatsappPlatformType = undefined;
+      // Una caída informada por Meta deja de tener sentido sin conexión.
+      lockedTenant.whatsappUnavailableSince = null;
+      lockedTenant.whatsappUnavailableReason = null;
+
+      await tenantRepository.save(lockedTenant);
+
+      const cancelledSessions =
+        await this.bookingSessionService.cancelOpenByTenant({
+          tenantId,
+          now,
+          reason: 'WHATSAPP_DISCONNECTED',
+          manager,
+        });
+
+      this.logger.log(
+        `WhatsApp desconectado tenantId=${tenantId} phoneNumber=${String(
+          tenant.whatsappPhoneNumber,
+        )} wabaId=${String(tenant.whatsappWabaId)} sesionesCanceladas=${cancelledSessions}`,
+      );
+    });
 
     return this.getSettings(tenantId);
   }

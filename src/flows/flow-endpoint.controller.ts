@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
+import { readMetaAppSecret } from '../whatsapp/utils/meta-app-secret.util';
 
 import {
   decryptFlowRequest,
@@ -164,24 +165,9 @@ export class FlowEndpointController {
     return valid;
   }
 
-  /**
-   * App secret de la aplicación de Meta (Configuración → Básica → Clave secreta).
-   *
-   * No existe un secreto propio de WhatsApp: la firma `X-Hub-Signature-256` la
-   * calcula Meta con el secreto de la app dueña del Flow. Se acepta el nombre
-   * `META_APP_SECRET`, que es el correcto, y también el histórico
-   * `WHATSAPP_APP_SECRET` para no romper despliegues existentes.
-   *
-   * Se recorta porque un salto de línea pegado sin querer cambia el HMAC por
-   * completo y produce exactamente el mismo error que un secreto equivocado.
-   */
+  /** Ver `readMetaAppSecret`: el mismo secreto firma Flows y los webhooks. */
   private readAppSecret(): string | undefined {
-    const raw =
-      this.configService.get<string>('META_APP_SECRET') ??
-      this.configService.get<string>('WHATSAPP_APP_SECRET');
-
-    const trimmed = raw?.trim();
-    return trimmed && trimmed.length > 0 ? trimmed : undefined;
+    return readMetaAppSecret(this.configService);
   }
 
   /**

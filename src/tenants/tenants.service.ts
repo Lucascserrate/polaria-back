@@ -34,6 +34,29 @@ export class TenantsService {
     return this.tenantRepository.findOneBy({ email });
   }
 
+  /**
+   * Salud de la conexión de WhatsApp según Meta.
+   *
+   * No pasa por `UpdateTenantDto` a propósito: no es algo que el negocio edite
+   * desde el panel, sino un dato que llega por webhook. Exponerlo en el PATCH
+   * del tenant permitiría marcar una conexión como caída desde afuera.
+   */
+  async setWhatsappUnavailability(params: {
+    tenantId: string;
+    since: Date | null;
+    reason: string | null;
+  }): Promise<void> {
+    await this.tenantRepository.update(params.tenantId, {
+      whatsappUnavailableSince: params.since,
+      whatsappUnavailableReason: params.reason,
+    });
+  }
+
+  /** Único camino para resolver el tenant de un webhook `account_update`. */
+  findByWhatsappWabaId(whatsappWabaId: string): Promise<Tenant | null> {
+    return this.tenantRepository.findOneBy({ whatsappWabaId });
+  }
+
   findByWhatsappPhoneId(whatsappPhoneId: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ whatsappPhoneId });
   }

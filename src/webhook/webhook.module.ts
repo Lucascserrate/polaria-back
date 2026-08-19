@@ -7,6 +7,7 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { MessagesModule } from '../messages/messages.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
+import { AccountUpdateService } from './account-update.service';
 import { ConversationRecorderService } from './conversation-recorder.service';
 import { InboundMessageService } from './inbound-message.service';
 import { WebhookController } from './webhook.controller';
@@ -29,6 +30,7 @@ import { WebhookService } from './webhook.service';
   controllers: [WebhookController],
   providers: [
     WebhookService,
+    AccountUpdateService,
     InboundMessageService,
     ConversationRecorderService,
   ],
