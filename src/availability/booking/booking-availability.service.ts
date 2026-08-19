@@ -25,6 +25,24 @@ import {
   resolveStaffForSlot,
 } from './staff-assignment';
 
+/**
+ * Para qué se piden los horarios.
+ *
+ * No es una preferencia de presentación: cambia qué se considera disponible, y
+ * por eso se nombra la intención en lugar de un booleano tipo `ignoreLeadTime`.
+ * Quien lee `purpose: 'manual-entry'` entiende el caso; quien lee un `true`
+ * suelto tiene que ir a buscar qué apaga.
+ *
+ * - `booking`: una reserva que todavía tiene que ocurrir. Es lo que usa
+ *   WhatsApp, y no ofrece horarios pasados ni uno que empieza en dos minutos.
+ * - `manual-entry`: el negocio registra a mano desde el panel, incluso una
+ *   atención de ayer que quedó sin cargar y tiene que aparecer en los reportes.
+ *   Se siguen respetando la jornada y los conflictos con otras citas; lo único
+ *   que no se aplica es el piso de "ahora + 15 minutos", que solo tiene sentido
+ *   para algo por venir.
+ */
+export type BookingSlotsPurpose = 'booking' | 'manual-entry';
+
 export type BookingSlotsQuery = {
   tenantId: string;
   /** Fecha en formato YYYY-MM-DD, en la zona horaria del negocio. */
@@ -32,6 +50,8 @@ export type BookingSlotsQuery = {
   serviceId: string;
   /** Profesional elegido. Omitirlo equivale a "Sin preferencia". */
   staffId?: string;
+  /** Por defecto `booking`: el comportamiento que ya tenía WhatsApp. */
+  purpose?: BookingSlotsPurpose;
 };
 
 export type SlotConfirmation =
@@ -230,7 +250,8 @@ export class BookingAvailabilityService {
     staffIds: string[];
     workingRangesByStaff: Record<string, SlotRange[]>;
     appointmentsByStaff: StaffBusyMap;
-    minStartTime: Date;
+    /** Ausente en el registro manual: ahí no hay hora mínima que respetar. */
+    minStartTime?: Date;
   } | null> {
     const { tenantId, date, serviceId, staffId } = query;
 
@@ -295,7 +316,13 @@ export class BookingAvailabilityService {
       staffIds,
       workingRangesByStaff,
       appointmentsByStaff,
-      minStartTime: this.calculateMinStartTime(timeZone),
+      // Sin piso en el registro manual: `buildBookingSlots` interpreta la
+      // ausencia como "no hay hora mínima", que es justo lo que corresponde
+      // cuando se está cargando algo que ya pasó.
+      minStartTime:
+        query.purpose === 'manual-entry'
+          ? undefined
+          : this.calculateMinStartTime(timeZone),
     };
   }
 

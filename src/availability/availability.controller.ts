@@ -12,13 +12,46 @@ import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { AvailabilityService } from './availability.service';
+import { BookingAvailabilityService } from './booking/booking-availability.service';
+import { BookingSlotsQueryDto } from './dto/booking-slots-query.dto';
 import { FindAvailableSlotsDto } from './dto/find-available-slots.dto';
 import { WorkingStaffQueryDto } from './dto/working-staff-query.dto';
 
 @ApiTags('availability')
 @Controller('availability')
 export class AvailabilityController {
-  constructor(private readonly availabilityService: AvailabilityService) {}
+  constructor(
+    private readonly availabilityService: AvailabilityService,
+    private readonly bookingAvailabilityService: BookingAvailabilityService,
+  ) {}
+
+  /**
+   * Horarios disponibles para crear una cita a mano desde el panel.
+   *
+   * Delega en el mismo servicio que usa el flujo guiado de WhatsApp, así que un
+   * horario nunca puede estar libre en una pantalla y ocupado en la otra. Lo
+   * único propio del panel es `purpose`, que permite registrar una atención de
+   * un día que ya pasó.
+   *
+   * No confundir con `POST slots`, que es el motor conversacional: sugiere
+   * horarios alrededor de una hora pedida, con otro paso y otras reglas.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('booking-slots')
+  getBookingSlots(@Req() req: Request, @Query() query: BookingSlotsQueryDto) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+
+    return this.bookingAvailabilityService.getAvailableSlots({
+      tenantId,
+      date: query.date,
+      serviceId: query.serviceId,
+      staffId: query.staffId,
+      purpose: 'manual-entry',
+    });
+  }
 
   @Post('slots')
   findAvailableSlots(@Body() input: FindAvailableSlotsDto) {
