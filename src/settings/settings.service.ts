@@ -365,26 +365,6 @@ export class SettingsService {
       );
     }
 
-    // Sin esta suscripción Meta no entrega los webhooks de la WABA recién
-    // vinculada (mensajes, y en Coexistence también echoes e historial).
-    try {
-      await graphPost(
-        `/${discoveredWabaId}/subscribed_apps`,
-        systemUserAccessToken,
-      );
-      this.logger.log(
-        `Embedded signup subscribed app to WABA tenantId=${tenantId} wabaId=${discoveredWabaId}`,
-      );
-    } catch (error: unknown) {
-      // Reintentar el signup no debería fallar solo porque la app ya estaba
-      // suscrita; se registra y se sigue.
-      this.logger.warn(
-        `Embedded signup could not subscribe app to WABA tenantId=${tenantId} wabaId=${discoveredWabaId} message=${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    }
-
     type PhoneNumberNode = {
       id?: string;
       display_phone_number?: string;
@@ -425,6 +405,30 @@ export class SettingsService {
     ) {
       throw new BadRequestException(
         'Meta did not return the expected business, WABA, or phone number data',
+      );
+    }
+
+    // Va después de validar el número y no antes: si la WABA no trae uno usable,
+    // el signup se cae igual, y suscribirse primero deja la app enganchada a los
+    // webhooks de una cuenta que este negocio nunca va a usar.
+    //
+    // Sin esta suscripción Meta no entrega los webhooks de la WABA recién
+    // vinculada (mensajes, y en Coexistence también echoes e historial).
+    try {
+      await graphPost(
+        `/${discoveredWabaId}/subscribed_apps`,
+        systemUserAccessToken,
+      );
+      this.logger.log(
+        `Embedded signup subscribed app to WABA tenantId=${tenantId} wabaId=${discoveredWabaId}`,
+      );
+    } catch (error: unknown) {
+      // Reintentar el signup no debería fallar solo porque la app ya estaba
+      // suscrita; se registra y se sigue.
+      this.logger.warn(
+        `Embedded signup could not subscribe app to WABA tenantId=${tenantId} wabaId=${discoveredWabaId} message=${
+          error instanceof Error ? error.message : String(error)
+        }`,
       );
     }
 
@@ -478,6 +482,46 @@ export class SettingsService {
         throw new ConflictException(
           'This WhatsApp Business Account is already connected to another tenant',
         );
+      }
+
+      // `whatsappPhoneNumber` tiene índice único, así que sin este chequeo la
+      // colisión salía como error de duplicado de MySQL: un 500 que no le dice
+      // nada al negocio, en vez del mismo 409 que ya devuelven las otras dos.
+      const tenantWithSamePhoneNumber = await tenantRepository
+        .createQueryBuilder('tenant')
+        .setLock('pessimistic_write')
+        .where('tenant.whatsappPhoneNumber = :phoneNumber', {
+          phoneNumber: discoveredPhoneNumber,
+        })
+        .andWhere('tenant.id != :tenantId', { tenantId })
+        .getOne();
+      if (tenantWithSamePhoneNumber) {
+        throw new ConflictException(
+          'This WhatsApp phone number is already connected to another tenant',
+        );
+      }
+
+      /**
+       * Cambio de número: el negocio conserva su tenant y toda su configuración
+       * —servicios, staff, horarios, historial—, y solo se reemplazan los datos
+       * de la conexión.
+       *
+       * El Flow es la excepción: pertenece a una WABA, así que si la WABA cambió,
+       * el id guardado apunta a un formulario que ya no podemos abrir. Dejarlo
+       * haría que el flujo de reserva intentara usarlo y fallara en cada intento;
+       * limpiándolo, se cae solo al canal nativo de listas y botones.
+       */
+      const wabaChanged =
+        Boolean(lockedTenant.whatsappWabaId) &&
+        lockedTenant.whatsappWabaId !== discoveredWabaId;
+
+      if (wabaChanged) {
+        this.logger.log(
+          `Embedded signup replaced WABA tenantId=${tenantId} previousWabaId=${String(
+            lockedTenant.whatsappWabaId,
+          )} newWabaId=${discoveredWabaId}; clearing whatsappFlowId`,
+        );
+        lockedTenant.whatsappFlowId = undefined;
       }
 
       lockedTenant.whatsappBusinessId = discoveredBusinessId;
