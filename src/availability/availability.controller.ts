@@ -26,12 +26,11 @@ export class AvailabilityController {
   ) {}
 
   /**
-   * Horarios disponibles para crear una cita a mano desde el panel.
+   * Horarios reservables para crear una cita a mano desde Agenda.
    *
-   * Delega en el mismo servicio que usa el flujo guiado de WhatsApp, así que un
-   * horario nunca puede estar libre en una pantalla y ocupado en la otra. Lo
-   * único propio del panel es `purpose`, que permite registrar una atención de
-   * un día que ya pasó.
+   * Delega en el mismo servicio que usa el flujo guiado de WhatsApp, sin
+   * variantes: un horario no puede estar libre en una pantalla y ocupado en la
+   * otra. Devuelve siempre de ahora en adelante, igual que para el cliente.
    *
    * No confundir con `POST slots`, que es el motor conversacional: sugiere
    * horarios alrededor de una hora pedida, con otro paso y otras reglas.
@@ -49,7 +48,6 @@ export class AvailabilityController {
       date: query.date,
       serviceId: query.serviceId,
       staffId: query.staffId,
-      purpose: 'manual-entry',
     });
   }
 
