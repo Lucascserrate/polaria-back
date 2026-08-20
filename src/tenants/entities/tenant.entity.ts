@@ -36,16 +36,27 @@ export class Tenant {
    * número se conectara en otra cuenta.
    */
   @Column({ type: 'varchar', length: 255, nullable: true })
-  whatsappPhoneNumber?: string | null;
+  whatsappPhoneNumber!: string | null;
+
+  /**
+   * Los campos de la conexión se declaran `!: T | null` y no `?: T`.
+   *
+   * No es cosmético: con el tipo opcional, borrarlos asignando `undefined`
+   * compilaba, y TypeORM ignora las propiedades `undefined` al guardar —lo dice
+   * en su propio código: "we don't perform operation over undefined properties
+   * (but we DO need null properties!)"—. El resultado era una desconexión que el
+   * panel mostraba como hecha mientras la columna conservaba el token, y Polaria
+   * seguía respondiendo por WhatsApp. Con el tipo nulable obligatorio, borrar
+   * con `undefined` no compila.
+   */
+  @Column({ type: 'text', nullable: true })
+  whatsappPhoneId!: string | null;
 
   @Column({ type: 'text', nullable: true })
-  whatsappPhoneId?: string;
+  whatsappAccessToken!: string | null;
 
   @Column({ type: 'text', nullable: true })
-  whatsappAccessToken?: string;
-
-  @Column({ type: 'text', nullable: true })
-  whatsappBusinessId?: string;
+  whatsappBusinessId!: string | null;
 
   /**
    * Indexada y `varchar` en lugar de `text`: es lo único por lo que se puede
@@ -54,10 +65,10 @@ export class Tenant {
    */
   @Index()
   @Column({ type: 'varchar', length: 64, nullable: true })
-  whatsappWabaId?: string | null;
+  whatsappWabaId!: string | null;
 
   @Column({ type: 'text', nullable: true })
-  whatsappVerifiedName?: string;
+  whatsappVerifiedName!: string | null;
 
   /**
    * Id del Flow de reservas publicado en la WABA de este tenant.
@@ -67,10 +78,10 @@ export class Tenant {
    * una WABA, así que cada barbería necesita el suyo y no se puede compartir.
    */
   @Column({ type: 'text', nullable: true })
-  whatsappFlowId?: string;
+  whatsappFlowId!: string | null;
 
   @Column({ type: 'timestamp', nullable: true })
-  whatsappConnectedAt?: Date | null;
+  whatsappConnectedAt!: Date | null;
 
   /**
    * Desde cuándo Meta reporta la conexión como caída (`account_update`).
@@ -81,11 +92,11 @@ export class Tenant {
    * negocio a rehacer el Embedded Signup. Si las borráramos, no habría con qué.
    */
   @Column({ type: 'datetime', nullable: true })
-  whatsappUnavailableSince?: Date | null;
+  whatsappUnavailableSince!: Date | null;
 
   /** Motivo que informó Meta: `CHANGE_NUMBER`, `PRIMARY_INACTIVITY`, etc. */
   @Column({ type: 'varchar', length: 64, nullable: true })
-  whatsappUnavailableReason?: string | null;
+  whatsappUnavailableReason!: string | null;
 
   /**
    * Coexistence: el número sigue usándose desde la app de WhatsApp Business
@@ -96,7 +107,7 @@ export class Tenant {
   whatsappIsOnBusinessApp!: boolean;
 
   @Column({ type: 'text', nullable: true })
-  whatsappPlatformType?: string;
+  whatsappPlatformType!: string | null;
 
   @Column()
   timezone!: string;

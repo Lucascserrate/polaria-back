@@ -94,18 +94,30 @@ export class SettingsService {
       `Loading settings tenantId=${tenantId} tenantName=${tenant.name} hasWhatsappToken=${Boolean(readStoredCredential(tenant.whatsappAccessToken))} hasPhoneId=${Boolean(tenant.whatsappPhoneId)} hasWabaId=${Boolean(tenant.whatsappWabaId)}`,
     );
 
-    const businessHours =
-      await this.businessHoursService.getTenantSchedule(tenantId);
+    const scheduleService = this.businessHoursService as unknown as {
+      getTenantSchedule: (id: string) => Promise<WeeklyScheduleRange[]>;
+    };
+    const businessHours = await scheduleService.getTenantSchedule(tenantId);
 
     return {
       polariaName: tenant.name,
       businessHours,
       aiEnabled: tenant.aiEnabled,
       whatsappConnection: {
+        /**
+         * Conectado es "Polaria puede operar este número", y eso lo deciden el
+         * token y el id del número: son los dos que usa el webhook para resolver
+         * el tenant y para responder.
+         *
+         * Antes también exigía la WABA, y eso escondía un estado a medias: con la
+         * WABA en `NULL` y el token presente, el panel decía "sin conectar"
+         * mientras Polaria seguía contestando por WhatsApp, y encima no ofrecía
+         * el botón de desconectar para arreglarlo. El estado que se muestra tiene
+         * que ser el que manda el comportamiento.
+         */
         connected: Boolean(
           readStoredCredential(tenant.whatsappAccessToken) &&
-          readStoredCredential(tenant.whatsappPhoneId) &&
-          readStoredCredential(tenant.whatsappWabaId),
+          readStoredCredential(tenant.whatsappPhoneId),
         ),
         businessId: tenant.whatsappBusinessId ?? null,
         wabaId: tenant.whatsappWabaId ?? null,
@@ -175,11 +187,15 @@ export class SettingsService {
 
       const updatedTenant = await this.tenantsService.update(tenantId, {
         whatsappBusinessId:
-          whatsappConnection.businessId ?? tenant.whatsappBusinessId,
+          whatsappConnection.businessId ??
+          tenant.whatsappBusinessId ??
+          undefined,
         whatsappWabaId:
           whatsappConnection.wabaId ?? tenant.whatsappWabaId ?? undefined,
         whatsappPhoneId:
-          whatsappConnection.phoneNumberId ?? tenant.whatsappPhoneId,
+          whatsappConnection.phoneNumberId ??
+          tenant.whatsappPhoneId ??
+          undefined,
         whatsappPhoneNumber:
           whatsappConnection.phoneNumber ??
           tenant.whatsappPhoneNumber ??
@@ -198,10 +214,13 @@ export class SettingsService {
     // acá: lo rechaza `replaceTenantSchedule`, porque un negocio sin ningún día
     // abierto no puede recibir reservas.
     if (dto.businessHours) {
-      await this.businessHoursService.replaceTenantSchedule(
-        tenantId,
-        dto.businessHours,
-      );
+      const scheduleService = this.businessHoursService as unknown as {
+        replaceTenantSchedule: (
+          id: string,
+          schedule: WeeklyScheduleRange[],
+        ) => Promise<void>;
+      };
+      await scheduleService.replaceTenantSchedule(tenantId, dto.businessHours);
     }
 
     return this.getSettings(tenantId);
@@ -537,16 +556,16 @@ export class SettingsService {
             lockedTenant.whatsappWabaId,
           )} newWabaId=${discoveredWabaId}; clearing whatsappFlowId`,
         );
-        lockedTenant.whatsappFlowId = undefined;
+        lockedTenant.whatsappFlowId = null;
       }
 
       lockedTenant.whatsappBusinessId = discoveredBusinessId;
       lockedTenant.whatsappWabaId = discoveredWabaId;
       lockedTenant.whatsappPhoneId = discoveredPhoneNumberId;
       lockedTenant.whatsappPhoneNumber = discoveredPhoneNumber;
-      lockedTenant.whatsappVerifiedName = discoveredVerifiedName ?? undefined;
+      lockedTenant.whatsappVerifiedName = discoveredVerifiedName ?? null;
       lockedTenant.whatsappIsOnBusinessApp = isOnBusinessApp;
-      lockedTenant.whatsappPlatformType = discoveredPlatformType ?? undefined;
+      lockedTenant.whatsappPlatformType = discoveredPlatformType ?? null;
       lockedTenant.whatsappAccessToken = systemUserAccessToken;
       lockedTenant.whatsappConnectedAt = new Date();
       // Reconectar cierra cualquier caída que Meta hubiera reportado: si el
@@ -609,17 +628,21 @@ export class SettingsService {
         throw new NotFoundException('Tenant not found');
       }
 
-      lockedTenant.whatsappBusinessId = undefined;
+      // Todo va a `null`, nunca a `undefined`: TypeORM saltea las propiedades
+      // `undefined` al guardar, así que asignarlas dejaba la columna intacta. Es
+      // lo que hacía que la desconexión se viera hecha en el panel mientras el
+      // token seguía guardado y Polaria seguía respondiendo por WhatsApp.
+      lockedTenant.whatsappBusinessId = null;
       lockedTenant.whatsappWabaId = null;
-      lockedTenant.whatsappPhoneId = undefined;
+      lockedTenant.whatsappPhoneId = null;
       lockedTenant.whatsappPhoneNumber = null;
-      lockedTenant.whatsappVerifiedName = undefined;
-      lockedTenant.whatsappAccessToken = undefined;
+      lockedTenant.whatsappVerifiedName = null;
+      lockedTenant.whatsappAccessToken = null;
       // El Flow pertenece a la WABA que se está soltando.
-      lockedTenant.whatsappFlowId = undefined;
+      lockedTenant.whatsappFlowId = null;
       lockedTenant.whatsappConnectedAt = null;
       lockedTenant.whatsappIsOnBusinessApp = false;
-      lockedTenant.whatsappPlatformType = undefined;
+      lockedTenant.whatsappPlatformType = null;
       // Una caída informada por Meta deja de tener sentido sin conexión.
       lockedTenant.whatsappUnavailableSince = null;
       lockedTenant.whatsappUnavailableReason = null;
