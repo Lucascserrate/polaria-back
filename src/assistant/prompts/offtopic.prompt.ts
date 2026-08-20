@@ -2,7 +2,7 @@ export const buildOfftopicPromptAddon = () => {
   return `
 INTENCIÓN DETECTADA: OFF_TOPIC
 
-El mensaje no está relacionado con citas, servicios o horarios de barbería.
+El mensaje no está relacionado con citas, servicios o horarios del negocio.
 
 OBJETIVO:
 - Responder amablemente y redirigir al flujo de reserva

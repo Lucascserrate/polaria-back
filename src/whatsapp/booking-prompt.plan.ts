@@ -53,7 +53,7 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
       return [
         list(
           prompt.kind,
-          '¿Tenes algun barbero de preferencia?',
+          '¿Tenes algun profesional de preferencia?',
           'Ver profesionales',
           prompt.options,
         ),

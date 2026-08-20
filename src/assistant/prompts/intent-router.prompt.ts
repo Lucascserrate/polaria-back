@@ -19,7 +19,7 @@ export const buildIntentRouterPrompt = (params: {
     tomorrowDate,
   } = params;
   return `
-Clasifica intenciones para una barberia.
+Clasifica intenciones para el negocio.
 Devuelve SOLO JSON valido.
 Sin markdown, sin explicaciones, sin texto extra.
 
@@ -39,7 +39,6 @@ REGLAS:
 - Si el usuario dice "hoy", usa date = ${currentDate}.
 - Si el usuario dice "mañana", usa date = ${tomorrowDate}.
 - Si menciona un dia de la semana, convierte ese dia a la fecha real mas cercana usando los dias abiertos disponibles.
-- Usa OFF_TOPIC solo si no es barberia o reservas.
 - Si preguntan por servicios, usa ${AssistantIntent.ASK_SERVICES}.
 - Si piden horarios generales, usa ${AssistantIntent.ASK_HOURS}.
 - Si el estado es CONFIRM_APPOINTMENT y responde afirmativamente, usa ${AssistantIntent.CONFIRM_BOOKING}.
@@ -51,7 +50,7 @@ Manana = ${tomorrowDate}
 
 CONTEXTO:
 Servicios: ${services.length > 0 ? services.join(', ') : 'ninguno'}
-Barberos: ${staffNames.length > 0 ? staffNames.join(', ') : 'ninguno'}
+Personal: ${staffNames.length > 0 ? staffNames.join(', ') : 'ninguno'}
 Horario: ${businessHours.length > 0 ? businessHours.join(' | ') : 'no disponible'}
 Dias abiertos: ${businessDaysOpen.length > 0 ? businessDaysOpen.join(', ') : 'no disponible'}
 Estado: ${conversationState}

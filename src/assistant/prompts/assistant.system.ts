@@ -18,7 +18,7 @@ export interface AssistantPromptContext {
   staffServices: { [staffName: string]: string[] };
   clientName?: string;
   isFirstInteraction?: boolean;
-  barbershopName: string;
+  tenantName: string;
 }
 
 export const buildAssistantSystemPrompt = (context: AssistantPromptContext) => {
@@ -29,7 +29,7 @@ export const buildAssistantSystemPrompt = (context: AssistantPromptContext) => {
   const staffNames = Object.keys(context.staffServices).join(', ');
 
   return `
-Eres un asistente de barberia por WhatsApp.
+Eres un asistente de reservas para WhatsApp.
 
 ESTILO:
 - Habla natural y relajado
@@ -55,7 +55,7 @@ REGLA DE AGENDAMIENTO:
 
 CONTEXTO DEL NEGOCIO:
 Servicios disponibles: ${services}
-Barberos: ${staffNames}
+Personal: ${staffNames}
 Horario: ${businessHours}
 Horario humano: ${businessHoursHuman || 'no disponible'}
 Dias abiertos: ${businessDaysOpen || 'no disponible'}

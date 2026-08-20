@@ -20,7 +20,7 @@ import { UserIntent } from '../intents/user-intent';
  * por completo.
  *
  * Ya no existen atajos basados en el estado de la conversación. Servían para
- * continuar una reserva conversacional —"responde con un nombre de barbero
+ * continuar una reserva conversacional —"responde con un nombre del staff"
  * mientras el estado es ASK_STAFF"— y esos estados desaparecieron junto con esa
  * forma de reservar.
  */
