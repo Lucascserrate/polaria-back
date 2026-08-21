@@ -14,6 +14,15 @@ import { Conversation } from '../../conversations/entities/conversation.entity';
 import { Message } from '../../messages/entities/message.entity';
 import { BusinessHour } from '../../business_hours/entities/business_hour.entity';
 
+/**
+ * Una cuenta de Google es un negocio. El índice único es lo que sostiene esa
+ * regla cuando el registro es self-service: sin él, dos peticiones simultáneas
+ * del primer login crearían dos negocios para la misma persona.
+ *
+ * Nulable a propósito: los tenants que crea soporte todavía no tienen cuenta
+ * asociada, y MySQL admite varios NULL bajo un índice único.
+ */
+@Index(['googleId'], { unique: true })
 @Index(['whatsappPhoneNumber'], { unique: true })
 @Entity('tenants')
 export class Tenant {

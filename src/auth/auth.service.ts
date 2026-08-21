@@ -30,30 +30,16 @@ export class AuthService {
         );
       }
 
-      let tenant = await this.tenantsService.findByGoogleId(user.googleId);
-
-      if (!tenant && user.email) {
-        const byEmail = await this.tenantsService.findByEmail(user.email);
-        if (byEmail && !byEmail.googleId) {
-          tenant = await this.tenantsService.setGoogleId(
-            byEmail.id,
-            user.googleId,
-          );
-        } else {
-          tenant = byEmail;
-        }
-      }
-
-      if (!tenant) {
-        return {
-          statusCode: HttpStatus.UNAUTHORIZED,
-          data: {
-            user: null,
-            tokens: null,
-          },
-          notFound: true as const,
-        };
-      }
+      /*
+       * Acá estaba la whitelist: si la cuenta no existía como tenant, se
+       * rechazaba el login. Ahora el primer acceso crea el negocio, y la
+       * búsqueda por correo sigue vinculando a los que dio de alta soporte.
+       */
+      const tenant = await this.tenantsService.findOrCreateByGoogleAccount({
+        googleId: user.googleId,
+        email: user.email,
+        displayName: user.displayName,
+      });
 
       return this.createSession(tenant);
     } catch {
@@ -64,31 +50,6 @@ export class AuthService {
     }
   }
 
-  /**
-   * Login temporal por correo para la revisión de Meta (App Review).
-   *
-   * Comparte la misma whitelist que OAuth (existir como tenant) y el mismo
-   * mecanismo de sesión (`createSession` + cookies). La única diferencia es
-   * el origen del correo: llega en el body en vez de venir del proveedor.
-   *
-   * TODO: eliminar junto con `POST /auth/local-login` al terminar la revisión.
-   */
-  async localLogin(email: string, res: Response) {
-    const tenant = await this.tenantsService.findByEmail(email);
-
-    if (!tenant) {
-      this.logger.warn(`localLogin rejected, email not whitelisted: ${email}`);
-      throw new HttpException(AuthError.UNAUTHORIZED, HttpStatus.UNAUTHORIZED);
-    }
-
-    const { data } = this.createSession(tenant);
-    setAuthCookies(res, data.tokens);
-
-    this.logger.log(`localLogin succeeded tenantId=${tenant.id}`);
-
-    return this.authenticatedResponse(tenant);
-  }
-
   private createSession(tenant: Tenant) {
     return {
       statusCode: HttpStatus.OK,
@@ -96,24 +57,16 @@ export class AuthService {
         user: tenant,
         tokens: createJwtToken(tenant, this.jwtService),
       },
-      notFound: false as const,
     };
   }
 
   async OAuthCallback(user: GoogleUserDto, res: Response) {
     try {
-      const { data, notFound } = await this.oauthLogin(user);
+      const { data } = await this.oauthLogin(user);
       this.logger.log(
-        `OAuthCallback user=${user.email ?? 'unknown'} googleId=${user.googleId ?? 'missing'} notFound=${notFound} tokensReady=${Boolean(data?.tokens?.accessToken && data?.tokens?.refreshToken)}`,
+        `OAuthCallback user=${user.email ?? 'unknown'} googleId=${user.googleId ?? 'missing'} tokensReady=${Boolean(data?.tokens?.accessToken && data?.tokens?.refreshToken)}`,
       );
 
-      if (notFound) {
-        this.logger.warn(
-          'OAuthCallback redirecting to /contact because tenant was not found',
-        );
-        res.redirect(`${CLIENT_BASE_URL ?? ''}/contact`);
-        return;
-      }
       this.logger.log(
         `Setting auth cookies secure=${AUTH_COOKIE_OPTIONS.secure} sameSite=${AUTH_COOKIE_OPTIONS.sameSite} path=${AUTH_COOKIE_OPTIONS.path} domain=${AUTH_COOKIE_OPTIONS.domain ?? 'host-only'}`,
       );

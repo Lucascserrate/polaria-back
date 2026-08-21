@@ -18,24 +18,6 @@ export class SlotAlreadyTakenError extends Error {
   }
 }
 
-/** Código de MySQL para violación de restricción única. */
-const MYSQL_DUPLICATE_ENTRY = 'ER_DUP_ENTRY';
-const MYSQL_DUPLICATE_ENTRY_ERRNO = 1062;
-
-/** Reconoce el fallo de índice único sin acoplar el llamador al driver. */
-export function isDuplicateEntryError(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-
-  const candidate = error as {
-    code?: unknown;
-    errno?: unknown;
-    driverError?: { code?: unknown; errno?: unknown };
-  };
-
-  const code = candidate.code ?? candidate.driverError?.code;
-  const errno = candidate.errno ?? candidate.driverError?.errno;
-
-  return (
-    code === MYSQL_DUPLICATE_ENTRY || errno === MYSQL_DUPLICATE_ENTRY_ERRNO
-  );
-}
+// El reconocimiento del choque de índice único es genérico y lo comparten dos
+// dominios; vive en `database/duplicate-entry.util`.
+export { isDuplicateEntryError } from '../database/duplicate-entry.util';
