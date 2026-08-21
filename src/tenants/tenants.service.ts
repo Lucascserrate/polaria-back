@@ -52,6 +52,34 @@ export class TenantsService {
     });
   }
 
+  /**
+   * Estado de la plantilla de recordatorios.
+   *
+   * Como `setWhatsappUnavailability`, no pasa por `UpdateTenantDto`: lo escribe
+   * el aprovisionamiento o un webhook de Meta, nunca el negocio desde el panel.
+   */
+  async setReminderTemplate(params: {
+    tenantId: string;
+    name: string | null;
+    language: string | null;
+    status: string | null;
+    metaStatus: string | null;
+  }): Promise<void> {
+    await this.tenantRepository.update(params.tenantId, {
+      reminderTemplateName: params.name,
+      reminderTemplateLanguage: params.language,
+      reminderTemplateStatus: params.status,
+      reminderTemplateMetaStatus: params.metaStatus,
+    });
+  }
+
+  /** Negocios cuya plantilla está esperando la revisión de Meta. */
+  findWithPendingReminderTemplate(): Promise<Tenant[]> {
+    return this.tenantRepository.find({
+      where: { reminderTemplateStatus: 'PENDING' },
+    });
+  }
+
   /** Único camino para resolver el tenant de un webhook `account_update`. */
   findByWhatsappWabaId(whatsappWabaId: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ whatsappWabaId });

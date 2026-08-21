@@ -5,6 +5,7 @@ import {
   buildButtonsPayload,
   buildFlowPayload,
   buildListPayload,
+  buildTemplatePayload,
   buildTextPayload,
   type BuiltMessage,
 } from './outgoing-message.builder';
@@ -12,6 +13,7 @@ import {
   type SendButtonsInput,
   type SendFlowInput,
   type SendListInput,
+  type SendTemplateInput,
   type SendTextInput,
   type WhatsAppCredentials,
 } from './types/outgoing-message.type';
@@ -26,8 +28,14 @@ export type SendResult = {
 /**
  * Única salida hacia la Cloud API de WhatsApp.
  *
- * Sabe enviar texto, botones y listas. Los renderizadores del flujo de reserva
- * hablan con este servicio y no construyen payloads por su cuenta.
+ * Sabe enviar texto, botones, listas, Flows y plantillas. Los renderizadores del
+ * flujo de reserva hablan con este servicio y no construyen payloads por su
+ * cuenta.
+ *
+ * La diferencia entre `sendText` y `sendTemplate` no es de formato sino de
+ * permiso: los mensajes libres solo se aceptan dentro de las 24 horas que abre
+ * el último mensaje del cliente. Todo lo que Polaria inicie por su cuenta
+ * —empezando por los recordatorios de cita— tiene que salir por plantilla.
  */
 @Injectable()
 export class WhatsAppSenderService {
@@ -59,6 +67,24 @@ export class WhatsAppSenderService {
     input: SendListInput,
   ): Promise<SendResult> {
     return this.send(credentials, input.to, 'list', buildListPayload(input));
+  }
+
+  /**
+   * Envía una plantilla aprobada.
+   *
+   * Es la única vía para escribirle a un cliente que no escribió en las últimas
+   * 24 horas; con texto libre, Meta responde 131047 y el mensaje no llega.
+   */
+  sendTemplate(
+    credentials: WhatsAppCredentials,
+    input: SendTemplateInput,
+  ): Promise<SendResult> {
+    return this.send(
+      credentials,
+      input.to,
+      'template',
+      buildTemplatePayload(input),
+    );
   }
 
   /** Abre un WhatsApp Flow. El resto de la conversación ocurre en su endpoint. */

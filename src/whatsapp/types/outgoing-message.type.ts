@@ -28,6 +28,16 @@ export const WHATSAPP_LIMITS = {
   /** Etiqueta del botón que abre el Flow. */
   FLOW_CTA_MAX: 20,
 
+  /** Botones de respuesta rápida de una plantilla, iguales en número a los nativos. */
+  TEMPLATE_QUICK_REPLY_MAX_COUNT: 3,
+  /**
+   * Largo de una variable del cuerpo de una plantilla.
+   *
+   * Se recorta en lugar de dejar que Meta rechace el envío: un nombre de
+   * servicio larguísimo no puede impedir que salga el recordatorio.
+   */
+  TEMPLATE_PARAMETER_MAX: 1024,
+
   /** El body de una lista admite más texto que el de un mensaje con botones. */
   BUTTONS_BODY_MAX: 1024,
   LIST_BODY_MAX: 4096,
@@ -87,6 +97,36 @@ export type SendFlowInput = {
   flowToken: string;
   header?: string;
   footer?: string;
+};
+
+/**
+ * Mensaje de plantilla aprobada.
+ *
+ * Es la única forma de escribirle a un cliente fuera de la ventana de 24 horas
+ * que abre su último mensaje. Un recordatorio de cita cae siempre fuera de esa
+ * ventana, así que no hay alternativa: con texto libre Meta responde 131047.
+ *
+ * La plantilla, su idioma y la cantidad y el orden de sus botones se fijan al
+ * aprobarla en la WABA. Lo único que viaja en cada envío son las variables del
+ * cuerpo y el payload de cada botón, y esto último es lo que permite reutilizar
+ * el codec de acciones sobre citas que ya existe.
+ */
+export type SendTemplateInput = {
+  to: string;
+  /** Nombre exacto con el que la plantilla quedó aprobada en la WABA. */
+  name: string;
+  /**
+   * Idioma con el que se aprobó, tal como lo espera Meta (`es`, `es_ES`,
+   * `en_US`). Si no coincide exactamente, el envío falla.
+   */
+  languageCode: string;
+  /** Variables del cuerpo, en el orden de `{{1}}`, `{{2}}`… */
+  bodyParameters?: string[];
+  /**
+   * Payloads de los botones de respuesta rápida, en el mismo orden en que están
+   * en la plantilla aprobada. Cada uno vuelve intacto al tocarlo.
+   */
+  quickReplyPayloads?: string[];
 };
 
 export type SendListInput = {

@@ -4,6 +4,7 @@ import {
   type SendButtonsInput,
   type SendFlowInput,
   type SendListInput,
+  type SendTemplateInput,
   type SendTextInput,
 } from './types/outgoing-message.type';
 
@@ -115,6 +116,95 @@ export function buildButtonsPayload(input: SendButtonsInput): BuiltMessage {
  * `INIT` antes de mostrar nada. Con `navigate` habría que precargar esos datos
  * en el propio mensaje.
  */
+/**
+ * Mensaje de plantilla aprobada.
+ *
+ * A diferencia del resto, acá no se construye el texto: el cuerpo ya está
+ * aprobado en la WABA y solo se completan sus variables. Por eso lo único que se
+ * valida es la forma —cantidad de botones, variables no vacías— y no la
+ * longitud de un body que no controlamos.
+ */
+export function buildTemplatePayload(input: SendTemplateInput): BuiltMessage {
+  const warnings: string[] = [];
+
+  const name = requireNonEmpty(input.name, 'nombre de la plantilla');
+  const languageCode = requireNonEmpty(
+    input.languageCode,
+    'idioma de la plantilla',
+  );
+
+  const bodyParameters = input.bodyParameters ?? [];
+  const quickReplyPayloads = input.quickReplyPayloads ?? [];
+
+  if (
+    quickReplyPayloads.length > WHATSAPP_LIMITS.TEMPLATE_QUICK_REPLY_MAX_COUNT
+  ) {
+    throw new WhatsAppMessageBuildError(
+      `Una plantilla admite hasta ${WHATSAPP_LIMITS.TEMPLATE_QUICK_REPLY_MAX_COUNT} botones de respuesta rápida y se recibieron ${quickReplyPayloads.length}.`,
+    );
+  }
+
+  quickReplyPayloads.forEach((payload, index) => {
+    // El payload es lo que vuelve para identificar la cita: si viene vacío, el
+    // botón llega sin forma de saber sobre qué actuar.
+    requireNonEmpty(payload, `payload del botón ${index}`);
+  });
+
+  const components: Array<Record<string, unknown>> = [];
+
+  if (bodyParameters.length > 0) {
+    components.push({
+      type: 'body',
+      parameters: bodyParameters.map((value, index) => ({
+        type: 'text',
+        text: clamp(
+          sanitizeTemplateParameter(
+            requireNonEmpty(value, `variable ${index + 1} del cuerpo`),
+          ),
+          WHATSAPP_LIMITS.TEMPLATE_PARAMETER_MAX,
+          `la variable ${index + 1} del cuerpo`,
+          warnings,
+        ),
+      })),
+    });
+  }
+
+  quickReplyPayloads.forEach((payload, index) => {
+    components.push({
+      type: 'button',
+      sub_type: 'quick_reply',
+      // Meta espera el índice como cadena, y posicional respecto de los botones
+      // tal como quedaron aprobados en la plantilla.
+      index: String(index),
+      parameters: [{ type: 'payload', payload }],
+    });
+  });
+
+  return {
+    payload: {
+      type: 'template',
+      template: {
+        name,
+        language: { code: languageCode },
+        ...(components.length > 0 ? { components } : {}),
+      },
+    },
+    warnings,
+  };
+}
+
+/**
+ * Deja una variable de plantilla en una sola línea.
+ *
+ * Meta rechaza los parámetros que contienen saltos de línea, tabulaciones o
+ * varios espacios seguidos, y lo hace con un error que no dice cuál de las
+ * variables fue. Un nombre de servicio cargado con un salto de línea de más
+ * alcanzaría para que ningún recordatorio de ese negocio saliera nunca.
+ */
+function sanitizeTemplateParameter(value: string): string {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
 export function buildFlowPayload(input: SendFlowInput): BuiltMessage {
   const warnings: string[] = [];
 

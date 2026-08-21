@@ -1,6 +1,7 @@
 import {
   buildButtonsPayload,
   buildListPayload,
+  buildTemplatePayload,
   buildTextPayload,
 } from './outgoing-message.builder';
 import {
@@ -266,5 +267,114 @@ describe('buildListPayload', () => {
     });
 
     expect(warnings).toHaveLength(2);
+  });
+});
+
+describe('buildTemplatePayload', () => {
+  it('construye una plantilla con variables y botones', () => {
+    const { payload, warnings } = buildTemplatePayload({
+      to: '549',
+      name: 'appointment_reminder',
+      languageCode: 'es',
+      bodyParameters: ['María', 'Corte', 'Diego', '16:00'],
+      quickReplyPayloads: ['appt|v1|resch|abc', 'appt|v1|cancel|abc'],
+    });
+
+    expect(payload).toEqual({
+      type: 'template',
+      template: {
+        name: 'appointment_reminder',
+        language: { code: 'es' },
+        components: [
+          {
+            type: 'body',
+            parameters: [
+              { type: 'text', text: 'María' },
+              { type: 'text', text: 'Corte' },
+              { type: 'text', text: 'Diego' },
+              { type: 'text', text: '16:00' },
+            ],
+          },
+          {
+            type: 'button',
+            sub_type: 'quick_reply',
+            index: '0',
+            parameters: [{ type: 'payload', payload: 'appt|v1|resch|abc' }],
+          },
+          {
+            type: 'button',
+            sub_type: 'quick_reply',
+            index: '1',
+            parameters: [{ type: 'payload', payload: 'appt|v1|cancel|abc' }],
+          },
+        ],
+      },
+    });
+    expect(warnings).toEqual([]);
+  });
+
+  it('omite components cuando la plantilla no tiene variables ni botones', () => {
+    const { payload } = buildTemplatePayload({
+      to: '549',
+      name: 'hello_world',
+      languageCode: 'en_US',
+    });
+
+    expect(payload).toEqual({
+      type: 'template',
+      template: { name: 'hello_world', language: { code: 'en_US' } },
+    });
+  });
+
+  it('deja las variables en una sola línea', () => {
+    // Meta rechaza los parámetros con saltos de línea, tabulaciones o espacios
+    // repetidos, y no dice cuál falló.
+    const { payload } = buildTemplatePayload({
+      to: '549',
+      name: 'appointment_reminder',
+      languageCode: 'es',
+      bodyParameters: ['  Corte \n de   barba\t '],
+    });
+
+    const template = payload.template as {
+      components: Array<{ parameters: Array<{ text: string }> }>;
+    };
+    expect(template.components[0].parameters[0].text).toBe('Corte de barba');
+  });
+
+  it('rechaza más botones de los que admite una plantilla', () => {
+    expect(() =>
+      buildTemplatePayload({
+        to: '549',
+        name: 'appointment_reminder',
+        languageCode: 'es',
+        quickReplyPayloads: ['a', 'b', 'c', 'd'],
+      }),
+    ).toThrow(WhatsAppMessageBuildError);
+  });
+
+  it('rechaza un payload vacío, que llegaría sin identificar la cita', () => {
+    expect(() =>
+      buildTemplatePayload({
+        to: '549',
+        name: 'appointment_reminder',
+        languageCode: 'es',
+        quickReplyPayloads: ['appt|v1|resch|abc', '   '],
+      }),
+    ).toThrow(WhatsAppMessageBuildError);
+  });
+
+  it('rechaza la plantilla sin nombre o sin idioma', () => {
+    expect(() =>
+      buildTemplatePayload({ to: '549', name: '  ', languageCode: 'es' }),
+    ).toThrow(WhatsAppMessageBuildError);
+
+    expect(() =>
+      buildTemplatePayload({
+        to: '549',
+        name: 'appointment_reminder',
+        languageCode: '',
+      }),
+    ).toThrow(WhatsAppMessageBuildError);
   });
 });

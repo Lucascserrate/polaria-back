@@ -9,6 +9,7 @@ import { TenantsModule } from '../tenants/tenants.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
 import { AccountUpdateService } from './account-update.service';
 import { ConversationRecorderService } from './conversation-recorder.service';
+import { TemplateStatusService } from './template-status.service';
 import { InboundMessageService } from './inbound-message.service';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
@@ -31,6 +32,7 @@ import { WebhookService } from './webhook.service';
   providers: [
     WebhookService,
     AccountUpdateService,
+    TemplateStatusService,
     InboundMessageService,
     ConversationRecorderService,
   ],

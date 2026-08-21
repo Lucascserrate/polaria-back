@@ -15,6 +15,7 @@ import {
   type JsonObject,
 } from './webhook-meta.util';
 import { AccountUpdateService } from './account-update.service';
+import { TemplateStatusService } from './template-status.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 
 /**
@@ -27,6 +28,9 @@ import type { Tenant } from '../tenants/entities/tenant.entity';
  */
 /** Eventos de la cuenta: conexión caída o restablecida desde el lado de Meta. */
 const ACCOUNT_UPDATE_FIELD = 'account_update';
+
+/** Aprobación o rechazo de una plantilla por parte de Meta. */
+const TEMPLATE_STATUS_FIELD = 'message_template_status_update';
 
 const COEXISTENCE_WEBHOOK_FIELDS = new Set([
   'history',
@@ -48,6 +52,7 @@ export class WebhookService {
     private readonly tenantsService: TenantsService,
     private readonly inboundMessageService: InboundMessageService,
     private readonly accountUpdateService: AccountUpdateService,
+    private readonly templateStatusService: TemplateStatusService,
   ) {}
 
   /**
@@ -96,6 +101,14 @@ export class WebhookService {
         if (!value) return;
 
         await this.accountUpdateService.handle({ entryId, entryTime, value });
+        return;
+      }
+
+      if (field === TEMPLATE_STATUS_FIELD) {
+        const value = getObjectField(change, 'value');
+        if (!value) return;
+
+        await this.templateStatusService.handle({ entryId, value });
         return;
       }
 

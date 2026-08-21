@@ -12,6 +12,8 @@ import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { BookingSessionService } from '../booking-flow/booking-session.service';
+import { WhatsAppTemplateService } from '../whatsapp/whatsapp-template.service';
+import { ReminderTemplateStatus } from '../whatsapp/reminder-template';
 import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { DataSource } from 'typeorm';
@@ -60,6 +62,10 @@ type SettingsResponse = {
     /** Cuándo Meta reportó la caída, o `null` si la conexión está sana. */
     unavailableSince: string | null;
     unavailableReason: string | null;
+    /** Ver `ReminderTemplateStatus`. Solo `APPROVED` habilita recordatorios. */
+    reminderTemplateStatus: string;
+    /** Estado crudo de Meta, para explicar un `UNAVAILABLE`. */
+    reminderTemplateMetaStatus: string | null;
     businessId: string | null;
     wabaId: string | null;
     phoneNumberId: string | null;
@@ -82,6 +88,7 @@ export class SettingsService {
     private readonly configService: ConfigService,
     private readonly dataSource: DataSource,
     private readonly bookingSessionService: BookingSessionService,
+    private readonly whatsAppTemplateService: WhatsAppTemplateService,
   ) {}
 
   async getSettings(tenantId: string): Promise<SettingsResponse> {
@@ -133,6 +140,14 @@ export class SettingsService {
           ? tenant.whatsappUnavailableSince.toISOString()
           : null,
         unavailableReason: tenant.whatsappUnavailableReason ?? null,
+        /**
+         * Estado de la plantilla de recordatorios. Vive dentro de
+         * `whatsappConnection` porque una plantilla pertenece a la WABA: sin
+         * conexión no hay plantilla de la que hablar.
+         */
+        reminderTemplateStatus:
+          tenant.reminderTemplateStatus ?? ReminderTemplateStatus.NOT_CREATED,
+        reminderTemplateMetaStatus: tenant.reminderTemplateMetaStatus ?? null,
       },
     };
   }
@@ -557,6 +572,12 @@ export class SettingsService {
           )} newWabaId=${discoveredWabaId}; clearing whatsappFlowId`,
         );
         lockedTenant.whatsappFlowId = null;
+        // Igual que el Flow: la plantilla pertenece a la WABA anterior. Se
+        // reaprovisiona más abajo contra la nueva.
+        lockedTenant.reminderTemplateName = null;
+        lockedTenant.reminderTemplateLanguage = null;
+        lockedTenant.reminderTemplateStatus = null;
+        lockedTenant.reminderTemplateMetaStatus = null;
       }
 
       lockedTenant.whatsappBusinessId = discoveredBusinessId;
@@ -584,7 +605,42 @@ export class SettingsService {
       throw new NotFoundException('Tenant not found');
     }
 
+    await this.provisionReminderTemplate({
+      tenantId,
+      wabaId: discoveredWabaId,
+      accessToken: systemUserAccessToken,
+    });
+
     return this.getSettings(tenantId);
+  }
+
+  /**
+   * Deja lista la plantilla de recordatorios de este negocio.
+   *
+   * Corre después de guardar la conexión y es best-effort, como la suscripción a
+   * webhooks: si Meta rechaza la creación, el negocio queda conectado y sin
+   * recordatorios. Fallar el signup entero por esto sería desproporcionado —el
+   * canal principal, que es recibir y responder mensajes, funciona igual.
+   */
+  private async provisionReminderTemplate(params: {
+    tenantId: string;
+    wabaId: string;
+    accessToken: string;
+  }): Promise<void> {
+    const state =
+      await this.whatsAppTemplateService.provisionReminderTemplate(params);
+
+    await this.tenantsService.setReminderTemplate({
+      tenantId: params.tenantId,
+      name:
+        state.status === ReminderTemplateStatus.NOT_CREATED ? null : state.name,
+      language:
+        state.status === ReminderTemplateStatus.NOT_CREATED
+          ? null
+          : state.language,
+      status: state.status,
+      metaStatus: state.metaStatus,
+    });
   }
 
   /**
@@ -646,6 +702,11 @@ export class SettingsService {
       // Una caída informada por Meta deja de tener sentido sin conexión.
       lockedTenant.whatsappUnavailableSince = null;
       lockedTenant.whatsappUnavailableReason = null;
+      // La plantilla vive en la WABA que se está soltando.
+      lockedTenant.reminderTemplateName = null;
+      lockedTenant.reminderTemplateLanguage = null;
+      lockedTenant.reminderTemplateStatus = null;
+      lockedTenant.reminderTemplateMetaStatus = null;
 
       await tenantRepository.save(lockedTenant);
 

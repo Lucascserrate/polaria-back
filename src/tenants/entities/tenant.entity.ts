@@ -99,6 +99,34 @@ export class Tenant {
   whatsappUnavailableReason!: string | null;
 
   /**
+   * Plantilla de recordatorios aprobada en la WABA de este negocio.
+   *
+   * Se aprovisiona sola al conectar WhatsApp y pertenece a la WABA, así que se
+   * limpia junto con el resto de la conexión: una plantilla de la WABA anterior
+   * no se puede enviar desde la nueva.
+   */
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  reminderTemplateName!: string | null;
+
+  /** Idioma con el que se aprobó. Al enviar tiene que coincidir exacto. */
+  @Column({ type: 'varchar', length: 16, nullable: true })
+  reminderTemplateLanguage!: string | null;
+
+  /** `ReminderTemplateStatus`. Solo `APPROVED` habilita el envío. */
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  reminderTemplateStatus!: string | null;
+
+  /**
+   * Estado tal como lo informa Meta.
+   *
+   * Nuestro `UNAVAILABLE` agrupa rechazada, pausada, deshabilitada y borrada.
+   * Sin el valor original no hay forma de decirle al negocio cuál de las cuatro
+   * le está pasando.
+   */
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  reminderTemplateMetaStatus!: string | null;
+
+  /**
    * Coexistence: el número sigue usándose desde la app de WhatsApp Business
    * en paralelo a Cloud API. Cambia lo que se puede hacer con el número
    * (no se registra, throughput fijo, llegan echoes de la app).
