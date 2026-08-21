@@ -22,6 +22,7 @@ import { SettingsModule } from './settings/settings.module';
 import { WebhookModule } from './webhook/webhook.module';
 import { WhatsAppModule } from './whatsapp/whatsapp.module';
 import { BookingFlowModule } from './booking-flow/booking-flow.module';
+import { RemindersModule } from './reminders/reminders.module';
 import { FlowsModule } from './flows/flows.module';
 import { ReportsModule } from './reports/reports.module';
 
@@ -62,6 +63,7 @@ import { ReportsModule } from './reports/reports.module';
     WebhookModule,
     WhatsAppModule,
     BookingFlowModule,
+    RemindersModule,
     FlowsModule,
     ReportsModule,
   ],
