@@ -6,6 +6,10 @@ import { Tenant } from './entities/tenant.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { isDuplicateEntryError } from '../database/duplicate-entry.util';
+import {
+  SubscriptionStatus,
+  trialEndsAt,
+} from '../subscriptions/subscription.rules';
 
 /**
  * Zona horaria con la que nace un negocio creado desde el registro.
@@ -153,6 +157,39 @@ export class TenantsService {
     return this.tenantRepository.find({
       where: { reminderTemplateStatus: 'PENDING' },
     });
+  }
+
+  /**
+   * Arranca la prueba gratuita, si no arrancó antes.
+   *
+   * Es idempotente por diseño y esa es la parte importante: el disparador va a
+   * ser la conexión de WhatsApp, y reconectar —cambiar de número, recuperarse de
+   * una caída— no puede regalar días nuevos ni reiniciar el reloj.
+   *
+   * Devuelve `true` solo cuando efectivamente la inició.
+   */
+  async startTrial(tenantId: string, now: Date = new Date()): Promise<boolean> {
+    const result = await this.tenantRepository
+      .createQueryBuilder()
+      .update(Tenant)
+      .set({
+        subscriptionStatus: SubscriptionStatus.TRIAL,
+        trialStartedAt: now,
+        trialEndsAt: trialEndsAt(now),
+      })
+      .where('id = :tenantId', { tenantId })
+      // La condición viaja dentro del UPDATE: si dos conexiones simultáneas
+      // llegan acá, solo una modifica la fila y la prueba queda con una única
+      // fecha de inicio.
+      .andWhere('trialStartedAt IS NULL')
+      .execute();
+
+    const started = (result.affected ?? 0) === 1;
+    if (started) {
+      this.logger.log(`Prueba gratuita iniciada (tenantId=${tenantId}).`);
+    }
+
+    return started;
   }
 
   /** Único camino para resolver el tenant de un webhook `account_update`. */

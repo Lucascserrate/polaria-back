@@ -13,6 +13,7 @@ import { Client } from '../../clients/entities/client.entity';
 import { Conversation } from '../../conversations/entities/conversation.entity';
 import { Message } from '../../messages/entities/message.entity';
 import { BusinessHour } from '../../business_hours/entities/business_hour.entity';
+import { SubscriptionStatus } from '../../subscriptions/subscription.rules';
 
 /**
  * Una cuenta de Google es un negocio. El índice único es lo que sostiene esa
@@ -197,6 +198,41 @@ export class Tenant {
    * Es el equivalente para todo el negocio de `ConversationState.HUMAN_HANDOFF`,
    * que hace lo mismo en una sola conversación.
    */
+  /**
+   * Coordenadas del local. Opcionales.
+   *
+   * Se guardan coordenadas y no una dirección de texto porque el destino es
+   * enviar la ubicación **como ubicación** por WhatsApp, que es un tipo de
+   * mensaje propio y pide latitud y longitud. Un enlace a un mapa obliga al
+   * cliente a salir de la conversación.
+   *
+   * MySQL devuelve `decimal` como cadena, así que quien las exponga tiene que
+   * convertirlas; ver `commissionRate`, que ya tenía este mismo cuidado.
+   */
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  latitude?: string | null;
+
+  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
+  longitude?: string | null;
+
+  /**
+   * Estado de la suscripción tal como se guarda. Ver `SubscriptionStatus`.
+   *
+   * No confundir con el estado que se responde: `TRIAL` guardado puede ser una
+   * prueba en curso o vencida según la hora, y esa cuenta la hace
+   * `resolveSubscription`. Nace en `NONE` porque la prueba no empieza al
+   * registrarse sino al conectar WhatsApp, que es cuando Polaria sirve de algo.
+   */
+  @Column({ type: 'varchar', length: 16, default: SubscriptionStatus.NONE })
+  subscriptionStatus!: string;
+
+  @Column({ type: 'datetime', nullable: true })
+  trialStartedAt?: Date | null;
+
+  /** Se calcula al arrancar la prueba y no se recalcula: ver `trialEndsAt()`. */
+  @Column({ type: 'datetime', nullable: true })
+  trialEndsAt?: Date | null;
+
   @Column({ default: true })
   aiEnabled!: boolean;
 
