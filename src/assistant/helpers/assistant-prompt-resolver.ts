@@ -24,7 +24,7 @@ export const resolvePromptForIntent = (params: {
   switch (intent) {
     case AssistantIntent.GREETING:
       return buildGreetingPromptAddon({
-        businessName: promptContext.barbershopName,
+        businessName: promptContext.tenantName,
         services: promptContext.services,
         businessHours: promptContext.businessHours,
         currentDate: promptContext.currentDate,
@@ -40,7 +40,7 @@ export const resolvePromptForIntent = (params: {
       return buildServicesPromptAddon({
         services: promptContext.services,
         servicesCatalog: promptContext.servicesCatalog,
-        businessName: promptContext.barbershopName,
+        businessName: promptContext.tenantName,
       });
 
     case AssistantIntent.ASK_HOURS:

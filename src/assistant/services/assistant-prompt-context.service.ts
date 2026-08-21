@@ -53,8 +53,8 @@ export class AssistantPromptContextService {
 
     const tenant: Tenant | null = await this.tenantsService.findOne(tenantId);
     const timezone = this.normalizeTimezone(tenant?.timezone);
-    const barbershopName = tenant?.name?.trim();
-    if (!barbershopName) {
+    const tenantName = tenant?.name?.trim();
+    if (!tenantName) {
       throw new Error(`Tenant name is required for tenantId=${tenantId}`);
     }
 
@@ -118,7 +118,7 @@ export class AssistantPromptContextService {
       services: serviceNames,
       servicesCatalog,
       staffServices,
-      barbershopName,
+      tenantName,
       currentDate: this.formatCurrentDate(timezone),
       currentTime: this.formatCurrentTime(timezone),
       isClosedNow: this.isClosedNow(businessHoursText, timezone),

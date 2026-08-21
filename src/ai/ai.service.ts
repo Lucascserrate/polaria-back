@@ -23,11 +23,16 @@ export class AIService {
     return response.choices[0]?.message ?? { content: '' };
   }
 
-  async chatRaw(
-    messages: ChatCompletionMessageParam[],
-  ): Promise<ChatCompletion> {
+  /**
+   * Respuesta simulada: el cliente de OpenAI está comentado más arriba.
+   *
+   * No es `async` porque no espera nada. Marcarla así solo para devolver una
+   * promesa escondía que acá no hay ninguna llamada real, y es lo que hace que
+   * el asistente conteste vacío.
+   */
+  chatRaw(messages: ChatCompletionMessageParam[]): Promise<ChatCompletion> {
     void messages;
-    return {
+    return Promise.resolve({
       id: 'stub-chat-completion',
       object: 'chat.completion',
       created: Math.floor(Date.now() / 1000),
@@ -48,6 +53,6 @@ export class AIService {
         completion_tokens: 0,
         total_tokens: 0,
       },
-    } as ChatCompletion;
+    } as ChatCompletion);
   }
 }

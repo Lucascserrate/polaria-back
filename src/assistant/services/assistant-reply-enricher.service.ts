@@ -89,7 +89,7 @@ export class AssistantReplyEnricherService {
       facts.businessHours =
         promptContext.businessHoursHuman ?? promptContext.businessHours;
       facts.businessDaysOpen = promptContext.businessDaysOpen ?? [];
-      facts.polariaName = promptContext.barbershopName;
+      facts.polariaName = promptContext.tenantName;
     }
 
     if (needs.discounts) facts.discounts = null;
