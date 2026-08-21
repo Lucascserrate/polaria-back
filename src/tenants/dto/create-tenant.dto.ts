@@ -1,5 +1,11 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
+import {
+  IsBoolean,
+  IsInt,
+  IsOptional,
+  IsString,
+  Length,
+} from 'class-validator';
 
 export class CreateTenantDto {
   @ApiProperty()
@@ -85,4 +91,14 @@ export class CreateTenantDto {
   @IsOptional()
   @IsBoolean()
   aiEnabled?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  remindersEnabled?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsInt()
+  reminderLeadMinutes?: number;
 }

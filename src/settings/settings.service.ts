@@ -53,6 +53,18 @@ type SettingsResponse = {
    */
   businessHours: WeeklyScheduleRange[];
   aiEnabled: boolean;
+  /**
+   * Recordatorios automáticos antes de la cita.
+   *
+   * Va como objeto propio y no dentro de `whatsappConnection` porque es una
+   * capacidad del negocio, no del canal: cuando existan correo o SMS, esta misma
+   * configuración los gobierna. Si el canal está listo para entregar es otra
+   * pregunta, y esa vive en `whatsappConnection.reminderTemplateStatus`.
+   */
+  reminders: {
+    enabled: boolean;
+    leadMinutes: number;
+  };
   whatsappConnection: {
     /**
      * Hay credenciales guardadas. No implica que Meta la considere sana: para
@@ -110,6 +122,10 @@ export class SettingsService {
       polariaName: tenant.name,
       businessHours,
       aiEnabled: tenant.aiEnabled,
+      reminders: {
+        enabled: tenant.remindersEnabled,
+        leadMinutes: tenant.reminderLeadMinutes,
+      },
       whatsappConnection: {
         /**
          * Conectado es "Polaria puede operar este número", y eso lo deciden el
@@ -177,6 +193,17 @@ export class SettingsService {
     ) {
       await this.tenantsService.update(tenantId, {
         aiEnabled: dto.aiEnabled,
+      });
+    }
+
+    if (
+      typeof dto.remindersEnabled === 'boolean' ||
+      typeof dto.reminderLeadMinutes === 'number'
+    ) {
+      await this.tenantsService.update(tenantId, {
+        remindersEnabled: dto.remindersEnabled ?? tenant.remindersEnabled,
+        reminderLeadMinutes:
+          dto.reminderLeadMinutes ?? tenant.reminderLeadMinutes,
       });
     }
 

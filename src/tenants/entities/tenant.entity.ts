@@ -99,6 +99,25 @@ export class Tenant {
   whatsappUnavailableReason!: string | null;
 
   /**
+   * Recordatorio automático antes de cada cita.
+   *
+   * Encendido por defecto. El canal actual es WhatsApp, pero el nombre no lo
+   * menciona a propósito: la capacidad es del negocio, no del canal, y cuando
+   * haya correo o SMS esta misma bandera los gobierna.
+   */
+  @Column({ default: true })
+  remindersEnabled!: boolean;
+
+  /**
+   * Cuánto antes de la cita se avisa, en minutos.
+   *
+   * En minutos y no en horas para no migrar la columna el día que alguien
+   * quiera avisar 45 minutos antes.
+   */
+  @Column({ type: 'int', default: 1440 })
+  reminderLeadMinutes!: number;
+
+  /**
    * Plantilla de recordatorios aprobada en la WABA de este negocio.
    *
    * Se aprovisiona sola al conectar WhatsApp y pertenece a la WABA, así que se
