@@ -98,6 +98,9 @@ export class AppointmentRemindersRepository {
           services: { service: true, staff: true },
         },
       },
+      // El profesional puede haber sido dado de baja después de agendarse la
+      // cita; el recordatorio tiene que seguir diciendo con quién es.
+      withDeleted: true,
       order: { scheduledFor: 'ASC' },
     });
   }

@@ -583,6 +583,9 @@ export class AppointmentsService {
         startTime: MoreThanOrEqual(params.now ?? new Date()),
       },
       relations: { services: { service: true, staff: true } },
+      // Sin esto, el profesional dado de baja entra como `NULL` y el cliente ve
+      // su turno sin profesional asignado.
+      withDeleted: true,
       order: { startTime: 'ASC' },
       take: params.limit,
     });
@@ -600,6 +603,9 @@ export class AppointmentsService {
         clientId: params.clientId,
       },
       relations: { services: { service: true, staff: true } },
+      // Sin esto, el profesional dado de baja entra como `NULL` y el cliente ve
+      // su turno sin profesional asignado.
+      withDeleted: true,
     });
   }
 
