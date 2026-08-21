@@ -20,6 +20,16 @@ export const REMINDER_CHANNEL_WHATSAPP = 'whatsapp';
 export enum ReminderState {
   /** Programado y esperando su momento. */
   SCHEDULED = 'SCHEDULED',
+  /**
+   * Tomado por una ejecución que está llamando al canal ahora mismo.
+   *
+   * Existe para separar "lo estoy mandando" de "llegó". Sin este paso había
+   * que marcar `SENT` antes de llamar a Meta —para que dos ejecuciones no
+   * enviaran lo mismo—, y una caída en el medio dejaba un recordatorio marcado
+   * como enviado que nunca salió: el dueño leía "enviado" y el cliente no
+   * había recibido nada.
+   */
+  SENDING = 'SENDING',
   /** Entregado al canal. Terminal: nunca se reenvía. */
   SENT = 'SENT',
   /** Ya no corresponde: la cita se canceló, se completó o se apagaron los avisos. */
@@ -41,6 +51,18 @@ export enum ReminderState {
 export const TERMINAL_REMINDER_STATES: readonly ReminderState[] = [
   ReminderState.SENT,
   ReminderState.FAILED,
+];
+
+/**
+ * Estados que la reconciliación no toca.
+ *
+ * Los terminales por lo dicho arriba, y `SENDING` porque hay un envío en
+ * curso: reescribir su horario o cancelarlo mientras alguien está hablando con
+ * Meta produciría una fila que no describe lo que pasó.
+ */
+const FROZEN_REMINDER_STATES: readonly ReminderState[] = [
+  ...TERMINAL_REMINDER_STATES,
+  ReminderState.SENDING,
 ];
 
 /** Por qué no hay recordatorio. Se guarda para poder explicarlo. */
@@ -159,9 +181,9 @@ export function resolveReminderAction(
   target: ReminderTarget,
   stored: StoredReminder | null,
 ): ReminderAction {
-  // `SENT` y `FAILED` no se revisan más. Que la cita cambie después no habilita
-  // un segundo mensaje: el cliente ya recibió uno.
-  if (stored && TERMINAL_REMINDER_STATES.includes(stored.state)) {
+  // Un estado congelado frena todo. Que la cita cambie después no habilita un
+  // segundo mensaje: el cliente ya recibió uno, o hay uno saliendo.
+  if (stored && FROZEN_REMINDER_STATES.includes(stored.state)) {
     return { kind: 'NOOP' };
   }
 

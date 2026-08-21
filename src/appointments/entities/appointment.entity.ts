@@ -12,10 +12,10 @@ import {
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Client } from '../../clients/entities/client.entity';
 import { AppointmentService } from './appointment_service.entity';
+import { AppointmentReminder } from '../../reminders/entities/appointment-reminder.entity';
 
 export enum AppointmentStatus {
   PENDING = 'pending',
-  BOOKED = 'booked',
   CONFIRMED = 'confirmed',
   CANCELLED = 'cancelled',
   COMPLETED = 'completed',
@@ -45,7 +45,6 @@ export function blocksAgenda(status: AppointmentStatus): boolean {
  */
 export const OPEN_APPOINTMENT_STATUSES: readonly AppointmentStatus[] = [
   AppointmentStatus.PENDING,
-  AppointmentStatus.BOOKED,
   AppointmentStatus.CONFIRMED,
 ];
 @Index(['tenantId', 'startTime'])
@@ -94,8 +93,14 @@ export class Appointment {
   @Column({ nullable: true })
   googleEventId?: string;
 
-  @Column({ default: false })
-  reminderSent!: boolean;
+  /**
+   * Recordatorios programados o enviados para esta cita.
+   *
+   * La relación existe para poder mostrar en la agenda si el aviso salió y,
+   * si no, por qué. La decisión de qué recordar no vive acá.
+   */
+  @OneToMany(() => AppointmentReminder, (reminder) => reminder.appointment)
+  reminders!: AppointmentReminder[];
 
   @CreateDateColumn()
   createdAt!: Date;

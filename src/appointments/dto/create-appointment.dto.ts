@@ -2,7 +2,6 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ArrayNotEmpty,
   IsArray,
-  IsBoolean,
   IsDateString,
   IsEnum,
   IsOptional,
@@ -61,9 +60,4 @@ export class CreateAppointmentDto {
   @IsOptional()
   @IsString()
   googleEventId?: string;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsBoolean()
-  reminderSent?: boolean;
 }

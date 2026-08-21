@@ -7,6 +7,7 @@ import { AppointmentRemindersRepository } from './appointment-reminders.reposito
 import {
   AppointmentRemindersService,
   REMINDER_SEND_REASONS,
+  SENDING_TIMEOUT_MINUTES,
 } from './appointment-reminders.service';
 import {
   REMINDER_CHANNEL_WHATSAPP,
@@ -35,6 +36,25 @@ export class AppointmentRemindersJob {
   @Cron(CronExpression.EVERY_5_MINUTES)
   async run(): Promise<void> {
     const now = new Date();
+
+    // Antes que nada, cerrar los envíos que quedaron colgados de una caída:
+    // si no, esas filas se quedan en `SENDING` para siempre y no se ven ni como
+    // enviadas ni como fallidas.
+    try {
+      const stale = await this.repository.failStaleSending({
+        olderThan: new Date(now.getTime() - SENDING_TIMEOUT_MINUTES * 60_000),
+        reason: REMINDER_SEND_REASONS.SEND_INTERRUPTED,
+      });
+      if (stale > 0) {
+        this.logger.warn(
+          `Envíos interrumpidos cerrados como fallidos: ${stale}.`,
+        );
+      }
+    } catch (error: unknown) {
+      this.logger.error(
+        `Fallo al cerrar envíos interrumpidos: ${describeError(error)}`,
+      );
+    }
 
     try {
       const { updated } = await this.remindersService.reconcile(now);
@@ -115,8 +135,12 @@ export class AppointmentRemindersJob {
      * ejecuciones coinciden solo una modifica la fila y solo esa envía. Al revés
      * —enviar y después marcar— las dos habrían enviado antes de escribir nada,
      * y el cliente recibiría el aviso dos veces.
+     *
+     * Queda en `SENDING` y no en `SENT`: acá solo se sabe que este proceso se
+     * hizo cargo. Si muere antes de terminar, `failStaleSending` lo cierra como
+     * fallido en vez de dejarlo mintiendo que se envió.
      */
-    const claimed = await this.repository.claimForSending(reminder.id, now);
+    const claimed = await this.repository.claimForSending(reminder.id);
     if (!claimed) {
       this.logger.log(
         `Recordatorio ya tomado por otra ejecución (reminderId=${reminder.id}).`,
@@ -147,7 +171,6 @@ export class AppointmentRemindersJob {
     );
 
     if (!result.ok) {
-      // La fila había quedado tomada como enviada y no lo fue.
       await this.repository.markFailed(
         reminder.id,
         result.error ?? 'SEND_FAILED',
@@ -158,10 +181,11 @@ export class AppointmentRemindersJob {
       return;
     }
 
-    await this.repository.markMetaMessageId(
-      reminder.id,
-      result.metaMessageId ?? null,
-    );
+    await this.repository.markSent({
+      reminderId: reminder.id,
+      sentAt: now,
+      metaMessageId: result.metaMessageId ?? null,
+    });
     this.logger.log(
       `Recordatorio enviado (reminderId=${reminder.id}, appointmentId=${appointment.id}).`,
     );

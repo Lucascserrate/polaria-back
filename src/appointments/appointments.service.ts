@@ -202,6 +202,16 @@ export class AppointmentsService {
       serviceNames: string[];
       totalDuration: number;
       timezone: string;
+      /**
+       * Recordatorio de esta cita, si hay alguno. Permite ver desde la agenda
+       * si el aviso salió y, cuando no, por qué.
+       */
+      reminder: {
+        state: string;
+        scheduledFor: string | null;
+        sentAt: string | null;
+        failureReason: string | null;
+      } | null;
     }>;
     total: number;
     counts: {
@@ -321,6 +331,22 @@ export class AppointmentsService {
         serviceNames,
         totalDuration,
         timezone,
+        // Hoy hay como máximo uno por cita. Se toma el primero en lugar de
+        // asumir que es único: cuando existan varios, esto muestra alguno en
+        // vez de romperse.
+        reminder: (() => {
+          const reminder = (a.reminders ?? [])[0];
+          if (!reminder) return null;
+
+          return {
+            state: reminder.state,
+            scheduledFor: reminder.scheduledFor
+              ? reminder.scheduledFor.toISOString()
+              : null,
+            sentAt: reminder.sentAt ? reminder.sentAt.toISOString() : null,
+            failureReason: reminder.failureReason,
+          };
+        })(),
       };
     });
 
@@ -378,11 +404,20 @@ export class AppointmentsService {
       serviceNames: string[];
       totalDuration: number;
       timezone: string;
+      /**
+       * Recordatorio de esta cita, si hay alguno. Permite ver desde la agenda
+       * si el aviso salió y, cuando no, por qué.
+       */
+      reminder: {
+        state: string;
+        scheduledFor: string | null;
+        sentAt: string | null;
+        failureReason: string | null;
+      } | null;
     }>;
     total: number;
     counts: {
       pending: number;
-      booked: number;
       confirmed: number;
       completed: number;
       cancelled: number;
@@ -403,6 +438,7 @@ export class AppointmentsService {
       relations: {
         client: true,
         tenant: true,
+        reminders: true,
         services: {
           service: true,
           staff: true,
@@ -439,6 +475,22 @@ export class AppointmentsService {
         serviceNames,
         totalDuration,
         timezone,
+        // Hoy hay como máximo uno por cita. Se toma el primero en lugar de
+        // asumir que es único: cuando existan varios, esto muestra alguno en
+        // vez de romperse.
+        reminder: (() => {
+          const reminder = (a.reminders ?? [])[0];
+          if (!reminder) return null;
+
+          return {
+            state: reminder.state,
+            scheduledFor: reminder.scheduledFor
+              ? reminder.scheduledFor.toISOString()
+              : null,
+            sentAt: reminder.sentAt ? reminder.sentAt.toISOString() : null,
+            failureReason: reminder.failureReason,
+          };
+        })(),
       };
     });
 
@@ -448,10 +500,6 @@ export class AppointmentsService {
       .addSelect(
         `SUM(CASE WHEN appointment.status = :pending THEN 1 ELSE 0 END)`,
         'pending',
-      )
-      .addSelect(
-        `SUM(CASE WHEN appointment.status = :booked THEN 1 ELSE 0 END)`,
-        'booked',
       )
       .addSelect(
         `SUM(CASE WHEN appointment.status = :confirmed THEN 1 ELSE 0 END)`,
@@ -470,7 +518,6 @@ export class AppointmentsService {
       .andWhere('appointment.startTime < :endUtc', { endUtc })
       .setParameters({
         pending: AppointmentStatus.PENDING,
-        booked: AppointmentStatus.BOOKED,
         confirmed: AppointmentStatus.CONFIRMED,
         completed: AppointmentStatus.COMPLETED,
         cancelled: AppointmentStatus.CANCELLED,
@@ -478,7 +525,6 @@ export class AppointmentsService {
       .getRawOne<{
         total: string;
         pending: string;
-        booked: string;
         confirmed: string;
         completed: string;
         cancelled: string;
@@ -508,7 +554,6 @@ export class AppointmentsService {
       total: Number(rawCounts?.total ?? items.length),
       counts: {
         pending: Number(rawCounts?.pending ?? 0),
-        booked: Number(rawCounts?.booked ?? 0),
         confirmed: Number(rawCounts?.confirmed ?? 0),
         completed: Number(rawCounts?.completed ?? 0),
         cancelled: Number(rawCounts?.cancelled ?? 0),
@@ -623,7 +668,6 @@ export class AppointmentsService {
       startTime: new Date(slot.startTime),
       endTime: new Date(slot.endTime),
       status: AppointmentStatus.CONFIRMED,
-      reminderSent: false,
     });
 
     const services = await this.serviceRepository.find({
@@ -709,7 +753,6 @@ export class AppointmentsService {
         startTime: input.startTime,
         endTime: input.endTime,
         status: AppointmentStatus.CONFIRMED,
-        reminderSent: false,
       }),
     );
 
@@ -879,7 +922,6 @@ export class AppointmentsService {
       endTime?: Date;
       status?: AppointmentStatus;
       googleEventId?: string;
-      reminderSent?: boolean;
       clientId?: string;
     };
 

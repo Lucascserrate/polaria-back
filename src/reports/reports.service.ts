@@ -30,7 +30,6 @@ const toMoney = (value: number): number => Math.round(value * 100) / 100;
 
 interface StatusCountRow {
   pending: string | null;
-  booked: string | null;
   confirmed: string | null;
   completed: string | null;
   cancelled: string | null;
@@ -156,10 +155,6 @@ export class ReportsService {
           'pending',
         )
         .addSelect(
-          'SUM(CASE WHEN appointment.status = :booked THEN 1 ELSE 0 END)',
-          'booked',
-        )
-        .addSelect(
           'SUM(CASE WHEN appointment.status = :confirmed THEN 1 ELSE 0 END)',
           'confirmed',
         )
@@ -173,7 +168,6 @@ export class ReportsService {
         )
         .setParameters({
           pending: AppointmentStatus.PENDING,
-          booked: AppointmentStatus.BOOKED,
           confirmed: AppointmentStatus.CONFIRMED,
           completed: AppointmentStatus.COMPLETED,
           cancelled: AppointmentStatus.CANCELLED,
@@ -187,7 +181,6 @@ export class ReportsService {
 
     const byStatus: Record<AppointmentStatus, number> = {
       [AppointmentStatus.PENDING]: toNumber(counts?.pending),
-      [AppointmentStatus.BOOKED]: toNumber(counts?.booked),
       [AppointmentStatus.CONFIRMED]: toNumber(counts?.confirmed),
       [AppointmentStatus.COMPLETED]: toNumber(counts?.completed),
       [AppointmentStatus.CANCELLED]: toNumber(counts?.cancelled),

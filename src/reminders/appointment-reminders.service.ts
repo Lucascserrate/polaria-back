@@ -23,7 +23,18 @@ export const REMINDER_SEND_REASONS = {
   TEMPLATE_NOT_APPROVED: 'TEMPLATE_NOT_APPROVED',
   NO_WHATSAPP_CONNECTION: 'NO_WHATSAPP_CONNECTION',
   APPOINTMENT_CHANGED: 'APPOINTMENT_CHANGED',
+  /** El proceso murió mientras hablaba con el canal. */
+  SEND_INTERRUPTED: 'SEND_INTERRUPTED',
 } as const;
+
+/**
+ * Cuánto puede tardar un envío antes de considerarse interrumpido.
+ *
+ * Holgado a propósito: el barrido corre cada 5 minutos y una llamada HTTP sin
+ * timeout puede tardar. Cerrar demasiado pronto un envío que en realidad está
+ * en curso sería marcar como fallido algo que sí llegó.
+ */
+export const SENDING_TIMEOUT_MINUTES = 15;
 
 /**
  * Estado que le corresponde a cada recordatorio.

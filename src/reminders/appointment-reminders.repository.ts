@@ -124,15 +124,18 @@ export class AppointmentRemindersRepository {
    * Toma el recordatorio para enviarlo, si nadie lo tomó antes.
    *
    * Es el punto donde se resuelve la concurrencia: la condición
-   * `state = SCHEDULED` va dentro del `UPDATE`, así que la base decide quién
-   * gana. Devuelve `true` solo al que modificó la fila; cualquier otra ejecución
-   * recibe `false` y no envía nada.
+   * `state = SCHEDULED` va dentro del `UPDATE`, así que el ganador lo elige la
+   * base con su lock de fila y no una comprobación previa en JavaScript.
+   * Devuelve `true` solo al que la modificó.
+   *
+   * Deja la fila en `SENDING` y no en `SENT`: lo único que se sabe en este
+   * punto es que este proceso se hizo cargo, no que el mensaje llegó.
    */
-  async claimForSending(reminderId: string, now: Date): Promise<boolean> {
+  async claimForSending(reminderId: string): Promise<boolean> {
     const result = await this.reminderRepository
       .createQueryBuilder()
       .update(AppointmentReminder)
-      .set({ state: ReminderState.SENT, sentAt: now })
+      .set({ state: ReminderState.SENDING })
       .where('id = :id', { id: reminderId })
       .andWhere('state = :state', { state: ReminderState.SCHEDULED })
       .execute();
@@ -140,14 +143,44 @@ export class AppointmentRemindersRepository {
     return (result.affected ?? 0) === 1;
   }
 
-  async markMetaMessageId(
-    reminderId: string,
-    metaMessageId: string | null,
-  ): Promise<void> {
-    await this.reminderRepository.update(reminderId, { metaMessageId });
+  /** Confirma la entrega. Recién acá el recordatorio queda enviado. */
+  async markSent(params: {
+    reminderId: string;
+    sentAt: Date;
+    metaMessageId: string | null;
+  }): Promise<void> {
+    await this.reminderRepository.update(params.reminderId, {
+      state: ReminderState.SENT,
+      sentAt: params.sentAt,
+      metaMessageId: params.metaMessageId,
+      failureReason: null,
+    });
   }
 
-  /** Devuelve al estado fallido un recordatorio que se había tomado para enviar. */
+  /**
+   * Cierra los envíos que quedaron colgados.
+   *
+   * Una fila en `SENDING` más allá del umbral significa que el proceso murió
+   * entre tomarla y terminar de hablar con Meta. Pasan a `FAILED` y no vuelven a
+   * `SCHEDULED`: no se sabe si el mensaje salió, y ante la duda es mejor un
+   * recordatorio que no llegó y se ve como fallido que uno duplicado.
+   */
+  async failStaleSending(params: {
+    olderThan: Date;
+    reason: string;
+  }): Promise<number> {
+    const result = await this.reminderRepository
+      .createQueryBuilder()
+      .update(AppointmentReminder)
+      .set({ state: ReminderState.FAILED, failureReason: params.reason })
+      .where('state = :state', { state: ReminderState.SENDING })
+      .andWhere('updatedAt <= :olderThan', { olderThan: params.olderThan })
+      .execute();
+
+    return result.affected ?? 0;
+  }
+
+  /** Cierra un envío que el canal rechazó. */
   async markFailed(reminderId: string, failureReason: string): Promise<void> {
     await this.reminderRepository.update(reminderId, {
       state: ReminderState.FAILED,
