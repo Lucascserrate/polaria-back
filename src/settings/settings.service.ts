@@ -672,7 +672,39 @@ export class SettingsService {
       accessToken: systemUserAccessToken,
     });
 
+    await this.startTrialOnFirstConnection(tenantId);
+
     return this.getSettings(tenantId);
+  }
+
+  /**
+   * Arranca la prueba gratuita cuando el negocio conecta WhatsApp.
+   *
+   * Este es el momento y no el registro: recién acá Polaria puede hacer algo por
+   * él. Si la prueba empezara al entrar con Google, alguien que abandona el
+   * onboarding cinco días perdería cinco días sin haber usado el producto.
+   *
+   * `startTrial` es idempotente —la condición `trialStartedAt IS NULL` viaja
+   * dentro del UPDATE—, así que reconectar, cambiar de número o recuperarse de
+   * una caída no reinicia el reloj ni regala días.
+   *
+   * Va después de la transacción y no adentro: un fallo acá deja al negocio
+   * conectado y sin prueba iniciada, que es el estado que **sí** da acceso
+   * (`NOT_STARTED`). Al revés —abortar la conexión porque no se pudo escribir una
+   * fecha— sería cambiar un problema de facturación por uno de producto.
+   */
+  private async startTrialOnFirstConnection(tenantId: string): Promise<void> {
+    try {
+      await this.tenantsService.startTrial(tenantId);
+    } catch (error: unknown) {
+      // En `error` y no en `warn`: nadie lo nota desde afuera, porque el negocio
+      // sigue teniendo acceso, y el log es la única forma de enterarse.
+      this.logger.error(
+        `No se pudo iniciar la prueba gratuita (tenantId=${tenantId}): ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   /**
