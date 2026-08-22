@@ -24,7 +24,9 @@ import { ConversationControlService } from '../conversations/conversation-contro
 import type { Conversation } from '../conversations/entities/conversation.entity';
 import {
   buildHandoffAcknowledgement,
+  buildBookedMenu,
   buildWelcomeMenu,
+  describeUpcomingAppointment,
   decodeMenuAction,
   shouldSendWelcomeMenu,
   WELCOME_MENU_SOURCE,
@@ -390,7 +392,40 @@ export class InboundMessageService {
         conversation,
         clientId,
         to: message.from,
+        /*
+         * "Sacar otro turno" ya es la respuesta a "tenés un turno, ¿qué querés
+         * hacer?". Volver a preguntarlo dejaría al cliente en un círculo.
+         */
+        skipExistingCheck: true,
       });
+      return;
+    }
+
+    if (action === WelcomeMenuAction.MANAGE) {
+      /*
+       * Abre el flujo de acciones sobre turnos que ya existe —el mismo al que
+       * llegan los botones del recordatorio—, así que reagendar y cancelar entran
+       * por un solo camino.
+       */
+      const intervened = await this.offerExistingAppointments({
+        tenantId,
+        credentials,
+        conversation,
+        clientId,
+        to: message.from,
+      });
+
+      // El turno se canceló entre que se mostró el menú y este toque.
+      if (!intervened) {
+        await this.replyAndRecord({
+          tenantId,
+          credentials,
+          conversation,
+          clientId,
+          to: message.from,
+          text: buildAppointmentGoneText(),
+        });
+      }
       return;
     }
 
@@ -440,8 +475,7 @@ export class InboundMessageService {
       return;
     }
 
-    const tenant = await this.tenantsService.findOne(params.tenantId);
-    const menu = buildWelcomeMenu(tenant?.name ?? 'la barbería');
+    const menu = await this.buildEntryMenu(params.tenantId, params.clientId);
 
     const sent = await this.whatsAppSenderService.sendButtons(
       params.credentials,
@@ -806,6 +840,55 @@ export class InboundMessageService {
   }
 
   /**
+   * Con qué se recibe al cliente.
+   *
+   * Si ya tiene un turno, se lo nombra en lugar de volver a presentarse.
+   * Repetir "soy el asistente, ¿en qué puedo ayudarte?" justo después de que
+   * reservó se lee como que el bot se olvidó de lo que acaba de pasar, y lo que
+   * la persona viene a resolver casi siempre es *ese* turno.
+   *
+   * Con varios turnos se nombra el más próximo, que es el que trae a alguien a
+   * escribir; los demás aparecen al elegir "Gestionar mi turno".
+   */
+  private async buildEntryMenu(
+    tenantId: string,
+    clientId: string,
+  ): Promise<{ body: string; options: Array<{ id: string; title: string }> }> {
+    const upcoming = await this.findUpcoming(tenantId, clientId);
+    const next = upcoming[0];
+
+    if (!next) {
+      const tenant = await this.tenantsService.findOne(tenantId);
+      return buildWelcomeMenu(tenant?.name ?? 'la barbería');
+    }
+
+    const summary = toAppointmentSummary(next);
+
+    return buildBookedMenu(
+      describeUpcomingAppointment({
+        startTime: summary.startTime,
+        staffName: summary.staffName,
+        timeZone: await this.resolveTimezone(tenantId),
+      }),
+    );
+  }
+
+  /** Turnos futuros del cliente, del más próximo en adelante. */
+  private findUpcoming(
+    tenantId: string,
+    clientId: string,
+  ): Promise<Appointment[]> {
+    const appointmentsApi = this.appointmentsService as {
+      findUpcomingByClient: (query: {
+        tenantId: string;
+        clientId: string;
+      }) => Promise<Appointment[]>;
+    };
+
+    return appointmentsApi.findUpcomingByClient({ tenantId, clientId });
+  }
+
+  /**
    * Ofrece qué hacer con las citas que el cliente ya tiene.
    *
    * Devuelve si intervino. Con una sola cita se saltea el paso de elegir cuál,
@@ -820,18 +903,7 @@ export class InboundMessageService {
   }): Promise<boolean> {
     const { tenantId, clientId } = params;
 
-    const appointmentsApi = this.appointmentsService as {
-      findUpcomingByClient: (query: {
-        tenantId: string;
-        clientId: string;
-      }) => Promise<Appointment[]>;
-    };
-
-    const upcoming: Appointment[] = await appointmentsApi.findUpcomingByClient({
-      tenantId,
-      clientId,
-    });
-
+    const upcoming = await this.findUpcoming(tenantId, clientId);
     if (upcoming.length === 0) return false;
 
     const timezone = await this.resolveTimezone(tenantId);
