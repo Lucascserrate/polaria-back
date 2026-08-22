@@ -110,6 +110,43 @@ export const resolveWorkingRangesByStaff = (input: {
 };
 
 /**
+ * De una lista de fechas, las que el negocio efectivamente atiende.
+ *
+ * Una fecha entra si **al menos un** profesional del equipo tiene franja ese
+ * día. Cubre los dos motivos por los que un día no sirve: el local cerrado —un
+ * domingo sin horario— y el día en el que nadie del equipo trabaja.
+ *
+ * Existe para no ofrecer días que no llevan a ninguna parte. Elegir "domingo 23"
+ * y recibir "no quedan horarios" no es un error del cálculo: es haber presentado
+ * como opción algo que nunca lo fue.
+ *
+ * No mira la agenda, así que un día abierto pero con todo tomado sigue
+ * apareciendo. Descartarlo obligaría a calcular la disponibilidad real de cada
+ * fecha, que son varias consultas por día; esto resuelve el caso frecuente con
+ * lo que ya está cargado en memoria.
+ */
+export const datesWithCoverage = (input: {
+  dates: string[];
+  timeZone: string;
+  businessHours: WeeklyTimeRange[];
+  staff: Array<{ id: string; usesCustomSchedule: boolean }>;
+  schedulesByStaff: Record<string, WeeklyTimeRange[]>;
+}): string[] =>
+  input.dates.filter((date) => {
+    const rangesByStaff = resolveWorkingRangesByStaff({
+      date,
+      timeZone: input.timeZone,
+      businessHours: input.businessHours,
+      staff: input.staff,
+      schedulesByStaff: input.schedulesByStaff,
+    });
+
+    return input.staff.some(
+      (member) => (rangesByStaff[member.id] ?? []).length > 0,
+    );
+  });
+
+/**
  * Cobertura combinada del equipo, para generar una única grilla de candidatos.
  *
  * Con Julio de 09:00 a 17:00 y Marco de 13:00 a 21:00 la grilla va de 09:00 a

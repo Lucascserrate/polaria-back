@@ -6,6 +6,7 @@ import { AvailabilityCalculator } from '../availability.calculator';
 import { AvailabilityRepository } from '../availability.repository';
 import { addMinutes, makeDateInTimeZone } from '../utils/availability.helpers';
 import {
+  datesWithCoverage,
   resolveWorkingRangesByStaff,
   unionWorkingRanges,
 } from '../utils/working-hours.resolver';
@@ -185,6 +186,60 @@ export class BookingAvailabilityService {
     return this.availabilityRepository.getStaffList(params.tenantId, [
       params.serviceId,
     ]);
+  }
+
+  /**
+   * De una lista de fechas, las que el negocio realmente atiende.
+   *
+   * Sirve para no ofrecer días que no llevan a ninguna parte: elegir "domingo
+   * 23" y recibir "no quedan horarios" para un día en que el local ni abre no es
+   * un error del cálculo, es haber presentado como opción algo que nunca lo fue.
+   *
+   * Son tres consultas para todas las fechas juntas, no tres por fecha: lo que
+   * decide qué día sirve son el horario del negocio y las jornadas del equipo, y
+   * eso se carga una vez y se resuelve en memoria.
+   *
+   * No mira la agenda, así que un día abierto pero con todo tomado sigue
+   * apareciendo. Ese caso ya tiene salida propia en el paso de horarios.
+   */
+  async getServiceableDates(params: {
+    tenantId: string;
+    dates: string[];
+    /** Ausente busca cobertura de cualquiera del equipo. */
+    serviceId?: string;
+    staffId?: string;
+  }): Promise<string[]> {
+    const { tenantId, dates, serviceId, staffId } = params;
+    if (dates.length === 0) return [];
+
+    const tenant = await this.availabilityRepository.getTenant(tenantId);
+    const timeZone = tenant?.timezone;
+    if (!timeZone) {
+      this.logger.warn(`Tenant sin timezone (tenantId=${tenantId}).`);
+      return [];
+    }
+
+    const staffList = await this.availabilityRepository.getStaffList(
+      tenantId,
+      serviceId ? [serviceId] : [],
+      staffId,
+    );
+    if (staffList.length === 0) return [];
+
+    const [businessHours, schedulesByStaff] = await Promise.all([
+      this.availabilityRepository.getBusinessHours(tenantId),
+      this.availabilityRepository.getStaffSchedules(
+        staffList.map((staff) => staff.id),
+      ),
+    ]);
+
+    return datesWithCoverage({
+      dates,
+      timeZone,
+      businessHours,
+      staff: staffList,
+      schedulesByStaff,
+    });
   }
 
   /**

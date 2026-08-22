@@ -658,7 +658,7 @@ export class BookingFlowService {
       kind: 'ASK_DATE',
       options: this.paginate(
         session,
-        this.dateOptions(session, timezone, now),
+        await this.dateOptions(session, timezone, now),
         limits,
       ),
     };
@@ -873,20 +873,39 @@ export class BookingFlowService {
   // Apoyo
   // -------------------------------------------------------------------------
 
-  private dateOptions(
+  /**
+   * Los próximos días que el negocio atiende.
+   *
+   * Se ofrecen solo los días con cobertura real: un domingo cerrado, o un día en
+   * que no trabaja nadie del equipo, no es una opción. Antes se listaban los
+   * catorce días siguientes sin mirar nada, y elegir uno cerrado devolvía "no
+   * quedan horarios" para un día en que el local ni abre.
+   *
+   * El servicio y el profesional ya elegidos acotan la pregunta: si el cliente
+   * pidió a alguien en particular, los días que ese alguien no trabaja tampoco
+   * sirven.
+   */
+  private async dateOptions(
     session: BookingSession,
     timezone: string,
     now: Date,
-  ): BookingOption[] {
+  ): Promise<BookingOption[]> {
     const today = todayIsoDateIn(timezone, now);
-    const options: BookingOption[] = [];
 
-    for (let offset = 1; offset <= BOOKING_DATE_HORIZON_DAYS; offset += 1) {
-      const date = addDaysToIsoDate(today, offset);
-      options.push(this.option(session, date, formatDateLabel(date)));
-    }
+    const horizon = Array.from({ length: BOOKING_DATE_HORIZON_DAYS }, (_, i) =>
+      addDaysToIsoDate(today, i + 1),
+    );
 
-    return options;
+    const dates = await this.bookingAvailabilityService.getServiceableDates({
+      tenantId: session.tenantId,
+      dates: horizon,
+      serviceId: session.selectedServiceId ?? undefined,
+      staffId: session.selectedStaffId ?? undefined,
+    });
+
+    return dates.map((date) =>
+      this.option(session, date, formatDateLabel(date)),
+    );
   }
 
   private loadSlots(session: BookingSession): Promise<BookingSlot[]> {

@@ -123,7 +123,7 @@ export class FlowBookingService {
       services,
       staff: onlyStaffId ? [] : this.staffOptions(staff),
       isStaffEnabled: !onlyStaffId,
-      dates: this.dateOptions(today),
+      dates: await this.dateOptions(session.tenantId, today, serviceId),
       isDateEnabled: true,
       slots: await this.slotOptions(session.tenantId, {
         serviceId,
@@ -176,7 +176,11 @@ export class FlowBookingService {
       services,
       staff: this.staffOptions(staff),
       isStaffEnabled: true,
-      dates: this.dateOptions(todayIsoDateIn(timezone)),
+      dates: await this.dateOptions(
+        session.tenantId,
+        todayIsoDateIn(timezone),
+        serviceId,
+      ),
       isDateEnabled: true,
       slots: await this.slotOptions(session.tenantId, {
         serviceId,
@@ -204,7 +208,7 @@ export class FlowBookingService {
 
     const timezone = await this.resolveTimezone(session.tenantId);
     const today = todayIsoDateIn(timezone);
-    const dates = this.dateOptions(today);
+    const dates = await this.dateOptions(session.tenantId, today, serviceId);
 
     const date = payload.date;
     if (!date || !dates.some((option) => option.id === date)) {
@@ -414,23 +418,41 @@ export class FlowBookingService {
     ];
   }
 
-  private dateOptions(today: string): FlowOption[] {
-    const options: FlowOption[] = [];
+  /**
+   * Los días que el negocio atiende, dentro del horizonte de reserva.
+   *
+   * Solo los que tienen cobertura real: un domingo cerrado, o un día en que no
+   * trabaja nadie del equipo, no se ofrece. Antes se listaban los catorce
+   * siguientes sin mirar nada y elegir uno cerrado devolvía "no quedan horarios"
+   * para un día en que el local ni abre.
+   *
+   * El servicio elegido acota la pregunta: si solo una persona lo hace, valen sus
+   * días.
+   */
+  private async dateOptions(
+    tenantId: string,
+    today: string,
+    serviceId?: string,
+  ): Promise<FlowOption[]> {
+    const horizon = Array.from({ length: BOOKING_DATE_HORIZON_DAYS }, (_, i) =>
+      addDaysToIsoDate(today, i),
+    );
 
-    for (let offset = 0; offset < BOOKING_DATE_HORIZON_DAYS; offset += 1) {
-      const date = addDaysToIsoDate(today, offset);
-      options.push({
-        id: date,
-        title:
-          offset === 0
-            ? 'Hoy'
-            : offset === 1
-              ? 'Mañana'
-              : formatDateLabel(date),
-      });
-    }
+    const dates = await this.bookingAvailabilityService.getServiceableDates({
+      tenantId,
+      dates: horizon,
+      serviceId,
+    });
 
-    return options;
+    return dates.map((date) => ({
+      id: date,
+      title:
+        date === horizon[0]
+          ? 'Hoy'
+          : date === horizon[1]
+            ? 'Mañana'
+            : formatDateLabel(date),
+    }));
   }
 
   private async slotOptions(
@@ -490,7 +512,7 @@ export class FlowBookingService {
       services,
       staff: this.staffOptions(staff),
       isStaffEnabled: staff.length > 1,
-      dates: this.dateOptions(todayIsoDateIn(timezone)),
+      dates: await this.dateOptions(session.tenantId, todayIsoDateIn(timezone)),
       isDateEnabled: true,
       slots: [],
       isSlotEnabled: false,

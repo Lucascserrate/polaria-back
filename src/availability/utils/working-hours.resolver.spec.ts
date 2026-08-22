@@ -1,6 +1,7 @@
 import { makeDateInTimeZone } from './availability.helpers';
 import type { SlotRange } from './availability.types';
 import {
+  datesWithCoverage,
   isWithinWorkingRanges,
   mergeRanges,
   resolveWorkingRanges,
@@ -271,5 +272,99 @@ describe('isWithinWorkingRanges', () => {
     expect(isWithinWorkingRanges(undefined, candidate('10:00', '10:30'))).toBe(
       false,
     );
+  });
+});
+
+describe('datesWithCoverage', () => {
+  /*
+   * Semana de prueba: lunes 16 a domingo 22 de marzo de 2026. El negocio abre de
+   * lunes a sábado, así que el domingo no debería ofrecerse nunca.
+   */
+  const WEEK = [
+    '2026-03-16',
+    '2026-03-17',
+    '2026-03-18',
+    '2026-03-19',
+    '2026-03-20',
+    '2026-03-21',
+    '2026-03-22',
+  ];
+
+  const OPEN_MONDAY_TO_SATURDAY: WeeklyTimeRange[] = [1, 2, 3, 4, 5, 6].map(
+    (dayOfWeek) => weekly('09:00', '19:00', dayOfWeek),
+  );
+
+  const withoutOwnSchedule = [{ id: 'fernando', usesCustomSchedule: false }];
+
+  it('descarta el día en que el negocio está cerrado', () => {
+    // Es el caso que se veía en WhatsApp: elegir "domingo 22" y recibir "no
+    // quedan horarios" para un día en que el local ni abre.
+    expect(
+      datesWithCoverage({
+        dates: WEEK,
+        timeZone: TIME_ZONE,
+        businessHours: OPEN_MONDAY_TO_SATURDAY,
+        staff: withoutOwnSchedule,
+        schedulesByStaff: {},
+      }),
+    ).toEqual(WEEK.slice(0, 6));
+  });
+
+  it('descarta el día en que nadie del equipo trabaja', () => {
+    // El local abre, pero el único profesional no atiende los sábados.
+    expect(
+      datesWithCoverage({
+        dates: WEEK,
+        timeZone: TIME_ZONE,
+        businessHours: OPEN_MONDAY_TO_SATURDAY,
+        staff: [{ id: 'lucas', usesCustomSchedule: true }],
+        schedulesByStaff: {
+          lucas: [1, 2, 3, 4, 5].map((dayOfWeek) =>
+            weekly('09:00', '18:00', dayOfWeek),
+          ),
+        },
+      }),
+    ).toEqual(WEEK.slice(0, 5));
+  });
+
+  it('conserva el día en que trabaja al menos uno', () => {
+    // Lucas no trabaja el sábado pero Fernando sí: el sábado sigue siendo una
+    // opción real.
+    expect(
+      datesWithCoverage({
+        dates: ['2026-03-21'],
+        timeZone: TIME_ZONE,
+        businessHours: OPEN_MONDAY_TO_SATURDAY,
+        staff: [
+          { id: 'lucas', usesCustomSchedule: true },
+          { id: 'fernando', usesCustomSchedule: false },
+        ],
+        schedulesByStaff: { lucas: [] },
+      }),
+    ).toEqual(['2026-03-21']);
+  });
+
+  it('sin horario del negocio no queda ninguna fecha', () => {
+    expect(
+      datesWithCoverage({
+        dates: WEEK,
+        timeZone: TIME_ZONE,
+        businessHours: [],
+        staff: withoutOwnSchedule,
+        schedulesByStaff: {},
+      }),
+    ).toEqual([]);
+  });
+
+  it('sin equipo no queda ninguna fecha', () => {
+    expect(
+      datesWithCoverage({
+        dates: WEEK,
+        timeZone: TIME_ZONE,
+        businessHours: OPEN_MONDAY_TO_SATURDAY,
+        staff: [],
+        schedulesByStaff: {},
+      }),
+    ).toEqual([]);
   });
 });
