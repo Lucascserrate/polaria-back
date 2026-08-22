@@ -118,6 +118,25 @@ export class AuthService {
     }
   }
 
+  /**
+   * Quién entró: el nombre del negocio y la cuenta de Google.
+   *
+   * Existe aparte de `validateTenant`, que devuelve el tenant entero —token de
+   * WhatsApp incluido—. Para saludar en el menú alcanzan dos campos, y son los
+   * únicos que se van a pedir en cada pantalla del panel.
+   */
+  async getAccount(tenantId: string) {
+    const tenant = await this.tenantsService.findOne(tenantId);
+    if (!tenant) {
+      throw new HttpException(
+        TenantError.NOT_AUTHENTICATED,
+        HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    return { name: tenant.name, email: tenant.email ?? null };
+  }
+
   async validateTenant(payload: { sub: string }) {
     const tenant = await this.tenantsService.findOne(payload.sub);
     if (!tenant) {

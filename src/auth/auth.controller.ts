@@ -6,6 +6,7 @@ import {
   Post,
   Req,
   Res,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
@@ -63,6 +64,16 @@ export class AuthController {
       `validateToken called accessCookiePresent=${Boolean(req.cookies?.accessToken)} refreshCookiePresent=${Boolean(req.cookies?.refreshToken)} origin=${headerValue(req.headers.origin)} host=${headerValue(req.headers.host)}`,
     );
     return this.authService.validateTenant(req.user);
+  }
+
+  @Get('account')
+  @UseGuards(AuthGuard('jwt'))
+  getAccount(@Req() req: JwtAuthRequest) {
+    const tenantId = req.user?.sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.authService.getAccount(tenantId);
   }
 
   @Post('logout')
