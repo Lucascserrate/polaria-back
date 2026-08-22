@@ -17,6 +17,7 @@ import { ReminderTemplateStatus } from '../whatsapp/reminder-template';
 import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
 import { normalizeReminderOffsets } from '../reminders/reminder-offsets';
 import { buildReminderPreview } from '../reminders/reminder-message';
+import { REMINDER_TEMPLATE_BUTTONS } from '../whatsapp/reminder-template';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { DataSource } from 'typeorm';
 import axios, { AxiosError } from 'axios';
@@ -94,6 +95,14 @@ type SettingsResponse = {
      * el negocio estaría aprobando un texto que no es el que sale.
      */
     previewText: string;
+    /**
+     * Botones de la plantilla, en orden.
+     *
+     * Van en la vista previa porque son parte de lo que ve el cliente: desde ahí
+     * reagenda o cancela sin escribir nada. Salen de la plantilla aprobada, igual
+     * que el texto.
+     */
+    previewButtons: string[];
   };
   whatsappConnection: {
     /**
@@ -158,6 +167,7 @@ export class SettingsService {
       reminders: {
         offsets: normalizeReminderOffsets(tenant.reminderOffsets),
         previewText: buildReminderPreview(tenant.name),
+        previewButtons: [...REMINDER_TEMPLATE_BUTTONS],
       },
       whatsappConnection: {
         /**
