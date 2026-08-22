@@ -25,4 +25,12 @@ export class BookingSlotsQueryDto {
   @IsOptional()
   @IsUUID()
   staffId?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Cita que se está editando: sus minutos no cuentan como ocupados.',
+  })
+  @IsOptional()
+  @IsUUID()
+  excludeAppointmentId?: string;
 }

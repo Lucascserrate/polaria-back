@@ -155,11 +155,20 @@ export class AvailabilityRepository {
     });
   }
 
+  /**
+   * Lo que cada profesional ya tiene ocupado ese día.
+   *
+   * @param excludeAppointmentId Cita que no cuenta como ocupada. Es lo que
+   * necesita editar una reserva: sus propios minutos no pueden bloquear su
+   * horario nuevo, o mover una cita quince minutos daría "ocupado" contra sí
+   * misma. Cualquier otro consumidor lo omite y nada cambia.
+   */
   async getAppointmentsByStaff(
     tenantId: string,
     desiredDate: string,
     timeZone: string,
     staffIds: string[],
+    excludeAppointmentId?: string,
   ): Promise<Record<string, Array<{ startTime: Date; endTime: Date }>>> {
     const uniqueStaffIds = Array.from(new Set(staffIds)).filter(Boolean);
     if (!uniqueStaffIds.length) return {};
@@ -168,7 +177,7 @@ export class AvailabilityRepository {
     const nextDayStart = addMinutes(dayStart, 24 * 60);
     const dayEnd = new Date(nextDayStart.getTime() - 1);
 
-    const segments = await this.appointmentServiceRepository
+    let query = this.appointmentServiceRepository
       .createQueryBuilder('as')
       .innerJoin('as.appointment', 'a')
       .where('a.tenantId = :tenantId', { tenantId })
@@ -180,8 +189,15 @@ export class AvailabilityRepository {
         dayStart,
         dayEnd,
       })
-      .orderBy('as.startTime', 'ASC')
-      .getMany();
+      .orderBy('as.startTime', 'ASC');
+
+    if (excludeAppointmentId) {
+      query = query.andWhere('as.appointmentId != :excludeAppointmentId', {
+        excludeAppointmentId,
+      });
+    }
+
+    const segments = await query.getMany();
 
     const grouped: Record<
       string,

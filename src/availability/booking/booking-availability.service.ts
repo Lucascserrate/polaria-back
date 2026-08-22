@@ -32,6 +32,14 @@ export type BookingSlotsQuery = {
   serviceId: string;
   /** Profesional elegido. Omitirlo equivale a "Sin preferencia". */
   staffId?: string;
+  /**
+   * Cita que no cuenta como ocupada.
+   *
+   * Es para editar una reserva: al preguntar qué horarios hay para *esta* cita,
+   * sus propios minutos no pueden contar como ocupados. Sin esto, mover una cita
+   * de 09:00 a 09:15 daría "ocupado" contra sí misma, que es el caso más común.
+   */
+  excludeAppointmentId?: string;
 };
 
 export type SlotConfirmation =
@@ -238,7 +246,7 @@ export class BookingAvailabilityService {
     /** Ausente en el registro manual: ahí no hay hora mínima que respetar. */
     minStartTime?: Date;
   } | null> {
-    const { tenantId, date, serviceId, staffId } = query;
+    const { tenantId, date, serviceId, staffId, excludeAppointmentId } = query;
 
     const tenant = await this.availabilityRepository.getTenant(tenantId);
     const timeZone = tenant?.timezone;
@@ -288,6 +296,7 @@ export class BookingAvailabilityService {
         date,
         timeZone,
         staffIds,
+        excludeAppointmentId,
       );
 
     const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
