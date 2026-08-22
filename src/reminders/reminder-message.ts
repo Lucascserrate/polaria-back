@@ -2,7 +2,10 @@ import {
   AppointmentAction,
   encodeAppointmentAction,
 } from '../booking-flow/appointment-actions';
-import { REMINDER_TEMPLATE_BUTTONS } from '../whatsapp/reminder-template';
+import {
+  REMINDER_TEMPLATE_BODY,
+  REMINDER_TEMPLATE_BUTTONS,
+} from '../whatsapp/reminder-template';
 
 /**
  * Contenido del recordatorio: las variables de la plantilla y los payloads de
@@ -85,4 +88,35 @@ export function buildReminderMessage(
       encodeAppointmentAction(actionByLabel[label], input.appointmentId),
     ),
   };
+}
+
+/** Datos de ejemplo para la vista previa. No sale nada real con ellos. */
+const PREVIEW_EXAMPLE = {
+  clientName: 'Lucas',
+  serviceName: 'Corte',
+  professionalName: 'Diego',
+  appointmentDateTime: 'mañana a las 17:00',
+};
+
+/**
+ * El mensaje tal como lo va a recibir el cliente, con datos de ejemplo.
+ *
+ * Rellena la **misma** plantilla que usa el envío real, en el mismo orden de
+ * variables. Es la única forma de que la vista previa no pueda mentir: si el
+ * panel escribiera el texto por su cuenta, cambiar la plantilla dejaría al
+ * negocio aprobando un mensaje que ya no es el que sale.
+ */
+export function buildReminderPreview(businessName: string): string {
+  const values = [
+    PREVIEW_EXAMPLE.clientName,
+    businessName?.trim() || 'tu negocio',
+    PREVIEW_EXAMPLE.serviceName,
+    PREVIEW_EXAMPLE.professionalName,
+    PREVIEW_EXAMPLE.appointmentDateTime,
+  ];
+
+  return REMINDER_TEMPLATE_BODY.replace(
+    /{{(d+)}}/g,
+    (match, index: string) => values[Number(index) - 1] ?? match,
+  );
 }

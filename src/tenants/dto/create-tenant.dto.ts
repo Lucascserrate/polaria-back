@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
+  IsArray,
   IsBoolean,
   IsInt,
   IsLatitude,
@@ -108,13 +109,9 @@ export class CreateTenantDto {
   @IsBoolean()
   aiEnabled?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ type: [Number] })
   @IsOptional()
-  @IsBoolean()
-  remindersEnabled?: boolean;
-
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsInt()
-  reminderLeadMinutes?: number;
+  @IsArray()
+  @IsInt({ each: true })
+  reminderOffsets?: number[];
 }

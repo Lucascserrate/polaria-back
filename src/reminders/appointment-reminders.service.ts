@@ -6,6 +6,7 @@ import { TenantsService } from '../tenants/tenants.service';
 import { canSendReminders } from '../whatsapp/reminder-template';
 import { AppointmentRemindersRepository } from './appointment-reminders.repository';
 import type { AppointmentReminder } from './entities/appointment-reminder.entity';
+import { normalizeReminderOffsets } from './reminder-offsets';
 import {
   REMINDER_CHANNEL_WHATSAPP,
   REMINDER_REASONS,
@@ -14,6 +15,10 @@ import {
   resolveReminderTarget,
   type ReminderTarget,
 } from './appointment-reminders.rules';
+
+/** Misma clave que el índice único de la tabla. */
+const reminderKey = (appointmentId: string, offsetMinutes: number) =>
+  `${appointmentId}:${offsetMinutes}`;
 
 /** Hasta cuándo mirar hacia adelante al reconciliar. */
 const RECONCILE_HORIZON_MINUTES = 3 * 24 * 60;
@@ -79,30 +84,70 @@ export class AppointmentRemindersService {
       appointments.map((appointment) => appointment.id),
       REMINDER_CHANNEL_WHATSAPP,
     );
-    const storedByAppointment = new Map(
-      existing.map((reminder) => [reminder.appointmentId, reminder]),
+
+    /**
+     * Lo guardado, indexado por cita **y** anticipación.
+     *
+     * Antes alcanzaba con la cita porque había un recordatorio por cita. Con
+     * varios, la clave tiene que ser la misma que la del índice único de la
+     * tabla, o el de 24 horas y el de 1 se pisarían entre sí.
+     */
+    const storedByKey = new Map(
+      existing.map((reminder) => [
+        reminderKey(reminder.appointmentId, reminder.offsetMinutes),
+        reminder,
+      ]),
     );
 
     for (const appointment of appointments) {
       const tenant = await this.loadTenant(appointment.tenantId, tenantCache);
       if (!tenant) continue;
 
-      const stored = storedByAppointment.get(appointment.id) ?? null;
-      const target = this.targetFor({ appointment, tenant, now });
-      const action = resolveReminderAction(target, stored);
+      const offsets = normalizeReminderOffsets(tenant.reminderOffsets);
 
-      if (action.kind === 'NOOP') continue;
+      for (const offsetMinutes of offsets) {
+        const stored =
+          storedByKey.get(reminderKey(appointment.id, offsetMinutes)) ?? null;
+        const target = this.targetFor({ appointment, offsetMinutes, now });
+        const action = resolveReminderAction(target, stored);
 
-      await this.repository.upsert({
-        appointmentId: appointment.id,
-        tenantId: appointment.tenantId,
-        channel: REMINDER_CHANNEL_WHATSAPP,
-        offsetMinutes: tenant.reminderLeadMinutes,
-        scheduledFor: action.scheduledFor,
-        state: action.state,
-        failureReason: action.failureReason,
-      });
-      updated += 1;
+        if (action.kind === 'NOOP') continue;
+
+        await this.repository.upsert({
+          appointmentId: appointment.id,
+          tenantId: appointment.tenantId,
+          channel: REMINDER_CHANNEL_WHATSAPP,
+          offsetMinutes,
+          scheduledFor: action.scheduledFor,
+          state: action.state,
+          failureReason: action.failureReason,
+        });
+        updated += 1;
+      }
+
+      /*
+       * Filas de anticipaciones que ya no están configuradas.
+       *
+       * El bucle de arriba solo mira lo que el negocio quiere hoy, así que no
+       * puede enterarse de lo que dejó de querer. Sin esto, apagar el aviso de 1
+       * hora dejaría los ya programados esperando su turno y saldrían igual.
+       *
+       * Cubre también apagar todos: con la lista vacía el bucle de arriba no
+       * itera y este cancela lo que hubiera quedado.
+       */
+      for (const reminder of existing) {
+        if (reminder.appointmentId !== appointment.id) continue;
+        if (offsets.includes(reminder.offsetMinutes)) continue;
+        if (reminder.state !== ReminderState.SCHEDULED) continue;
+
+        await this.repository.updateState({
+          reminderId: reminder.id,
+          state: ReminderState.CANCELLED,
+          scheduledFor: null,
+          failureReason: REMINDER_REASONS.OFFSET_NOT_CONFIGURED,
+        });
+        updated += 1;
+      }
     }
 
     // Las citas que dejaron de estar activas no aparecen en la consulta de
@@ -141,7 +186,15 @@ export class AppointmentRemindersService {
       return REMINDER_SEND_REASONS.APPOINTMENT_CHANGED;
     }
 
-    const target = this.targetFor({ appointment, tenant, now });
+    // La anticipación sale de la fila y no de la configuración actual: si el
+    // negocio cambió de opinión, esta fila ya fue cancelada por la
+    // reconciliación. Leer la configuración acá descartaría un envío legítimo
+    // por un cambio que todavía no se reconcilió.
+    const target = this.targetFor({
+      appointment,
+      offsetMinutes: reminder.offsetMinutes,
+      now,
+    });
 
     // Lo que corresponde ahora tiene que seguir siendo "avisar", y en el mismo
     // momento para el que se programó. Si la cita se movió, el momento cambia y
@@ -173,13 +226,13 @@ export class AppointmentRemindersService {
    */
   private targetFor(params: {
     appointment: Appointment;
-    tenant: Tenant;
+    offsetMinutes: number;
     now: Date;
   }): ReminderTarget {
-    const { appointment, tenant, now } = params;
+    const { appointment, offsetMinutes, now } = params;
 
     const scheduledFor = new Date(
-      appointment.startTime.getTime() - tenant.reminderLeadMinutes * 60_000,
+      appointment.startTime.getTime() - offsetMinutes * 60_000,
     );
 
     return resolveReminderTarget({
@@ -188,10 +241,7 @@ export class AppointmentRemindersService {
         startTime: appointment.startTime,
         clientPhone: appointment.client?.phone ?? null,
       },
-      tenant: {
-        remindersEnabled: tenant.remindersEnabled,
-        reminderLeadMinutes: tenant.reminderLeadMinutes,
-      },
+      offsetMinutes,
       // Se evalúa contra el momento programado o contra ahora, el que sea más
       // temprano: si no, un recordatorio vencido se descartaría por "tarde" en
       // el mismo instante en que corresponde enviarlo.

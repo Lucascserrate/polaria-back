@@ -67,8 +67,13 @@ const FROZEN_REMINDER_STATES: readonly ReminderState[] = [
 
 /** Por qué no hay recordatorio. Se guarda para poder explicarlo. */
 export const REMINDER_REASONS = {
-  /** El negocio los tiene apagados. */
-  DISABLED: 'REMINDERS_DISABLED',
+  /**
+   * Esta anticipación ya no está configurada.
+   *
+   * Cubre los dos casos que llevan al mismo lugar: el negocio apagó todos los
+   * avisos, o apagó justo el de esta anticipación y dejó otro encendido.
+   */
+  OFFSET_NOT_CONFIGURED: 'OFFSET_NOT_CONFIGURED',
   /** La cita se canceló o ya se atendió. */
   APPOINTMENT_INACTIVE: 'APPOINTMENT_INACTIVE',
   /** El momento de avisar ya pasó, así que no hay nada que programar. */
@@ -93,10 +98,14 @@ export type ReminderSnapshot = {
     startTime: Date;
     clientPhone: string | null;
   };
-  tenant: {
-    remindersEnabled: boolean;
-    reminderLeadMinutes: number;
-  };
+  /**
+   * Anticipación de **este** recordatorio, en minutos.
+   *
+   * Antes venía del negocio, cuando había uno solo. Ahora el llamador itera las
+   * anticipaciones configuradas y pregunta por cada una: la regla es la misma
+   * para el aviso de 24 horas y para el de 1, y lo único que cambia es el número.
+   */
+  offsetMinutes: number;
   now: Date;
 };
 
@@ -114,11 +123,7 @@ export type ReminderSnapshot = {
  * el mensaje.
  */
 export function resolveReminderTarget(input: ReminderSnapshot): ReminderTarget {
-  const { appointment, tenant, now } = input;
-
-  if (!tenant.remindersEnabled) {
-    return { kind: 'NOT_NEEDED', reason: REMINDER_REASONS.DISABLED };
-  }
+  const { appointment, offsetMinutes, now } = input;
 
   // Una cita cancelada o ya atendida no ocupa agenda y no se recuerda.
   if (!blocksAgenda(appointment.status)) {
@@ -128,12 +133,12 @@ export function resolveReminderTarget(input: ReminderSnapshot): ReminderTarget {
     };
   }
 
-  if (tenant.reminderLeadMinutes <= 0) {
+  if (offsetMinutes <= 0) {
     return { kind: 'NOT_NEEDED', reason: REMINDER_REASONS.INVALID_LEAD };
   }
 
   const scheduledFor = new Date(
-    appointment.startTime.getTime() - tenant.reminderLeadMinutes * 60_000,
+    appointment.startTime.getTime() - offsetMinutes * 60_000,
   );
 
   /*
@@ -227,4 +232,45 @@ function toDesiredRow(target: ReminderTarget): {
         failureReason: target.reason,
       };
   }
+}
+
+/**
+ * Cuál de los recordatorios de una cita mostrar en la agenda.
+ *
+ * Con dos avisos por cita hay que elegir uno, y lo útil es **el próximo
+ * pendiente**: si el de 24 horas ya salió y el de 1 hora espera, lo que le
+ * importa al negocio es el que falta. Si no queda ninguno pendiente, el último
+ * enviado dice que el cliente ya fue avisado. Y si tampoco hubo envíos, se
+ * muestra cualquiera de los que no salieron para poder explicar por qué.
+ *
+ * Puro y con la lista completa como entrada: la decisión no depende del orden en
+ * que la base devuelva las filas.
+ */
+export function pickReminderToShow<
+  T extends {
+    state: ReminderState;
+    scheduledFor: Date | null;
+    sentAt: Date | null;
+  },
+>(reminders: T[]): T | null {
+  if (reminders.length === 0) return null;
+
+  const pending = reminders
+    .filter(
+      (reminder) =>
+        reminder.state === ReminderState.SCHEDULED ||
+        reminder.state === ReminderState.SENDING,
+    )
+    .sort(
+      (a, b) =>
+        (a.scheduledFor?.getTime() ?? 0) - (b.scheduledFor?.getTime() ?? 0),
+    );
+
+  if (pending.length > 0) return pending[0];
+
+  const sent = reminders
+    .filter((reminder) => reminder.state === ReminderState.SENT)
+    .sort((a, b) => (b.sentAt?.getTime() ?? 0) - (a.sentAt?.getTime() ?? 0));
+
+  return sent[0] ?? reminders[0];
 }

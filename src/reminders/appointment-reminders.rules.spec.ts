@@ -2,6 +2,7 @@ import { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import {
   REMINDER_REASONS,
   ReminderState,
+  pickReminderToShow,
   resolveReminderAction,
   resolveReminderTarget,
   type ReminderSnapshot,
@@ -17,8 +18,7 @@ const snapshot = (
     status?: AppointmentStatus;
     startTime?: Date;
     clientPhone?: string | null;
-    remindersEnabled?: boolean;
-    reminderLeadMinutes?: number;
+    offsetMinutes?: number;
     now?: Date;
   } = {},
 ): ReminderSnapshot => ({
@@ -31,10 +31,7 @@ const snapshot = (
         ? '+59170000000'
         : overrides.clientPhone,
   },
-  tenant: {
-    remindersEnabled: overrides.remindersEnabled ?? true,
-    reminderLeadMinutes: overrides.reminderLeadMinutes ?? 1440,
-  },
+  offsetMinutes: overrides.offsetMinutes ?? 1440,
   now: overrides.now ?? NOW,
 });
 
@@ -47,15 +44,6 @@ describe('resolveReminderTarget', () => {
     expect(target).toEqual({
       kind: 'SCHEDULE',
       scheduledFor: new Date('2026-08-21T16:00:00.000Z'),
-    });
-  });
-
-  it('no programa nada con los recordatorios apagados', () => {
-    expect(
-      resolveReminderTarget(snapshot({ remindersEnabled: false })),
-    ).toEqual({
-      kind: 'NOT_NEEDED',
-      reason: REMINDER_REASONS.DISABLED,
     });
   });
 
@@ -132,7 +120,7 @@ describe('resolveReminderTarget', () => {
   it('respeta anticipaciones cortas', () => {
     const target = resolveReminderTarget(
       snapshot({
-        reminderLeadMinutes: 60,
+        offsetMinutes: 60,
         startTime: new Date('2026-08-20T18:00:00.000Z'),
       }),
     );
@@ -278,5 +266,71 @@ describe('resolveReminderAction', () => {
         { state: ReminderState.SKIPPED, scheduledFor: null },
       ),
     ).toEqual({ kind: 'NOOP' });
+  });
+});
+
+describe('pickReminderToShow', () => {
+  const reminder = (
+    state: ReminderState,
+    overrides: { scheduledFor?: string; sentAt?: string } = {},
+  ) => ({
+    state,
+    scheduledFor: overrides.scheduledFor
+      ? new Date(overrides.scheduledFor)
+      : null,
+    sentAt: overrides.sentAt ? new Date(overrides.sentAt) : null,
+  });
+
+  it('sin recordatorios no hay nada que mostrar', () => {
+    expect(pickReminderToShow([])).toBeNull();
+  });
+
+  it('con los dos pendientes muestra el de 24 h, que es el próximo', () => {
+    const lejano = reminder(ReminderState.SCHEDULED, {
+      scheduledFor: '2026-08-21T16:00:00.000Z',
+    });
+    const cercano = reminder(ReminderState.SCHEDULED, {
+      scheduledFor: '2026-08-22T15:00:00.000Z',
+    });
+
+    // El orden de entrada no decide: llega el cercano primero y gana el lejano.
+    expect(pickReminderToShow([cercano, lejano])).toBe(lejano);
+  });
+
+  it('con el de 24 h enviado muestra el de 1 h, que es el que falta', () => {
+    const enviado = reminder(ReminderState.SENT, {
+      sentAt: '2026-08-21T16:00:00.000Z',
+    });
+    const pendiente = reminder(ReminderState.SCHEDULED, {
+      scheduledFor: '2026-08-22T15:00:00.000Z',
+    });
+
+    expect(pickReminderToShow([enviado, pendiente])).toBe(pendiente);
+  });
+
+  it('un envío en curso cuenta como pendiente', () => {
+    const enviando = reminder(ReminderState.SENDING);
+    const enviado = reminder(ReminderState.SENT, {
+      sentAt: '2026-08-21T16:00:00.000Z',
+    });
+
+    expect(pickReminderToShow([enviado, enviando])).toBe(enviando);
+  });
+
+  it('con todo enviado muestra el último, que es el aviso más reciente', () => {
+    const primero = reminder(ReminderState.SENT, {
+      sentAt: '2026-08-21T16:00:00.000Z',
+    });
+    const ultimo = reminder(ReminderState.SENT, {
+      sentAt: '2026-08-22T15:00:00.000Z',
+    });
+
+    expect(pickReminderToShow([primero, ultimo])).toBe(ultimo);
+  });
+
+  it('sin pendientes ni enviados muestra uno para poder explicar por qué', () => {
+    const salteado = reminder(ReminderState.SKIPPED);
+
+    expect(pickReminderToShow([salteado])).toBe(salteado);
   });
 });

@@ -15,6 +15,8 @@ import { BookingSessionService } from '../booking-flow/booking-session.service';
 import { WhatsAppTemplateService } from '../whatsapp/whatsapp-template.service';
 import { ReminderTemplateStatus } from '../whatsapp/reminder-template';
 import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
+import { normalizeReminderOffsets } from '../reminders/reminder-offsets';
+import { buildReminderPreview } from '../reminders/reminder-message';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { DataSource } from 'typeorm';
 import axios, { AxiosError } from 'axios';
@@ -81,8 +83,17 @@ type SettingsResponse = {
    * pregunta, y esa vive en `whatsappConnection.reminderTemplateStatus`.
    */
   reminders: {
-    enabled: boolean;
-    leadMinutes: number;
+    /** Anticipaciones activas, en minutos, de la más lejana a la más cercana. */
+    offsets: number[];
+    /**
+     * El mensaje tal como lo va a recibir el cliente, con datos de ejemplo.
+     *
+     * Lo arma el backend con la **misma** plantilla y el mismo orden de
+     * variables que usa el envío real. Si el panel lo escribiera por su cuenta,
+     * la vista previa y el mensaje podrían divergir sin que nadie se entere, y
+     * el negocio estaría aprobando un texto que no es el que sale.
+     */
+    previewText: string;
   };
   whatsappConnection: {
     /**
@@ -145,8 +156,8 @@ export class SettingsService {
       businessHours,
       aiEnabled: tenant.aiEnabled,
       reminders: {
-        enabled: tenant.remindersEnabled,
-        leadMinutes: tenant.reminderLeadMinutes,
+        offsets: normalizeReminderOffsets(tenant.reminderOffsets),
+        previewText: buildReminderPreview(tenant.name),
       },
       whatsappConnection: {
         /**
@@ -230,14 +241,11 @@ export class SettingsService {
       });
     }
 
-    if (
-      typeof dto.remindersEnabled === 'boolean' ||
-      typeof dto.reminderLeadMinutes === 'number'
-    ) {
+    if (dto.reminderOffsets) {
       await this.tenantsService.update(tenantId, {
-        remindersEnabled: dto.remindersEnabled ?? tenant.remindersEnabled,
-        reminderLeadMinutes:
-          dto.reminderLeadMinutes ?? tenant.reminderLeadMinutes,
+        // Se normaliza antes de guardar para que la columna no acumule
+        // repetidos ni desorden: lo que se lee es lo que se escribió.
+        reminderOffsets: normalizeReminderOffsets(dto.reminderOffsets),
       });
     }
 

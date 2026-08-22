@@ -10,6 +10,7 @@ import {
   SubscriptionStatus,
   trialEndsAt,
 } from '../subscriptions/subscription.rules';
+import { DEFAULT_REMINDER_OFFSETS } from '../reminders/reminder-offsets';
 
 /**
  * Zona horaria con la que nace un negocio creado desde el registro.
@@ -93,7 +94,14 @@ export class TenantsService {
   }
 
   create(createTenantDto: CreateTenantDto): Promise<Tenant> {
-    const tenant = this.tenantRepository.create(createTenantDto);
+    const tenant = this.tenantRepository.create({
+      ...createTenantDto,
+      // Un negocio nuevo arranca con el aviso del día anterior. Va acá y no como
+      // default de la columna porque MySQL no admite un default literal en JSON,
+      // y así los dos caminos de alta —registro y soporte— lo comparten.
+      reminderOffsets:
+        createTenantDto.reminderOffsets ?? DEFAULT_REMINDER_OFFSETS,
+    });
     return this.tenantRepository.save(tenant);
   }
 

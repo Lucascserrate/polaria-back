@@ -12,9 +12,7 @@ import {
 import { Type } from 'class-transformer';
 import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
 import { BUSINESS_TYPES } from '../../tenants/business-type';
-
-/** Anticipaciones ofrecidas: 1, 3, 6, 12 y 24 horas, en minutos. */
-export const REMINDER_LEAD_OPTIONS = [60, 180, 360, 720, 1440];
+import { SUPPORTED_REMINDER_OFFSETS } from '../../reminders/reminder-offsets';
 
 class LocationDto {
   @IsLatitude()
@@ -91,21 +89,18 @@ export class UpdateSettingsDto {
   @Type(() => LocationDto)
   location?: LocationDto | null;
 
-  @IsOptional()
-  @IsBoolean()
-  remindersEnabled?: boolean;
-
   /**
-   * Anticipación en minutos, restringida a las opciones que ofrece el panel.
+   * Con cuánta anticipación avisar cada cita, en minutos.
    *
-   * La lista cerrada no es una limitación arbitraria: un valor libre habilitaría
-   * "2 minutos antes", que produce un aviso inútil, y valores raros que después
-   * hay que soportar para siempre.
+   * Una lista vacía apaga los recordatorios: es una configuración válida, no un
+   * campo sin completar. Los valores están restringidos porque uno libre
+   * habilitaría "2 minutos antes", que produce un aviso inútil.
    */
   @IsOptional()
-  @IsInt()
-  @IsIn(REMINDER_LEAD_OPTIONS)
-  reminderLeadMinutes?: number;
+  @IsArray()
+  @IsInt({ each: true })
+  @IsIn(SUPPORTED_REMINDER_OFFSETS, { each: true })
+  reminderOffsets?: number[];
 
   @IsOptional()
   @ValidateNested()

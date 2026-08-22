@@ -18,6 +18,7 @@ import { AppointmentService as AppointmentServiceEntity } from './entities/appoi
 import { Service } from '../services/entities/service.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { pickReminderToShow } from '../reminders/appointment-reminders.rules';
 import {
   isDuplicateEntryError,
   SlotAlreadyTakenError,
@@ -331,11 +332,10 @@ export class AppointmentsService {
         serviceNames,
         totalDuration,
         timezone,
-        // Hoy hay como máximo uno por cita. Se toma el primero en lugar de
-        // asumir que es único: cuando existan varios, esto muestra alguno en
-        // vez de romperse.
+        // Con varios avisos por cita se muestra el próximo pendiente; ver
+        // `pickReminderToShow`.
         reminder: (() => {
-          const reminder = (a.reminders ?? [])[0];
+          const reminder = pickReminderToShow(a.reminders ?? []);
           if (!reminder) return null;
 
           return {

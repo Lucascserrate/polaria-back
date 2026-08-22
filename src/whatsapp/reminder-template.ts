@@ -47,7 +47,15 @@ export const REMINDER_TEMPLATE_VARIABLES = [
   'appointmentDateTime',
 ] as const;
 
-const REMINDER_TEMPLATE_BODY = [
+/**
+ * Cuerpo aprobado por Meta.
+ *
+ * Se exporta para que la vista previa del panel salga de acá y no de una
+ * copia: el negocio tiene que ver exactamente lo que va a recibir su cliente.
+ * Cambiar este texto significa una plantilla nueva, con otro nombre y otra
+ * aprobación, y reaprovisionar cada WABA.
+ */
+export const REMINDER_TEMPLATE_BODY = [
   'Hola {{1}} 👋',
   '',
   'Te recordamos tu cita en {{2}}.',

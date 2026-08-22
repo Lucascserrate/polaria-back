@@ -119,23 +119,19 @@ export class Tenant {
   whatsappUnavailableReason!: string | null;
 
   /**
-   * Recordatorio automático antes de cada cita.
+   * Con cuánta anticipación se avisa cada cita, en minutos.
    *
-   * Encendido por defecto. El canal actual es WhatsApp, pero el nombre no lo
-   * menciona a propósito: la capacidad es del negocio, no del canal, y cuando
-   * haya correo o SMS esta misma bandera los gobierna.
-   */
-  @Column({ default: true })
-  remindersEnabled!: boolean;
-
-  /**
-   * Cuánto antes de la cita se avisa, en minutos.
+   * Es una lista porque un negocio puede querer el aviso del día anterior **y**
+   * el de un rato antes: son dos recordatorios de la misma cita, no un ajuste de
+   * uno solo. Una lista vacía significa que están apagados, así que no hay un
+   * booleano aparte que pueda contradecirla.
    *
-   * En minutos y no en horas para no migrar la columna el día que alguien
-   * quiera avisar 45 minutos antes.
+   * En minutos y no en horas para no migrar el día que alguien quiera avisar 45
+   * minutos antes. Se lee siempre con `normalizeReminderOffsets`: la columna es
+   * JSON y su contenido no lo garantiza el esquema.
    */
-  @Column({ type: 'int', default: 1440 })
-  reminderLeadMinutes!: number;
+  @Column({ type: 'json', nullable: true })
+  reminderOffsets?: number[] | null;
 
   /**
    * Plantilla de recordatorios aprobada en la WABA de este negocio.
