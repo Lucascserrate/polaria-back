@@ -23,6 +23,16 @@ import { SubscriptionStatus } from '../../subscriptions/subscription.rules';
  * Nulable a propósito: los tenants que crea soporte todavía no tienen cuenta
  * asociada, y MySQL admite varios NULL bajo un índice único.
  */
+/**
+ * Convierte a número lo que MySQL devuelve como cadena para las columnas
+ * `decimal`. `null` se conserva: no tener ubicación no es la coordenada 0,0.
+ */
+const decimalTransformer = {
+  to: (value?: number | null) => value ?? null,
+  from: (value?: string | null) =>
+    value === null || value === undefined ? null : Number(value),
+};
+
 @Index(['googleId'], { unique: true })
 @Index(['whatsappPhoneNumber'], { unique: true })
 @Entity('tenants')
@@ -206,14 +216,29 @@ export class Tenant {
    * mensaje propio y pide latitud y longitud. Un enlace a un mapa obliga al
    * cliente a salir de la conversación.
    *
-   * MySQL devuelve `decimal` como cadena, así que quien las exponga tiene que
-   * convertirlas; ver `commissionRate`, que ya tenía este mismo cuidado.
+   * MySQL devuelve `decimal` como cadena, así que la columna lleva un
+   * transformer: sin él, la propiedad sería `string` al leer y `number` al
+   * escribir, y cada consumidor tendría que recordar convertirla. Es el problema
+   * que `commissionRate` resolvió con helpers en el cliente; acá se corta en el
+   * origen.
    */
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
-  latitude?: string | null;
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+    transformer: decimalTransformer,
+  })
+  latitude?: number | null;
 
-  @Column({ type: 'decimal', precision: 10, scale: 7, nullable: true })
-  longitude?: string | null;
+  @Column({
+    type: 'decimal',
+    precision: 10,
+    scale: 7,
+    nullable: true,
+    transformer: decimalTransformer,
+  })
+  longitude?: number | null;
 
   /**
    * Estado de la suscripción tal como se guarda. Ver `SubscriptionStatus`.

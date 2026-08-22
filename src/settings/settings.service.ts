@@ -45,8 +45,27 @@ const isMetaAxiosError = (
   return axios.isAxiosError<MetaErrorResponse>(error);
 };
 
+/** Media coordenada no ubica nada: o están las dos o no hay ubicación. */
+const toLocation = (
+  latitude?: number | null,
+  longitude?: number | null,
+): { latitude: number; longitude: number } | null =>
+  typeof latitude === 'number' && typeof longitude === 'number'
+    ? { latitude, longitude }
+    : null;
+
 type SettingsResponse = {
   polariaName: string;
+  /** Ver `BUSINESS_TYPES`. `null` mientras la configuración inicial no lo cargó. */
+  businessType: string | null;
+  timezone: string;
+  /**
+   * Coordenadas del local, como números.
+   *
+   * MySQL devuelve `decimal` como cadena; se convierte acá para que el panel no
+   * tenga que saberlo.
+   */
+  location: { latitude: number; longitude: number } | null;
   /**
    * Horario semanal del negocio, una entrada por franja. Un día sin entradas
    * está cerrado; varias entradas en un mismo día son un turno partido.
@@ -120,6 +139,9 @@ export class SettingsService {
 
     return {
       polariaName: tenant.name,
+      businessType: tenant.businessType ?? null,
+      timezone: tenant.timezone,
+      location: toLocation(tenant.latitude, tenant.longitude),
       businessHours,
       aiEnabled: tenant.aiEnabled,
       reminders: {
@@ -184,6 +206,18 @@ export class SettingsService {
     if (dto.polariaName && dto.polariaName !== tenant.name) {
       await this.tenantsService.update(tenantId, {
         name: dto.polariaName,
+      });
+    }
+
+    if (dto.businessType || dto.timezone || dto.location !== undefined) {
+      await this.tenantsService.update(tenantId, {
+        businessType: dto.businessType ?? tenant.businessType ?? undefined,
+        timezone: dto.timezone ?? tenant.timezone,
+        // `null` explícito borra la ubicación; ausente la deja como está.
+        latitude:
+          dto.location === null ? null : (dto.location?.latitude ?? undefined),
+        longitude:
+          dto.location === null ? null : (dto.location?.longitude ?? undefined),
       });
     }
 

@@ -2,6 +2,8 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsInt,
+  IsLatitude,
+  IsLongitude,
   IsOptional,
   IsString,
   Length,
@@ -16,6 +18,20 @@ export class CreateTenantDto {
   @IsOptional()
   @IsString()
   businessType?: string;
+
+  /**
+   * Coordenadas del local. Nulables por separado para que un `null` explícito
+   * pueda borrar la ubicación desde la configuración.
+   */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsLatitude()
+  latitude?: number | null;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsLongitude()
+  longitude?: number | null;
 
   @ApiProperty()
   @IsString()
