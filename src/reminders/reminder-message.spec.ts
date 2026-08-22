@@ -1,6 +1,7 @@
 import { REMINDER_TEMPLATE_VARIABLES } from '../whatsapp/reminder-template';
 import {
   buildReminderMessage,
+  buildReminderPreview,
   formatReminderDateTime,
 } from './reminder-message';
 
@@ -65,5 +66,28 @@ describe('buildReminderMessage', () => {
       'appt|v1|resched|appt-1',
       'appt|v1|cancel|appt-1',
     ]);
+  });
+});
+
+describe('buildReminderPreview', () => {
+  it('reemplaza todas las variables de la plantilla', () => {
+    const preview = buildReminderPreview('Studio Nova');
+
+    expect(preview).not.toContain('{{');
+    expect(preview).toContain('Studio Nova');
+  });
+
+  it('usa el nombre del negocio y datos de ejemplo para el resto', () => {
+    const preview = buildReminderPreview('Studio Nova');
+
+    // El cliente, el servicio, el profesional y la hora son inventados: la
+    // vista previa no puede depender de que exista una cita real.
+    expect(preview).toContain('Hola Lucas');
+    expect(preview).toContain('Servicio: Corte');
+    expect(preview).toContain('Profesional: Diego');
+  });
+
+  it('no deja el negocio en blanco cuando todavía no tiene nombre', () => {
+    expect(buildReminderPreview('   ')).toContain('tu negocio');
   });
 });

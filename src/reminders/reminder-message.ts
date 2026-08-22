@@ -116,7 +116,7 @@ export function buildReminderPreview(businessName: string): string {
   ];
 
   return REMINDER_TEMPLATE_BODY.replace(
-    /{{(d+)}}/g,
+    /{{(\d+)}}/g,
     (match, index: string) => values[Number(index) - 1] ?? match,
   );
 }
