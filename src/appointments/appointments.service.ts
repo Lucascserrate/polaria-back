@@ -27,7 +27,12 @@ import {
   isDuplicateEntryError,
   SlotAlreadyTakenError,
 } from './slot-already-taken.error';
-import { toAppointmentItem, type AppointmentItem } from './appointment-item';
+import {
+  toAppointmentDetail,
+  toAppointmentItem,
+  type AppointmentDetail,
+  type AppointmentItem,
+} from './appointment-item';
 import {
   currentCalendarDate,
   dayWindow,
@@ -318,6 +323,40 @@ export class AppointmentsService {
       limit: safeLimit,
       hasMore: skip + items.length < total,
     };
+  }
+
+  /**
+   * La reserva completa, mapeada, para el panel.
+   *
+   * Aparte de `findOneByTenant`, que devuelve la entidad cruda y la usan los
+   * flujos internos: esa arrastra la relación `tenant` con el token de WhatsApp
+   * adentro, y eso no puede viajar al navegador.
+   */
+  async findDetailByTenant(
+    id: string,
+    tenantId: string,
+  ): Promise<AppointmentDetail> {
+    const appointment = await this.appointmentRepository.findOne({
+      where: { id, tenantId },
+      relations: {
+        client: true,
+        tenant: true,
+        reminders: true,
+        services: { service: true, staff: true },
+      },
+      // Conserva el profesional aunque haya sido dado de baja: la reserva ya
+      // existe y su historial no debe perder el dato.
+      withDeleted: true,
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('La cita no existe');
+    }
+
+    return toAppointmentDetail(
+      appointment,
+      appointment.tenant?.timezone ?? DEFAULT_TIMEZONE,
+    );
   }
 
   findOneByTenant(id: string, tenantId: string) {
@@ -1001,7 +1040,7 @@ export class AppointmentsService {
     id: string,
     tenantId: string,
     dto: EditBookingDto,
-  ): Promise<AppointmentItem> {
+  ): Promise<AppointmentDetail> {
     const appointment = await this.appointmentRepository.findOne({
       where: { id, tenantId },
       relations: { services: true },
@@ -1105,22 +1144,7 @@ export class AppointmentsService {
       throw error;
     }
 
-    const updated = await this.appointmentRepository.findOne({
-      where: { id, tenantId },
-      relations: {
-        client: true,
-        tenant: true,
-        reminders: true,
-        services: { service: true, staff: true },
-      },
-      withDeleted: true,
-    });
-
-    if (!updated) {
-      throw new NotFoundException('La cita no existe');
-    }
-
-    return toAppointmentItem(updated, timezone);
+    return this.findDetailByTenant(id, tenantId);
   }
 
   /**

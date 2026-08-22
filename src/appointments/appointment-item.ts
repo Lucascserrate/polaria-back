@@ -23,9 +23,13 @@ export interface AppointmentSegmentItem {
   /** `null` si el profesional fue borrado físicamente alguna vez. */
   staffId: string | null;
   staffName: string | null;
+  serviceId: string;
   serviceName: string | null;
   startTime: string;
   endTime: string;
+  /** Lo pactado al reservar, no lo que el servicio cuesta hoy. */
+  price: number;
+  durationMinutes: number;
 }
 
 export interface AppointmentItem {
@@ -99,9 +103,12 @@ export const toAppointmentItem = (
     .map((s) => ({
       staffId: s.staffId ?? null,
       staffName: s.staff?.name ?? null,
+      serviceId: s.serviceId,
       serviceName: s.service?.name ?? null,
       startTime: s.startTime.toISOString(),
       endTime: s.endTime.toISOString(),
+      price: Number(s.priceAtBooking),
+      durationMinutes: s.durationAtBooking,
     }))
     .sort((a, b) => a.startTime.localeCompare(b.startTime));
 
@@ -141,5 +148,40 @@ export const toAppointmentItem = (
           failureReason: reminder.failureReason,
         }
       : null,
+  };
+};
+
+/**
+ * La reserva con lo que hace falta para editarla.
+ *
+ * Existe aparte del ítem de la agenda por dos razones. Una es que trae datos que
+ * sólo importan en el detalle: el cliente con su teléfono y el total. La otra es
+ * más importante: `GET /appointments/:id` devolvía la entidad cruda con la
+ * relación `tenant`, y eso arrastraba **el token de WhatsApp del negocio en
+ * texto plano** hasta el navegador. Un mapeo explícito no puede filtrar lo que no
+ * nombra.
+ */
+export interface AppointmentDetail extends AppointmentItem {
+  client: { id: string; name: string | null; phone: string | null } | null;
+  /** Suma de lo pactado en cada tramo. */
+  totalPrice: number;
+}
+
+export const toAppointmentDetail = (
+  appointment: Appointment,
+  timezone: string,
+): AppointmentDetail => {
+  const item = toAppointmentItem(appointment, timezone);
+
+  return {
+    ...item,
+    client: appointment.client
+      ? {
+          id: appointment.client.id,
+          name: appointment.client.name ?? null,
+          phone: appointment.client.phone ?? null,
+        }
+      : null,
+    totalPrice: item.segments.reduce((sum, segment) => sum + segment.price, 0),
   };
 };

@@ -102,7 +102,7 @@ export class AppointmentsController {
     if (!tenantId) {
       throw new UnauthorizedException('Missing tenant id');
     }
-    return this.appointmentsService.findOneByTenant(id, tenantId);
+    return this.appointmentsService.findDetailByTenant(id, tenantId);
   }
 
   @UseGuards(AuthGuard('jwt'))
