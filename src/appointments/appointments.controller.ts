@@ -17,6 +17,7 @@ import type { Request } from 'express';
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { AppointmentsRangeQueryDto } from './dto/appointments-range-query.dto';
 
 @ApiTags('appointments')
 @Controller('appointments')
@@ -73,6 +74,24 @@ export class AppointmentsController {
       throw new UnauthorizedException('Missing tenant id');
     }
     return this.appointmentsService.findDayByTenant(tenantId, date?.trim());
+  }
+
+  /**
+   * Las citas de un rango de días. Va antes de `:id` para que `range` no se lea
+   * como el identificador de una cita.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Get('range')
+  findRange(@Req() req: Request, @Query() query: AppointmentsRangeQueryDto) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.appointmentsService.findRangeByTenant(
+      tenantId,
+      query.from,
+      query.to,
+    );
   }
 
   @UseGuards(AuthGuard('jwt'))

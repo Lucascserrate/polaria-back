@@ -11,7 +11,7 @@ import {
 
 import { Appointment } from '../../appointments/entities/appointment.entity';
 import { Tenant } from '../../tenants/entities/tenant.entity';
-import { ReminderState } from '../appointment-reminders.rules';
+import { ReminderState } from '../reminder-state';
 
 /**
  * Un recordatorio programado para una cita.

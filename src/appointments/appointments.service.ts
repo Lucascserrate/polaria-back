@@ -18,11 +18,29 @@ import { AppointmentService as AppointmentServiceEntity } from './entities/appoi
 import { Service } from '../services/entities/service.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
-import { pickReminderToShow } from '../reminders/appointment-reminders.rules';
 import {
   isDuplicateEntryError,
   SlotAlreadyTakenError,
 } from './slot-already-taken.error';
+import { toAppointmentItem, type AppointmentItem } from './appointment-item';
+import {
+  currentCalendarDate,
+  dayWindow,
+  daysInRange,
+  parseCalendarDate,
+  rangeWindow,
+  type CalendarDate,
+} from './appointment-window';
+
+const DEFAULT_TIMEZONE = 'America/La_Paz';
+
+/**
+ * Tope de días que puede pedir una sola consulta de rango.
+ *
+ * La agenda pide siete. El límite está para que un `from`/`to` mal armado no
+ * termine trayendo un año entero de citas con todas sus relaciones.
+ */
+const MAX_RANGE_DAYS = 62;
 
 @Injectable()
 export class AppointmentsService {
@@ -46,7 +64,7 @@ export class AppointmentsService {
     const tenant = await tenantRepo.findOne({
       where: { id: appointmentData.tenantId },
     });
-    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
     const { date, time } = this.getDateTimeParts(startTime, timezone);
 
     const services = await this.serviceRepository.find({
@@ -189,31 +207,7 @@ export class AppointmentsService {
       sortBy?: 'date-asc' | 'date-desc';
     },
   ): Promise<{
-    items: Array<{
-      id: string;
-      startTime: string;
-      /** Instante de fin. La agenda calcula la altura de la cita con estos dos. */
-      endTime: string;
-      startTimeFormatted: string;
-      endTimeFormatted: string;
-      status: AppointmentStatus;
-      clientName?: string;
-      staffName?: string;
-      businessName?: string;
-      serviceNames: string[];
-      totalDuration: number;
-      timezone: string;
-      /**
-       * Recordatorio de esta cita, si hay alguno. Permite ver desde la agenda
-       * si el aviso salió y, cuando no, por qué.
-       */
-      reminder: {
-        state: string;
-        scheduledFor: string | null;
-        sentAt: string | null;
-        failureReason: string | null;
-      } | null;
-    }>;
+    items: AppointmentItem[];
     total: number;
     counts: {
       pending: number;
@@ -301,54 +295,9 @@ export class AppointmentsService {
         cancelled: string;
       }>();
 
-    const items = appointments.map((a) => {
-      const timezone = a.tenant?.timezone ?? 'America/La_Paz';
-      const serviceNames = (a.services ?? [])
-        .map((s) => s.service?.name)
-        .filter((name): name is string => !!name);
-      const totalDuration = (a.services ?? []).reduce((sum, s) => {
-        return sum + (s.durationAtBooking ?? 0);
-      }, 0);
-      return {
-        id: a.id,
-        startTime: a.startTime.toISOString(),
-        // El fin sale de la cita y no de sumar `totalDuration`, que es la suma de
-        // `durationAtBooking` y queda en 0 si algún servicio no la tiene cargada.
-        endTime: a.endTime.toISOString(),
-        startTimeFormatted: this.formatDateTime(a.startTime, timezone),
-        endTimeFormatted: this.formatDateTime(a.endTime, timezone),
-        status: a.status,
-        clientName: a.client?.name,
-        staffName: (() => {
-          const names = (a.services ?? [])
-            .map((s) => s.staff?.name)
-            .filter((n): n is string => !!n);
-          const unique = Array.from(new Set(names));
-          if (unique.length === 0) return undefined;
-          if (unique.length === 1) return unique[0];
-          return 'Varios';
-        })(),
-        businessName: a.tenant?.name,
-        serviceNames,
-        totalDuration,
-        timezone,
-        // Con varios avisos por cita se muestra el próximo pendiente; ver
-        // `pickReminderToShow`.
-        reminder: (() => {
-          const reminder = pickReminderToShow(a.reminders ?? []);
-          if (!reminder) return null;
-
-          return {
-            state: reminder.state,
-            scheduledFor: reminder.scheduledFor
-              ? reminder.scheduledFor.toISOString()
-              : null,
-            sentAt: reminder.sentAt ? reminder.sentAt.toISOString() : null,
-            failureReason: reminder.failureReason,
-          };
-        })(),
-      };
-    });
+    const items = appointments.map((a) =>
+      toAppointmentItem(a, a.tenant?.timezone ?? DEFAULT_TIMEZONE),
+    );
 
     return {
       items,
@@ -383,6 +332,64 @@ export class AppointmentsService {
   }
 
   /**
+   * Las citas de varios días seguidos, para la agenda semanal.
+   *
+   * No devuelve totales ni ingresos: la agenda dibuja una grilla, y sumar por
+   * día sería trabajo que nadie mira. Tampoco recorta por estado —una cancelada
+   * ocupa lugar en el calendario igual que el resto— ni por profesional: eso lo
+   * decide la vista con `segments`.
+   */
+  async findRangeByTenant(
+    tenantId: string,
+    from: string,
+    to: string,
+  ): Promise<{
+    items: AppointmentItem[];
+    from: string;
+    to: string;
+    timezone: string;
+  }> {
+    const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+    const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
+
+    const { startUtc, endUtc } = this.resolveRangeWindow(timezone, from, to);
+
+    /*
+     * El filtro es por inicio, igual que la consulta del día: una cita que
+     * empieza antes del rango y termina dentro queda afuera. Con jornadas que
+     * cierran antes de medianoche eso no puede pasar, y filtrar por
+     * solapamiento obligaría a un OR que no aprovecha el índice.
+     */
+    const appointments = await this.appointmentRepository.find({
+      where: {
+        tenantId,
+        startTime: Between(startUtc, new Date(endUtc.getTime() - 1)),
+      },
+      relations: {
+        client: true,
+        tenant: true,
+        reminders: true,
+        services: {
+          service: true,
+          staff: true,
+        },
+      },
+      // Sin esto las citas de un profesional dado de baja aparecerían sin
+      // profesional, y en la vista por columnas no tendrían dónde ir.
+      withDeleted: true,
+      order: { startTime: 'ASC' },
+    });
+
+    return {
+      items: appointments.map((a) => toAppointmentItem(a, timezone)),
+      from,
+      to,
+      timezone,
+    };
+  }
+
+  /**
    * La agenda de un día completo del negocio, con sus totales.
    *
    * `date` ausente significa hoy, que es lo que abre el panel; con una fecha se
@@ -392,29 +399,7 @@ export class AppointmentsService {
     tenantId: string,
     date?: string,
   ): Promise<{
-    items: Array<{
-      id: string;
-      startTime: string;
-      startTimeFormatted: string;
-      endTimeFormatted: string;
-      status: AppointmentStatus;
-      clientName?: string;
-      staffName?: string;
-      businessName?: string;
-      serviceNames: string[];
-      totalDuration: number;
-      timezone: string;
-      /**
-       * Recordatorio de esta cita, si hay alguno. Permite ver desde la agenda
-       * si el aviso salió y, cuando no, por qué.
-       */
-      reminder: {
-        state: string;
-        scheduledFor: string | null;
-        sentAt: string | null;
-        failureReason: string | null;
-      } | null;
-    }>;
+    items: AppointmentItem[];
     total: number;
     counts: {
       pending: number;
@@ -426,7 +411,7 @@ export class AppointmentsService {
   }> {
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
     const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-    const timezone = tenant?.timezone ?? 'America/La_Paz';
+    const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
     const { startUtc, endUtc } = this.resolveDayRange(timezone, date);
 
     const endInclusive = new Date(endUtc.getTime() - 1);
@@ -448,51 +433,7 @@ export class AppointmentsService {
       order: { startTime: 'ASC' },
     });
 
-    const items = appointments.map((a) => {
-      const serviceNames = (a.services ?? [])
-        .map((s) => s.service?.name)
-        .filter((name): name is string => !!name);
-      const totalDuration = (a.services ?? []).reduce((sum, s) => {
-        return sum + (s.durationAtBooking ?? 0);
-      }, 0);
-      return {
-        id: a.id,
-        startTime: a.startTime.toISOString(),
-        startTimeFormatted: this.formatDateTime(a.startTime, timezone),
-        endTimeFormatted: this.formatDateTime(a.endTime, timezone),
-        status: a.status,
-        clientName: a.client?.name,
-        staffName: (() => {
-          const names = (a.services ?? [])
-            .map((s) => s.staff?.name)
-            .filter((n): n is string => !!n);
-          const unique = Array.from(new Set(names));
-          if (unique.length === 0) return undefined;
-          if (unique.length === 1) return unique[0];
-          return 'Varios';
-        })(),
-        businessName: a.tenant?.name,
-        serviceNames,
-        totalDuration,
-        timezone,
-        // Hoy hay como máximo uno por cita. Se toma el primero en lugar de
-        // asumir que es único: cuando existan varios, esto muestra alguno en
-        // vez de romperse.
-        reminder: (() => {
-          const reminder = (a.reminders ?? [])[0];
-          if (!reminder) return null;
-
-          return {
-            state: reminder.state,
-            scheduledFor: reminder.scheduledFor
-              ? reminder.scheduledFor.toISOString()
-              : null,
-            sentAt: reminder.sentAt ? reminder.sentAt.toISOString() : null,
-            failureReason: reminder.failureReason,
-          };
-        })(),
-      };
-    });
+    const items = appointments.map((a) => toAppointmentItem(a, timezone));
 
     const rawCounts = await this.appointmentRepository
       .createQueryBuilder('appointment')
@@ -948,7 +889,7 @@ export class AppointmentsService {
         const tenantRepo =
           this.appointmentRepository.manager.getRepository(Tenant);
         const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-        const timezone = tenant?.timezone ?? 'America/La_Paz';
+        const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
         const { date, time } = this.getDateTimeParts(
           appointment.startTime,
           timezone,
@@ -1034,116 +975,53 @@ export class AppointmentsService {
     return { deleted: true };
   }
 
-  private formatDateTime(date: Date, timezone: string): string {
-    const formatter = new Intl.DateTimeFormat('es-CO', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    });
-    return formatter.format(date);
-  }
-
   /**
    * Rango del día pedido, o del día en curso si no vino ninguno.
    *
-   * La fecha se interpreta en la zona del negocio y no en la de quien mira la
-   * pantalla: a las 21:00 del lunes en Bolivia ya es martes en Europa, y la
-   * agenda que corresponde mostrar es la del local.
+   * El cálculo vive en `appointment-window`; acá solo se traduce una fecha
+   * inválida al error que corresponde devolver por HTTP.
    */
   private resolveDayRange(timezone: string, date?: string) {
-    if (!date) return this.getDayRange(timezone, new Date());
-
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
-    if (!match) {
-      throw new BadRequestException('date debe tener formato YYYY-MM-DD');
+    if (!date) {
+      return dayWindow(timezone, currentCalendarDate(timezone, new Date()));
     }
 
-    const [year, month, day] = match.slice(1).map(Number);
-
-    // `Date.UTC` acomoda en silencio un 31 de febrero al 3 de marzo, así que la
-    // única forma de detectar una fecha inexistente es ver si sobrevivió igual.
-    const parsed = new Date(Date.UTC(year, month - 1, day));
-    if (
-      parsed.getUTCFullYear() !== year ||
-      parsed.getUTCMonth() !== month - 1 ||
-      parsed.getUTCDate() !== day
-    ) {
-      throw new BadRequestException(`La fecha ${date} no existe`);
-    }
-
-    return this.getDayRangeForDate(timezone, year, month, day);
-  }
-
-  private getDayRange(timezone: string, now: Date) {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(now);
-    const year = Number(parts.find((p) => p.type === 'year')?.value ?? '0');
-    const month = Number(parts.find((p) => p.type === 'month')?.value ?? '1');
-    const day = Number(parts.find((p) => p.type === 'day')?.value ?? '1');
-
-    return this.getDayRangeForDate(timezone, year, month, day);
+    return dayWindow(timezone, this.parseDateOrFail(date, 'date'));
   }
 
   /**
-   * Medianoche a medianoche de un día del calendario del negocio, en UTC.
+   * Rango de varios días seguidos, con los dos extremos incluidos.
    *
-   * El offset se pide dos veces, una por cada borde, porque un cambio de horario
-   * de verano en el medio los deja con offsets distintos y ese día dura 23 o 25
-   * horas.
+   * El tope de días no es una regla de negocio: es lo que evita que un `from` y
+   * un `to` mal armados traigan medio historial del negocio con todas sus
+   * relaciones en una sola consulta.
    */
-  private getDayRangeForDate(
-    timezone: string,
-    year: number,
-    month: number,
-    day: number,
-  ) {
-    const startLocalUtcGuess = new Date(
-      Date.UTC(year, month - 1, day, 0, 0, 0),
-    );
-    const startOffset = this.getTimeZoneOffsetMinutes(
-      timezone,
-      startLocalUtcGuess,
-    );
-    const startUtc = new Date(
-      Date.UTC(year, month - 1, day, 0, 0, 0) - startOffset * 60000,
-    );
+  private resolveRangeWindow(timezone: string, from: string, to: string) {
+    const start = this.parseDateOrFail(from, 'from');
+    const end = this.parseDateOrFail(to, 'to');
 
-    const nextDay = new Date(Date.UTC(year, month - 1, day + 1, 0, 0, 0));
-    const endOffset = this.getTimeZoneOffsetMinutes(timezone, nextDay);
-    const endUtc = new Date(
-      Date.UTC(year, month - 1, day + 1, 0, 0, 0) - endOffset * 60000,
-    );
+    const days = daysInRange(start, end);
+    if (days === 0) {
+      throw new BadRequestException('to no puede ser anterior a from');
+    }
+    if (days > MAX_RANGE_DAYS) {
+      throw new BadRequestException(
+        `El rango no puede superar ${MAX_RANGE_DAYS} días`,
+      );
+    }
 
-    return { startUtc, endUtc };
+    return rangeWindow(timezone, start, end);
   }
 
-  private getTimeZoneOffsetMinutes(timezone: string, date: Date): number {
-    const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: timezone,
-      timeZoneName: 'shortOffset',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    }).formatToParts(date);
-    const tz = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+0';
-    const match = tz.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);
-    if (!match) return 0;
-    const sign = match[1] === '-' ? -1 : 1;
-    const hours = Number(match[2] ?? '0');
-    const minutes = Number(match[3] ?? '0');
-    return sign * (hours * 60 + minutes);
+  private parseDateOrFail(value: string, field: string): CalendarDate {
+    const parsed = parseCalendarDate(value);
+    if (!parsed) {
+      throw new BadRequestException(
+        `${field} debe ser una fecha real con formato YYYY-MM-DD`,
+      );
+    }
+
+    return parsed;
   }
 
   private getDateTimeParts(date: Date, timezone: string) {
