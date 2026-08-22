@@ -2,6 +2,7 @@
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, In, MoreThanOrEqual, Repository } from 'typeorm';
@@ -10,10 +11,14 @@ import {
   Appointment,
   blocksAgenda,
   BLOCKING_APPOINTMENT_STATUSES,
+  OPEN_APPOINTMENT_STATUSES,
 } from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { EditBookingDto } from './dto/edit-booking.dto';
+import { planBookingSegments } from './booking-plan';
 import { AvailabilityService } from '../availability/availability.service';
+import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import { AppointmentService as AppointmentServiceEntity } from './entities/appointment_service.entity';
 import { Service } from '../services/entities/service.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
@@ -52,6 +57,7 @@ export class AppointmentsService {
     @InjectRepository(Service)
     private serviceRepository: Repository<Service>,
     private readonly availabilityService: AvailabilityService,
+    private readonly bookingAvailabilityService: BookingAvailabilityService,
   ) {}
 
   async create(createAppointmentDto: CreateAppointmentDto) {
@@ -968,6 +974,198 @@ export class AppointmentsService {
     }
 
     return this.findOneByTenant(id, tenantId);
+  }
+
+  /**
+   * Edita una reserva existente **en el lugar**.
+   *
+   * Conserva el `appointmentId`, su historial y sus relaciones: no crea una
+   * reserva nueva ni cancela la anterior. Eso importa porque el cliente ya tiene
+   * esa cita —le llegó su confirmación y su recordatorio cuelga de ella— y
+   * partirla en dos dejaría dos verdades.
+   *
+   * Recibe el estado deseado completo de lo editable: cuándo empieza y qué
+   * servicios tiene, cada uno con su profesional. Todo lo demás no se toca.
+   *
+   * La disponibilidad la decide el mismo motor que usan WhatsApp y el asistente
+   * de creación, con una sola diferencia: **esta cita no cuenta como ocupada**.
+   * Sin eso, corregir la hora de 09:00 a 09:15 chocaría contra sí misma. No hay
+   * forma de forzar un horario cerrado o pisado: si el motor no lo ofrece, no se
+   * guarda.
+   *
+   * Los recordatorios no se tocan acá. La reconciliación corre cada cinco
+   * minutos, recalcula el aviso desde el inicio de la cita y mueve el que
+   * corresponda; uno ya enviado se queda enviado, que es la verdad.
+   */
+  async editBookingByTenant(
+    id: string,
+    tenantId: string,
+    dto: EditBookingDto,
+  ): Promise<AppointmentItem> {
+    const appointment = await this.appointmentRepository.findOne({
+      where: { id, tenantId },
+      relations: { services: true },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('La cita no existe');
+    }
+
+    if (!OPEN_APPOINTMENT_STATUSES.includes(appointment.status)) {
+      throw new ConflictException(
+        'Solo se pueden editar citas pendientes o confirmadas',
+      );
+    }
+
+    const startTime = this.parseDate(dto.startTime, 'startTime');
+
+    const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+    const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
+
+    const serviceIds = [...new Set(dto.items.map((item) => item.serviceId))];
+    const services = await this.serviceRepository.find({
+      where: { id: In(serviceIds), tenantId, isActive: true },
+    });
+
+    const plan = planBookingSegments({
+      startTime,
+      items: dto.items,
+      services: new Map(
+        services.map((service) => [
+          service.id,
+          {
+            durationMinutes: service.durationMinutes,
+            price: Number(service.price),
+          },
+        ]),
+      ),
+      // Lo que la reserva ya tenía entra con su precio pactado; ver `booking-plan`.
+      agreedPrices: new Map(
+        (appointment.services ?? []).map((segment) => [
+          segment.serviceId,
+          Number(segment.priceAtBooking),
+        ]),
+      ),
+    });
+
+    if (!plan.ok) {
+      throw new BadRequestException(
+        `Servicio inexistente o inactivo: ${plan.missingServiceIds.join(', ')}`,
+      );
+    }
+
+    /*
+     * Cada tramo se revalida por separado, con su propio servicio y profesional.
+     * Es lo que permite que el corte lo haga uno y la barba otro sin inventar
+     * reglas nuevas: el motor ya sabe si esa persona hace ese servicio, si le
+     * toca trabajar y si tiene el horario libre.
+     */
+    for (const segment of plan.segments) {
+      const { date } = this.getDateTimeParts(segment.startTime, timezone);
+
+      const confirmation = await this.bookingAvailabilityService.confirmSlot({
+        tenantId,
+        date,
+        serviceId: segment.serviceId,
+        staffId: segment.staffId,
+        startTime: segment.startTime,
+        excludeAppointmentId: id,
+      });
+
+      if (!confirmation.available) {
+        const { time } = this.getDateTimeParts(segment.startTime, timezone);
+        throw new ConflictException(
+          `Las ${time} no están disponibles para ese servicio con ese profesional`,
+        );
+      }
+    }
+
+    const claimsSlot = blocksAgenda(appointment.status);
+
+    /*
+     * Los tramos se reemplazan dentro de una transacción. Borrarlos e insertarlos
+     * sueltos deja la cita sin tramos si el insert falla —por ejemplo contra el
+     * índice único—, y una cita sin tramos no tiene profesional, ni precio, ni
+     * lugar en la agenda.
+     */
+    try {
+      await this.replaceSegments({ id, tenantId, plan, claimsSlot, startTime });
+    } catch (error: unknown) {
+      /*
+       * El índice único es la última barrera: entre la revalidación y el insert,
+       * WhatsApp pudo tomar ese horario. Se responde igual que un horario
+       * ocupado, no como una falla del servidor.
+       */
+      if (isDuplicateEntryError(error)) {
+        throw new ConflictException(
+          'Ese horario acaba de ocuparse. Elegí otro.',
+        );
+      }
+      throw error;
+    }
+
+    const updated = await this.appointmentRepository.findOne({
+      where: { id, tenantId },
+      relations: {
+        client: true,
+        tenant: true,
+        reminders: true,
+        services: { service: true, staff: true },
+      },
+      withDeleted: true,
+    });
+
+    if (!updated) {
+      throw new NotFoundException('La cita no existe');
+    }
+
+    return toAppointmentItem(updated, timezone);
+  }
+
+  /**
+   * Reemplaza los tramos de una reserva y corre su horario, todo o nada.
+   *
+   * Borrarlos e insertarlos sueltos deja la cita sin tramos si el insert falla
+   * —por ejemplo contra el índice único—, y una cita sin tramos no tiene
+   * profesional, ni precio, ni lugar en la agenda.
+   */
+  private async replaceSegments(input: {
+    id: string;
+    tenantId: string;
+    plan: Extract<ReturnType<typeof planBookingSegments>, { ok: true }>;
+    claimsSlot: boolean;
+    startTime: Date;
+  }): Promise<void> {
+    const { id, tenantId, plan, claimsSlot, startTime } = input;
+
+    await this.appointmentRepository.manager.transaction(async (manager) => {
+      await manager.delete(AppointmentServiceEntity, { appointmentId: id });
+
+      const segments = plan.segments.map((segment) =>
+        manager.create(AppointmentServiceEntity, {
+          appointmentId: id,
+          serviceId: segment.serviceId,
+          staffId: segment.staffId,
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+          // Es la columna del índice único: la última barrera contra que dos
+          // reservas tomen el mismo horario del mismo profesional.
+          activeStartTime: claimsSlot ? segment.startTime : null,
+          priceAtBooking: segment.price,
+          durationAtBooking: segment.durationMinutes,
+          sequenceOrder: segment.sequenceOrder,
+        }),
+      );
+
+      await manager.save(segments);
+
+      await manager.update(
+        Appointment,
+        { id, tenantId },
+        { startTime, endTime: plan.endTime },
+      );
+    });
   }
 
   async removeByTenant(id: string, tenantId: string) {

@@ -18,6 +18,7 @@ import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { AppointmentsRangeQueryDto } from './dto/appointments-range-query.dto';
+import { EditBookingDto } from './dto/edit-booking.dto';
 
 @ApiTags('appointments')
 @Controller('appointments')
@@ -119,6 +120,31 @@ export class AppointmentsController {
       id,
       tenantId,
       updateAppointmentDto,
+    );
+  }
+
+  /**
+   * Edita la reserva: cuándo empieza y qué servicios tiene, con su profesional.
+   *
+   * Es la misma cita, no una nueva: conserva id, historial y relaciones. Va en su
+   * propia ruta y no en `PATCH :id` porque ese recibe parches campo por campo
+   * —hoy lo usa el cambio de estado— y esto es un estado deseado completo.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Patch(':id/booking')
+  editBooking(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() editBookingDto: EditBookingDto,
+  ) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.appointmentsService.editBookingByTenant(
+      id,
+      tenantId,
+      editBookingDto,
     );
   }
 
