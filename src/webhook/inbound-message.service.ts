@@ -830,7 +830,7 @@ export class InboundMessageService {
           clientId,
           to: message.from,
           skipExistingCheck: true,
-          replacesAppointmentId: appointment.id,
+          editingAppointmentId: appointment.id,
         });
         return;
 
@@ -1010,7 +1010,7 @@ export class InboundMessageService {
     to: string;
     /** Salta la detección de turnos existentes: ya se decidió sacar otro. */
     skipExistingCheck?: boolean;
-    replacesAppointmentId?: string;
+    editingAppointmentId?: string;
   }): Promise<void> {
     const { tenantId, credentials, conversation, clientId, to } = params;
 
@@ -1034,7 +1034,7 @@ export class InboundMessageService {
       tenantId,
       clientId,
       conversationId: conversation.id,
-      replacesAppointmentId: params.replacesAppointmentId,
+      editingAppointmentId: params.editingAppointmentId,
       limits: flowId ? {} : NATIVE_CHANNEL_LIMITS,
     });
 

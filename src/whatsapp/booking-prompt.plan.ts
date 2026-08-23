@@ -86,7 +86,11 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
       return [
         text(
           prompt.kind,
-          `¡Listo! Tu turno quedó agendado.\n\n${describeSummary(prompt.summary)}`,
+          `${
+            prompt.edited
+              ? '¡Listo! Cambié tu turno.'
+              : '¡Listo! Tu turno quedó agendado.'
+          }\n\n${describeSummary(prompt.summary)}`,
         ),
       ];
 

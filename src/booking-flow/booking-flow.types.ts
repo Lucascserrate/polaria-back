@@ -117,7 +117,18 @@ export type BookingPrompt =
       options: BookingOption[];
     }
   | { kind: 'CONFIRM'; summary: BookingSummary; options: BookingOption[] }
-  | { kind: 'COMPLETED'; summary: BookingSummary; appointmentId: string }
+  | {
+      kind: 'COMPLETED';
+      summary: BookingSummary;
+      appointmentId: string;
+      /**
+       * La reserva ya existía y se modificó, en lugar de crearse.
+       *
+       * Cambia el texto: decirle "tu turno quedó agendado" a alguien que acaba de
+       * mover el suyo suena a que le agendaron un segundo.
+       */
+      edited?: boolean;
+    }
   | { kind: 'CANCELLED' }
   | { kind: 'EXPIRED' }
   /** La interacción pertenece a una sesión vencida, ajena o a un paso anterior. */

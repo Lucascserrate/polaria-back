@@ -1,7 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { ConflictException, Injectable, Logger } from '@nestjs/common';
 
 import { AppointmentsService } from '../appointments/appointments.service';
-import type { Appointment } from '../appointments/entities/appointment.entity';
+import {
+  blocksAgenda,
+  type Appointment,
+} from '../appointments/entities/appointment.entity';
 import { SlotAlreadyTakenError } from '../appointments/slot-already-taken.error';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import type { BookingSlot } from '../availability/booking/booking-slot.type';
@@ -91,7 +94,7 @@ export class BookingFlowService {
      * Cita a reemplazar. La reserva corre igual que cualquier otra; lo único que
      * cambia es que al confirmarse cancela la anterior.
      */
-    replacesAppointmentId?: string;
+    editingAppointmentId?: string;
     limits?: BookingChannelLimits;
     now?: Date;
   }): Promise<BookingPrompt> {
@@ -103,7 +106,7 @@ export class BookingFlowService {
       tenantId: params.tenantId,
       clientId: params.clientId,
       conversationId: params.conversationId,
-      replacesAppointmentId: params.replacesAppointmentId,
+      editingAppointmentId: params.editingAppointmentId,
       now,
     });
 
@@ -505,53 +508,70 @@ export class BookingFlowService {
       return { kind: 'STALE' };
     }
 
+    /*
+     * La cita que se está editando se vuelve a resolver acá, y no se confía en el
+     * id guardado en la sesión: entre que el cliente tocó "Reagendar" y este
+     * confirmar pudo cancelarla desde otro lado, o el negocio pudo atenderla.
+     * `findUpcomingByClientAndId` la busca **por cliente**, así que además es lo
+     * que garantiza que nadie termine tocando un turno ajeno.
+     */
+    const editing = await this.resolveEditingAppointment(session);
+
     const confirmation = await this.bookingAvailabilityService.confirmSlot({
       tenantId: session.tenantId,
       date: selectedDate,
       serviceId: selectedServiceId,
       staffId: session.selectedStaffId ?? undefined,
       startTime: selectedSlotStart,
+      // La misma exclusión que al listar: lo que se ofreció tiene que poder
+      // confirmarse.
+      excludeAppointmentId: editing?.id,
     });
 
     if (!confirmation.available) {
       return this.slotTakenPrompt({ session, metaMessageId, limits, now });
     }
 
+    /*
+     * Editando se modifica la cita que ya existe; si no, se crea una nueva. Es la
+     * única diferencia entre reagendar y reservar, y termina acá: todo lo
+     * anterior —servicio, profesional, horario, revalidación— es el mismo camino.
+     *
+     * La edición pasa por el mismo mecanismo que usa el panel, así que "cambiar
+     * un turno" tiene una sola implementación: valida, replanifica los tramos y
+     * los reescribe en una transacción. Antes se creaba una cita nueva y se
+     * cancelaba la anterior, lo que le cambiaba el id al turno del cliente y
+     * dejaba una ventana con las dos vivas.
+     */
     let appointment: Appointment;
     try {
-      appointment = await this.appointmentsService.createFromBookingFlow({
-        tenantId: session.tenantId,
-        clientId: session.clientId,
-        serviceId: selectedServiceId,
-        staffId: confirmation.staffId,
-        startTime: confirmation.startTime,
-        endTime: confirmation.endTime,
-      });
+      appointment = editing
+        ? await this.applyReschedule({
+            session,
+            appointmentId: editing.id,
+            serviceId: selectedServiceId,
+            staffId: confirmation.staffId,
+            startTime: confirmation.startTime,
+          })
+        : await this.appointmentsService.createFromBookingFlow({
+            tenantId: session.tenantId,
+            clientId: session.clientId,
+            serviceId: selectedServiceId,
+            staffId: confirmation.staffId,
+            startTime: confirmation.startTime,
+            endTime: confirmation.endTime,
+          });
     } catch (error: unknown) {
-      // El índice único es la última barrera: si otro cliente insertó el mismo
-      // horario en la ventana entre la revalidación y este insert, se trata igual
+      // El índice único es la última barrera: si otro cliente tomó el mismo
+      // horario en la ventana entre la revalidación y la escritura, se trata igual
       // que un horario ocupado.
-      if (error instanceof SlotAlreadyTakenError) {
+      if (error instanceof SlotAlreadyTakenError || isSlotConflict(error)) {
         this.logger.warn(
-          `Carrera perdida contra el índice único (sessionId=${session.id}): ${error.message}`,
+          `Carrera perdida por el horario (sessionId=${session.id}): ${describeError(error)}`,
         );
         return this.slotTakenPrompt({ session, metaMessageId, limits, now });
       }
       throw error;
-    }
-
-    // Reagenda: la cita vieja se cancela recién ahora, con la nueva ya creada.
-    // Hacerlo antes dejaría al cliente sin turno si abandonaba a mitad.
-    if (session.replacesAppointmentId) {
-      const appointmentsService: AppointmentsService = this.appointmentsService;
-      await appointmentsService.cancelByClient({
-        tenantId: session.tenantId,
-        clientId: session.clientId,
-        appointmentId: session.replacesAppointmentId,
-      });
-      this.logger.log(
-        `Turno reagendado (sessionId=${session.id}, anterior=${session.replacesAppointmentId}, nuevo=${appointment.id}).`,
-      );
     }
 
     const completed = await this.bookingSessionService.complete({
@@ -566,8 +586,127 @@ export class BookingFlowService {
     const summary = await this.buildSummary(completed, confirmation.staffId);
 
     return summary
-      ? { kind: 'COMPLETED', summary, appointmentId: appointment.id }
+      ? {
+          kind: 'COMPLETED',
+          summary,
+          appointmentId: appointment.id,
+          edited: Boolean(editing),
+        }
       : { kind: 'STALE' };
+  }
+
+  /**
+   * Aplica el reagendamiento sobre la cita que ya existe.
+   *
+   * Usa el mismo mecanismo que el drawer del panel —`editBookingByTenant`—, así
+   * que la validación, la disponibilidad, los precios pactados, la duración
+   * vigente y la escritura transaccional viven en un solo lugar. Acá no se decide
+   * ninguna regla: se traduce lo que eligió el cliente al estado deseado que ese
+   * método espera.
+   *
+   * El estado deseado lleva un solo servicio porque el flujo de WhatsApp es de un
+   * solo servicio. Si la reserva tenía más, quedan afuera; eso ya pasaba con el
+   * camino anterior y se registra al resolver la cita.
+   *
+   * La pertenencia al cliente se validó antes de llegar acá:
+   * `editBookingByTenant` es la edición administrativa del negocio y no filtra
+   * por cliente.
+   */
+  private async applyReschedule(params: {
+    session: BookingSession;
+    appointmentId: string;
+    serviceId: string;
+    staffId: string;
+    startTime: Date;
+  }): Promise<Appointment> {
+    const { session, appointmentId, serviceId, staffId, startTime } = params;
+
+    await this.appointmentsService.editBookingByTenant(
+      appointmentId,
+      session.tenantId,
+      {
+        startTime: startTime.toISOString(),
+        items: [{ serviceId, staffId }],
+      },
+    );
+
+    this.logger.log(
+      `Turno reagendado en el lugar (sessionId=${session.id}, appointmentId=${appointmentId}).`,
+    );
+
+    const updated = await this.appointmentsService.findUpcomingByClientAndId({
+      tenantId: session.tenantId,
+      clientId: session.clientId,
+      appointmentId,
+    });
+
+    // La edición ya ocurrió: si no se puede releer, la cita igual quedó movida.
+    if (!updated) {
+      throw new Error(
+        `No se pudo releer la cita reagendada (appointmentId=${appointmentId}).`,
+      );
+    }
+
+    return updated;
+  }
+
+  /**
+   * La cita que esta sesión está editando, si todavía existe y es de este
+   * cliente.
+   *
+   * Devuelve `null` cuando la sesión no está editando nada, cuando la cita ya no
+   * está —cancelada o atendida en el medio— o cuando no le pertenece. En esos
+   * casos el flujo sigue como una reserva nueva: el cliente eligió un horario y
+   * lo que espera es tener turno, no un error sobre una cita que ya no le
+   * importa.
+   */
+  private async resolveEditingAppointment(
+    session: BookingSession,
+  ): Promise<Appointment | null> {
+    const appointmentId = session.editingAppointmentId;
+    if (!appointmentId) return null;
+
+    const appointment =
+      await this.appointmentsService.findUpcomingByClientAndId({
+        tenantId: session.tenantId,
+        clientId: session.clientId,
+        appointmentId,
+      });
+
+    if (!appointment) {
+      this.logger.warn(
+        `La cita a reagendar ya no está disponible (sessionId=${session.id}, appointmentId=${appointmentId}).`,
+      );
+      return null;
+    }
+
+    /*
+     * El estado se comprueba acá y no se delega: `findUpcomingByClientAndId`
+     * busca por id y cliente, sin filtrar por estado, así que puede devolver una
+     * cita ya atendida o cancelada. La edición rechaza esas con un conflicto que
+     * el cliente leería como "ese horario está tomado", que no es lo que pasó.
+     */
+    if (!blocksAgenda(appointment.status)) {
+      this.logger.warn(
+        `La cita a reagendar ya no está activa (sessionId=${session.id}, appointmentId=${appointmentId}, status=${appointment.status}).`,
+      );
+      return null;
+    }
+
+    /*
+     * El flujo de WhatsApp es de un solo servicio, así que reagendar por acá una
+     * reserva de varios deja solo el elegido. Ya pasaba con el camino anterior
+     * —creaba una cita de un servicio y cancelaba la de dos—, pero conviene verlo
+     * cuando ocurre en lugar de descubrirlo por un reclamo.
+     */
+    const segments = appointment.services?.length ?? 0;
+    if (segments > 1) {
+      this.logger.warn(
+        `Reagenda por WhatsApp de una reserva con ${segments} servicios: queda con el servicio elegido en el flujo (appointmentId=${appointmentId}).`,
+      );
+    }
+
+    return appointment;
   }
 
   /**
@@ -918,6 +1057,13 @@ export class BookingFlowService {
       date: session.selectedDate,
       serviceId: session.selectedServiceId,
       staffId: session.selectedStaffId ?? undefined,
+      /*
+       * Reagendando, la propia cita no cuenta como ocupada. Sin esto, mover un
+       * turno de 18:00 a 18:15 no aparece siquiera como opción: sus propios
+       * treinta minutos tapan el horario nuevo, y el cliente concluye que no hay
+       * lugar cuando el lugar es el suyo.
+       */
+      excludeAppointmentId: session.editingAppointmentId ?? undefined,
     });
   }
 
@@ -1003,4 +1149,20 @@ export class BookingFlowService {
     const tenant = await this.tenantsService.findOne(tenantId);
     return tenant?.currency ?? null;
   }
+}
+
+/**
+ * Si el error dice "ese horario está tomado".
+ *
+ * La creación lo señala con `SlotAlreadyTakenError`; la edición, que pasa por el
+ * mecanismo del panel, lo traduce a un `ConflictException` con el motivo adentro.
+ * Los dos significan lo mismo para el cliente, y los dos tienen que llevarlo a la
+ * lista fresca de horarios en lugar de a un error.
+ */
+function isSlotConflict(error: unknown): boolean {
+  return error instanceof ConflictException;
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

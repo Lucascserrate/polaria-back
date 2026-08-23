@@ -127,14 +127,16 @@ export class BookingSession {
   appointmentId?: string | null;
 
   /**
-   * Cita que esta reserva viene a reemplazar, cuando el cliente pidió reagendar.
+   * Cita que esta sesión está editando, cuando el cliente pidió reagendar.
    *
-   * La vieja se cancela **al confirmar la nueva**, no antes: si se cancelara
-   * primero y el cliente abandonara el flujo a mitad, se quedaría sin turno por
-   * haber intentado moverlo.
+   * Presente significa "modo edición": al confirmar no se crea una reserva
+   * nueva, se modifica esta en el lugar y conserva su id, su historial y sus
+   * relaciones. También es lo que hace que la propia cita no cuente como
+   * ocupada al calcular horarios: sin eso, mover un turno quince minutos daría
+   * "ocupado" contra sí mismo.
    */
   @Column({ type: 'varchar', length: 36, nullable: true })
-  replacesAppointmentId?: string | null;
+  editingAppointmentId?: string | null;
 
   /**
    * `id` del último mensaje de Meta procesado. Meta reintenta los webhooks, y

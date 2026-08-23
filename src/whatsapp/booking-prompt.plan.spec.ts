@@ -91,6 +91,30 @@ describe('planBookingPrompt', () => {
     // 19:00 UTC son las 15:00 en La Paz.
     expect(plans[0].body).toContain('15:00');
   });
+
+  it('una reserva nueva se anuncia como agendada', () => {
+    const plans = planBookingPrompt({
+      kind: 'COMPLETED',
+      summary: SUMMARY,
+      appointmentId: 'appt-1',
+    });
+
+    expect(plans[0].body).toContain('quedó agendado');
+  });
+
+  it('una reserva modificada se anuncia como cambiada', () => {
+    // Decirle "tu turno quedó agendado" a quien acaba de mover el suyo suena a
+    // que le agendaron un segundo.
+    const plans = planBookingPrompt({
+      kind: 'COMPLETED',
+      summary: SUMMARY,
+      appointmentId: 'appt-1',
+      edited: true,
+    });
+
+    expect(plans[0].body).toContain('Cambié tu turno');
+    expect(plans[0].body).not.toContain('quedó agendado');
+  });
 });
 
 describe('planToTranscript', () => {
