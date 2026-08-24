@@ -290,6 +290,11 @@ export class BookingAvailabilityService {
     /** Fecha del pedido, `YYYY-MM-DD` en la zona del negocio. */
     date: string;
     segments: RequestedSegment[];
+    /**
+     * Cita que no cuenta como ocupada. La necesita la edición: los minutos que
+     * la reserva ya tenía no pueden contar como "pisado" contra sí misma.
+     */
+    excludeAppointmentId?: string;
     now?: Date;
   }): Promise<BookingWarning[]> {
     const { tenantId, date, segments } = input;
@@ -304,11 +309,19 @@ export class BookingAvailabilityService {
 
     const staffIds = [...new Set(segments.map((segment) => segment.staffId))];
 
-    const [businessHours, schedulesByStaff, staffList] = await Promise.all([
-      this.availabilityRepository.getBusinessHours(tenantId),
-      this.availabilityRepository.getStaffSchedules(staffIds),
-      this.availabilityRepository.getActiveStaffWithServices(tenantId),
-    ]);
+    const [businessHours, schedulesByStaff, staffList, busyByStaff] =
+      await Promise.all([
+        this.availabilityRepository.getBusinessHours(tenantId),
+        this.availabilityRepository.getStaffSchedules(staffIds),
+        this.availabilityRepository.getActiveStaffWithServices(tenantId),
+        this.availabilityRepository.getAppointmentsByStaff(
+          tenantId,
+          date,
+          timeZone,
+          staffIds,
+          input.excludeAppointmentId,
+        ),
+      ]);
 
     const staff = staffIds.map((id) => ({
       id,
@@ -345,6 +358,7 @@ export class BookingAvailabilityService {
       segments,
       businessRanges,
       workingRangesByStaff,
+      busyByStaff,
     });
   }
 

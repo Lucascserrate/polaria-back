@@ -29,6 +29,8 @@ export enum BookingWarningCode {
   OUTSIDE_BUSINESS_HOURS = 'OUTSIDE_BUSINESS_HOURS',
   /** El negocio está abierto a esa hora, pero ese profesional no trabaja. */
   STAFF_OFF_SHIFT = 'STAFF_OFF_SHIFT',
+  /** Ese profesional ya tiene otra cita que se pisa con esta. */
+  STAFF_BUSY = 'STAFF_BUSY',
 }
 
 export interface BookingWarning {
@@ -59,7 +61,18 @@ export interface CollectBookingWarningsInput {
   businessRanges: SlotRange[];
   /** Jornada de cada profesional ese día, por `staffId`. */
   workingRangesByStaff: Record<string, SlotRange[]>;
+  /**
+   * Lo que cada profesional ya tiene tomado ese día, por `staffId`.
+   *
+   * No incluye a la reserva que se está editando: sus propios minutos no se
+   * pisan consigo misma.
+   */
+  busyByStaff?: Record<string, SlotRange[]>;
 }
+
+/** Dos tramos se pisan si comparten aunque sea un minuto. */
+const overlaps = (a: SlotRange, b: SlotRange): boolean =>
+  a.startTime < b.endTime && a.endTime > b.startTime;
 
 /**
  * Las advertencias de una reserva pedida, sin repetir la misma en tres formas.
@@ -84,6 +97,32 @@ export const collectBookingWarnings = (
     warnings.push({
       code: BookingWarningCode.PAST_TIME,
       message: 'El horario elegido ya pasó.',
+    });
+  }
+
+  /*
+   * Pisarse con otra cita se avisa siempre, aunque el día esté cerrado o la hora
+   * quede fuera de horario.
+   *
+   * Las demás advertencias hablan del calendario del negocio y se explican entre
+   * sí; esta habla de otro cliente que ya tiene ese horario, y no es consecuencia
+   * de ninguna. Callarla porque además es fuera de hora sería esconder la única
+   * que involucra a una persona esperando.
+   */
+  const busyReported = new Set<string>();
+  for (const segment of segments) {
+    if (busyReported.has(segment.staffId)) continue;
+
+    const taken = input.busyByStaff?.[segment.staffId] ?? [];
+    if (!taken.some((other) => overlaps(segment, other))) continue;
+
+    busyReported.add(segment.staffId);
+    warnings.push({
+      code: BookingWarningCode.STAFF_BUSY,
+      staffId: segment.staffId,
+      message: segment.staffName
+        ? `${segment.staffName} ya tiene otra cita en ese horario.`
+        : 'El profesional ya tiene otra cita en ese horario.',
     });
   }
 

@@ -745,11 +745,21 @@ export class AppointmentsService {
    * Recibe el estado deseado completo de lo editable: cuándo empieza y qué
    * servicios tiene, cada uno con su profesional. Todo lo demás no se toca.
    *
-   * La disponibilidad la decide el mismo motor que usan WhatsApp y el asistente
-   * de creación, con una sola diferencia: **esta cita no cuenta como ocupada**.
-   * Sin eso, corregir la hora de 09:00 a 09:15 chocaría contra sí misma. No hay
-   * forma de forzar un horario cerrado o pisado: si el motor no lo ofrece, no se
-   * guarda.
+   * Rige la misma política que `create`: **advierte, no impide**. Alargar una
+   * reserva de las 16:30 con un servicio más, aunque se pase de la hora de
+   * cierre, es trabajo legítimo del negocio —el cliente ya está sentado en la
+   * silla—, y hasta acá se rechazaba con un "elegí otra hora". Los bloqueos son
+   * los que no admiten interpretación: la cita tiene que existir y estar
+   * abierta, el servicio tiene que estar activo, el profesional tiene que hacer
+   * ese servicio, y el índice único sigue siendo la última barrera.
+   *
+   * Las advertencias se calculan excluyendo esta misma cita: sus propios minutos
+   * no pueden contar como ocupados contra sí misma, o correr la hora quince
+   * minutos avisaría que se pisa consigo misma.
+   *
+   * WhatsApp no se ablanda por esto. El flujo del cliente revalida con
+   * `confirmSlot` antes de llegar acá y corta si el horario no está disponible;
+   * la estrictez vive en el flujo, igual que en `createFromBookingFlow`.
    *
    * Los recordatorios no se tocan acá. La reconciliación corre cada cinco
    * minutos, recalcula el aviso desde el inicio de la cita y mueve el que
@@ -759,7 +769,7 @@ export class AppointmentsService {
     id: string,
     tenantId: string,
     dto: EditBookingDto,
-  ): Promise<AppointmentDetail> {
+  ): Promise<{ appointment: AppointmentDetail; warnings: BookingWarning[] }> {
     const appointment = await this.appointmentRepository.findOne({
       where: { id, tenantId },
       relations: { services: true },
@@ -813,31 +823,24 @@ export class AppointmentsService {
       );
     }
 
-    /*
-     * Cada tramo se revalida por separado, con su propio servicio y profesional.
-     * Es lo que permite que el corte lo haga uno y la barba otro sin inventar
-     * reglas nuevas: el motor ya sabe si esa persona hace ese servicio, si le
-     * toca trabajar y si tiene el horario libre.
-     */
-    for (const segment of plan.segments) {
-      const { date } = this.getDateTimeParts(segment.startTime, timezone);
+    // Bloqueo, no advertencia: que alguien no haga ese servicio no es una
+    // excepción que el negocio quiera registrar, es un dato incoherente.
+    const staffById = await this.resolveBookingStaff(tenantId, dto.items);
 
-      const confirmation = await this.bookingAvailabilityService.confirmSlot({
+    const { date } = this.getDateTimeParts(startTime, timezone);
+
+    const warnings =
+      await this.bookingAvailabilityService.inspectRequestedBooking({
         tenantId,
         date,
-        serviceId: segment.serviceId,
-        staffId: segment.staffId,
-        startTime: segment.startTime,
+        segments: plan.segments.map((segment) => ({
+          staffId: segment.staffId,
+          staffName: staffById.get(segment.staffId)?.name ?? null,
+          startTime: segment.startTime,
+          endTime: segment.endTime,
+        })),
         excludeAppointmentId: id,
       });
-
-      if (!confirmation.available) {
-        const { time } = this.getDateTimeParts(segment.startTime, timezone);
-        throw new ConflictException(
-          `Las ${time} no están disponibles para ese servicio con ese profesional`,
-        );
-      }
-    }
 
     const claimsSlot = blocksAgenda(appointment.status);
 
@@ -863,7 +866,10 @@ export class AppointmentsService {
       throw error;
     }
 
-    return this.findDetailByTenant(id, tenantId);
+    return {
+      appointment: await this.findDetailByTenant(id, tenantId),
+      warnings,
+    };
   }
 
   /**

@@ -34,6 +34,7 @@ const collect = (input: {
     string,
     Array<{ startTime: Date; endTime: Date }>
   >;
+  busyByStaff?: Record<string, Array<{ startTime: Date; endTime: Date }>>;
   now?: Date;
 }) =>
   collectBookingWarnings({
@@ -44,6 +45,7 @@ const collect = (input: {
       diego: BUSINESS,
       carlos: BUSINESS,
     },
+    busyByStaff: input.busyByStaff,
   }).map((warning) => warning.code);
 
 describe('collectBookingWarnings', () => {
@@ -215,5 +217,85 @@ describe('collectBookingWarnings', () => {
 
   it('sin tramos no hay nada que advertir', () => {
     expect(collect({ segments: [] })).toEqual([]);
+  });
+});
+
+describe('collectBookingWarnings · pisarse con otra cita', () => {
+  it('advierte cuando el tramo se pisa con una cita existente', () => {
+    // El caso de alargar una reserva: 16:30 pasa a terminar 17:30 y se come
+    // los 17:00 de otro cliente.
+    expect(
+      collect({
+        segments: [segment('16:30', '17:30')],
+        busyByStaff: {
+          diego: [{ startTime: at('17:00'), endTime: at('17:30') }],
+        },
+      }),
+    ).toEqual([BookingWarningCode.STAFF_BUSY]);
+  });
+
+  it('no advierte cuando una termina justo donde empieza la otra', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '17:00')],
+        busyByStaff: {
+          diego: [{ startTime: at('17:00'), endTime: at('17:30') }],
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it('no confunde la agenda de un profesional con la de otro', () => {
+    expect(
+      collect({
+        segments: [segment('16:30', '17:30')],
+        busyByStaff: {
+          carlos: [{ startTime: at('17:00'), endTime: at('17:30') }],
+        },
+      }),
+    ).toEqual([]);
+  });
+
+  it('lo dice una sola vez aunque se pisen varios tramos del mismo profesional', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30'), segment('16:30', '17:00')],
+        busyByStaff: {
+          diego: [{ startTime: at('16:00'), endTime: at('17:00') }],
+        },
+      }),
+    ).toEqual([BookingWarningCode.STAFF_BUSY]);
+  });
+
+  it('no se calla porque además esté fuera de horario', () => {
+    // Es la advertencia que involucra a otra persona esperando: taparla con
+    // "fuera de horario" sería esconder la más grave de las dos.
+    expect(
+      collect({
+        segments: [segment('19:00', '20:00')],
+        busyByStaff: {
+          diego: [{ startTime: at('19:00'), endTime: at('19:30') }],
+        },
+      }),
+    ).toEqual([
+      BookingWarningCode.STAFF_BUSY,
+      BookingWarningCode.OUTSIDE_BUSINESS_HOURS,
+    ]);
+  });
+
+  it('no se calla porque además el día esté cerrado', () => {
+    expect(
+      collect({
+        segments: [segment('16:30', '17:30')],
+        businessRanges: [],
+        busyByStaff: {
+          diego: [{ startTime: at('17:00'), endTime: at('17:30') }],
+        },
+      }),
+    ).toEqual([BookingWarningCode.STAFF_BUSY, BookingWarningCode.CLOSED_DAY]);
+  });
+
+  it('sin agenda ocupada no cambia nada', () => {
+    expect(collect({ segments: [segment('16:00', '16:30')] })).toEqual([]);
   });
 });
