@@ -63,6 +63,14 @@ type SettingsResponse = {
   businessType: string | null;
   timezone: string;
   /**
+   * Moneda del negocio, en ISO 4217.
+   *
+   * La sabía solo el módulo de reportes, así que el resto del panel mostraba
+   * precios sin unidad —o con una escrita a mano—. Cualquier pantalla que
+   * muestre plata la necesita.
+   */
+  currency: string;
+  /**
    * Coordenadas del local, como números.
    *
    * MySQL devuelve `decimal` como cadena; se convierte acá para que el panel no
@@ -161,6 +169,7 @@ export class SettingsService {
       polariaName: tenant.name,
       businessType: tenant.businessType ?? null,
       timezone: tenant.timezone,
+      currency: tenant.currency,
       location: toLocation(tenant.latitude, tenant.longitude),
       businessHours,
       aiEnabled: tenant.aiEnabled,
