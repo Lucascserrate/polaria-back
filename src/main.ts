@@ -2,6 +2,7 @@ import cookieParser from 'cookie-parser';
 import { NestApplication, NestFactory } from '@nestjs/core';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { AppModule } from './app.module';
+import { VALIDATION_PIPE_OPTIONS } from './config/validation-pipe.options';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 import 'dotenv/config';
@@ -39,13 +40,7 @@ async function bootstrap() {
   });
 
   app.use(cookieParser());
-  app.useGlobalPipes(
-    new ValidationPipe({
-      whitelist: true,
-      transform: true,
-      forbidNonWhitelisted: true,
-    }),
-  );
+  app.useGlobalPipes(new ValidationPipe(VALIDATION_PIPE_OPTIONS));
 
   const config = new DocumentBuilder()
     .setTitle('Polaria API')

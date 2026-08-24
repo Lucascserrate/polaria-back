@@ -16,7 +16,7 @@ import { AuthGuard } from '@nestjs/passport';
 import type { Request } from 'express';
 import { AppointmentsService } from './appointments.service';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AppointmentsRangeQueryDto } from './dto/appointments-range-query.dto';
 import { EditBookingDto } from './dto/edit-booking.dto';
 
@@ -100,7 +100,7 @@ export class AppointmentsController {
   update(
     @Req() req: Request,
     @Param('id') id: string,
-    @Body() updateAppointmentDto: UpdateAppointmentDto,
+    @Body() updateStatusDto: UpdateAppointmentStatusDto,
   ) {
     const tenantId = (req.user as { sub?: string }).sub;
     if (!tenantId) {
@@ -109,7 +109,7 @@ export class AppointmentsController {
     return this.appointmentsService.updateByTenant(
       id,
       tenantId,
-      updateAppointmentDto,
+      updateStatusDto,
     );
   }
 

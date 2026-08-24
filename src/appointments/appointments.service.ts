@@ -15,7 +15,7 @@ import {
   OPEN_APPOINTMENT_STATUSES,
 } from './entities/appointment.entity';
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
-import { UpdateAppointmentDto } from './dto/update-appointment.dto';
+import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { EditBookingDto } from './dto/edit-booking.dto';
 import { planBookingSegments } from './booking-plan';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
@@ -716,23 +716,20 @@ export class AppointmentsService {
   async updateByTenant(
     id: string,
     tenantId: string,
-    dto: UpdateAppointmentDto,
+    dto: UpdateAppointmentStatusDto,
   ) {
-    const { status, googleEventId } = dto as {
-      status?: AppointmentStatus;
-      googleEventId?: string;
-    };
-
-    await this.appointmentRepository.update(
+    const { affected } = await this.appointmentRepository.update(
       { id, tenantId },
-      {
-        ...(status ? { status } : {}),
-        ...(googleEventId ? { googleEventId } : {}),
-      },
+      { status: dto.status },
     );
 
+    // Sin esto, pedir el estado de una cita ajena devolvería sus datos.
+    if (!affected) {
+      throw new NotFoundException('La cita no existe');
+    }
+
     // Un cambio de estado libera o reclama el horario en el índice único.
-    await this.syncActiveSlot(id, status);
+    await this.syncActiveSlot(id, dto.status);
 
     return this.findDetailByTenant(id, tenantId);
   }
