@@ -1,5 +1,6 @@
 import { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import { ReportPreset } from './utils/report-range.util';
+import type { ReportTimeline } from './utils/report-timeline.util';
 
 export interface ReportSummary {
   /** Suma de `priceAtBooking` de los servicios de citas completadas. */
@@ -46,6 +47,12 @@ export interface TenantReport {
   /** Moneda del negocio en ISO 4217, para que el cliente formatee los montos. */
   currency: string;
   summary: ReportSummary;
+  /**
+   * Cómo evolucionó la facturación dentro del período.
+   *
+   * `null` cuando el rango es de un solo día: una sola barra no compara nada.
+   */
+  timeline: ReportTimeline | null;
   staffRanking: StaffRankingEntry[];
   serviceRanking: ServiceRankingEntry[];
 }

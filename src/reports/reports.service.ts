@@ -13,6 +13,10 @@ import { TenantError } from '../tenants/enums/tenant.enum';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { ReportRange, resolveReportRange } from './utils/report-range.util';
 import {
+  buildReportTimeline,
+  type ReportTimeline,
+} from './utils/report-timeline.util';
+import {
   ReportSummary,
   ServiceRankingEntry,
   StaffRankingEntry,
@@ -82,11 +86,14 @@ export class ReportsService {
     const timezone = tenant.timezone || DEFAULT_TIMEZONE;
     const range = resolveReportRange(query, timezone, new Date());
 
-    const [summary, staffRanking, serviceRanking] = await Promise.all([
-      this.getSummary(tenantId, range),
-      this.getStaffRanking(tenantId, range),
-      this.getServiceRanking(tenantId, range),
-    ]);
+    const [summary, timeline, staffRanking, serviceRanking] = await Promise.all(
+      [
+        this.getSummary(tenantId, range),
+        this.getTimeline(tenantId, range, timezone),
+        this.getStaffRanking(tenantId, range),
+        this.getServiceRanking(tenantId, range),
+      ],
+    );
 
     return {
       range: {
@@ -97,6 +104,7 @@ export class ReportsService {
       },
       currency: tenant.currency,
       summary,
+      timeline,
       staffRanking,
       serviceRanking,
     };
@@ -202,6 +210,42 @@ export class ReportsService {
         : 0,
       byStatus,
     };
+  }
+
+  /**
+   * La evolución de la facturación dentro del período.
+   *
+   * Trae las filas y agrupa en memoria en lugar de pedirle a MySQL un
+   * `GROUP BY` por fecha. El día que interesa es el del negocio: agrupando por
+   * fecha UTC, las citas de la tarde-noche caerían en el día siguiente, y
+   * `CONVERT_TZ` exige las tablas de zonas cargadas. Son las mismas filas que ya
+   * recorren los otros agregados, con dos columnas.
+   */
+  private async getTimeline(
+    tenantId: string,
+    range: ReportRange,
+    timezone: string,
+  ): Promise<ReportTimeline | null> {
+    const rows = await this.billedSegments(tenantId, range)
+      .select('appointment.id', 'appointmentId')
+      .addSelect('appointment.startTime', 'startTime')
+      .addSelect('segment.priceAtBooking', 'price')
+      .getRawMany<{
+        appointmentId: string;
+        startTime: Date | string;
+        price: string | number;
+      }>();
+
+    return buildReportTimeline({
+      from: range.from,
+      to: range.to,
+      timezone,
+      entries: rows.map((row) => ({
+        appointmentId: row.appointmentId,
+        startTime: new Date(row.startTime),
+        price: toNumber(row.price),
+      })),
+    });
   }
 
   private async getStaffRanking(
