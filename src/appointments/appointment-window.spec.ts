@@ -1,6 +1,5 @@
 import {
   currentCalendarDate,
-  dayWindow,
   daysInRange,
   parseCalendarDate,
   rangeWindow,
@@ -39,13 +38,12 @@ describe('parseCalendarDate', () => {
   });
 });
 
-describe('dayWindow', () => {
+describe('rangeWindow de un solo día', () => {
+  const oneDay = (year: number, month: number, day: number) =>
+    rangeWindow(LA_PAZ, { year, month, day }, { year, month, day });
+
   it('abre a la medianoche del negocio y cierra en la del día siguiente', () => {
-    const { startUtc, endUtc } = dayWindow(LA_PAZ, {
-      year: 2026,
-      month: 8,
-      day: 22,
-    });
+    const { startUtc, endUtc } = oneDay(2026, 8, 22);
 
     // Medianoche en UTC-4 es 04:00 UTC.
     expect(startUtc.toISOString()).toBe('2026-08-22T04:00:00.000Z');
@@ -53,11 +51,7 @@ describe('dayWindow', () => {
   });
 
   it('cruza el fin de mes sin saltearse el día', () => {
-    const { startUtc, endUtc } = dayWindow(LA_PAZ, {
-      year: 2026,
-      month: 8,
-      day: 31,
-    });
+    const { startUtc, endUtc } = oneDay(2026, 8, 31);
 
     expect(startUtc.toISOString()).toBe('2026-08-31T04:00:00.000Z');
     expect(endUtc.toISOString()).toBe('2026-09-01T04:00:00.000Z');
@@ -66,8 +60,16 @@ describe('dayWindow', () => {
   it('usa el desplazamiento de la fecha pedida, no el de hoy', () => {
     // Enero es verano en Santiago (UTC-3) y julio invierno (UTC-4). Con un
     // desplazamiento fijo, una de las dos ventanas quedaría corrida una hora.
-    const summer = dayWindow(SANTIAGO, { year: 2026, month: 1, day: 15 });
-    const winter = dayWindow(SANTIAGO, { year: 2026, month: 7, day: 15 });
+    const summer = rangeWindow(
+      SANTIAGO,
+      { year: 2026, month: 1, day: 15 },
+      { year: 2026, month: 1, day: 15 },
+    );
+    const winter = rangeWindow(
+      SANTIAGO,
+      { year: 2026, month: 7, day: 15 },
+      { year: 2026, month: 7, day: 15 },
+    );
 
     expect(summer.startUtc.toISOString()).toBe('2026-01-15T03:00:00.000Z');
     expect(winter.startUtc.toISOString()).toBe('2026-07-15T04:00:00.000Z');
@@ -85,12 +87,6 @@ describe('rangeWindow', () => {
 
     expect(startUtc.toISOString()).toBe('2026-08-17T04:00:00.000Z');
     expect(endUtc.toISOString()).toBe('2026-08-24T04:00:00.000Z');
-  });
-
-  it('un solo día equivale a la ventana de ese día', () => {
-    const date = { year: 2026, month: 8, day: 22 };
-
-    expect(rangeWindow(LA_PAZ, date, date)).toEqual(dayWindow(LA_PAZ, date));
   });
 
   it('cruza el cambio de año', () => {

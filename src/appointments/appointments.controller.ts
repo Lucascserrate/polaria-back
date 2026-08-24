@@ -67,16 +67,6 @@ export class AppointmentsController {
     );
   }
 
-  @UseGuards(AuthGuard('jwt'))
-  @Get('day')
-  findDay(@Req() req: Request, @Query('date') date?: string) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
-    return this.appointmentsService.findDayByTenant(tenantId, date?.trim());
-  }
-
   /**
    * Las citas de un rango de días. Va antes de `:id` para que `range` no se lea
    * como el identificador de una cita.

@@ -17,7 +17,6 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentDto } from './dto/update-appointment.dto';
 import { EditBookingDto } from './dto/edit-booking.dto';
 import { planBookingSegments } from './booking-plan';
-import { AvailabilityService } from '../availability/availability.service';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import { AppointmentService as AppointmentServiceEntity } from './entities/appointment_service.entity';
 import { Service } from '../services/entities/service.entity';
@@ -37,7 +36,6 @@ import {
 } from './appointment-item';
 import {
   currentCalendarDate,
-  dayWindow,
   daysInRange,
   parseCalendarDate,
   rangeWindow,
@@ -63,7 +61,6 @@ export class AppointmentsService {
     private appointmentServiceRepository: Repository<AppointmentServiceEntity>,
     @InjectRepository(Service)
     private serviceRepository: Repository<Service>,
-    private readonly availabilityService: AvailabilityService,
     private readonly bookingAvailabilityService: BookingAvailabilityService,
   ) {}
 
@@ -173,52 +170,6 @@ export class AppointmentsService {
   }
 
   /**
-   * Los profesionales de una reserva, verificando que puedan hacer su servicio.
-   *
-   * Es un bloqueo y no una advertencia: que alguien no ofrezca ese servicio no es
-   * una excepción que el negocio quiera registrar, es un dato incoherente. El
-   * panel elige de listas filtradas, así que llegar acá con un par inválido
-   * significa que algo se desincronizó.
-   */
-  private async resolveBookingStaff(
-    tenantId: string,
-    items: Array<{ serviceId: string; staffId: string }>,
-  ): Promise<Map<string, { id: string; name: string }>> {
-    const staffRepo = this.appointmentRepository.manager.getRepository(Staff);
-
-    const staffIds = [...new Set(items.map((item) => item.staffId))];
-    const staff = await staffRepo.find({
-      where: { id: In(staffIds), tenantId, isActive: true },
-      relations: { services: true },
-    });
-
-    const byId = new Map(staff.map((member) => [member.id, member]));
-
-    for (const item of items) {
-      const member = byId.get(item.staffId);
-      if (!member) {
-        throw new BadRequestException(
-          `El profesional ${item.staffId} no existe o no está activo`,
-        );
-      }
-
-      const offersService = (member.services ?? []).some(
-        (service) => service.id === item.serviceId,
-      );
-
-      if (!offersService) {
-        throw new BadRequestException(
-          `${member.name} no ofrece el servicio seleccionado`,
-        );
-      }
-    }
-
-    return new Map(
-      staff.map((member) => [member.id, { id: member.id, name: member.name }]),
-    );
-  }
-
-  /**
    * Inserta la cita y sus tramos, todo o nada.
    *
    * Es la contraparte de `replaceSegments`: la misma transacción y la misma
@@ -278,24 +229,50 @@ export class AppointmentsService {
     }
   }
 
-  private async saveSegments(
-    segments: AppointmentServiceEntity[],
-    rollbackAppointmentId?: string,
-  ): Promise<void> {
-    try {
-      await this.appointmentServiceRepository.save(segments);
-    } catch (error: unknown) {
-      if (rollbackAppointmentId) {
-        await this.appointmentRepository.delete({ id: rollbackAppointmentId });
-      }
-      if (isDuplicateEntryError(error)) {
-        const first = segments[0];
-        throw new ConflictException(
-          new SlotAlreadyTakenError(first.staffId, first.startTime).message,
+  /**
+   * Los profesionales de una reserva, verificando que puedan hacer su servicio.
+   *
+   * Es un bloqueo y no una advertencia: que alguien no ofrezca ese servicio no es
+   * una excepción que el negocio quiera registrar, es un dato incoherente. El
+   * panel elige de listas filtradas, así que llegar acá con un par inválido
+   * significa que algo se desincronizó.
+   */
+  private async resolveBookingStaff(
+    tenantId: string,
+    items: Array<{ serviceId: string; staffId: string }>,
+  ): Promise<Map<string, { id: string; name: string }>> {
+    const staffRepo = this.appointmentRepository.manager.getRepository(Staff);
+
+    const staffIds = [...new Set(items.map((item) => item.staffId))];
+    const staff = await staffRepo.find({
+      where: { id: In(staffIds), tenantId, isActive: true },
+      relations: { services: true },
+    });
+
+    const byId = new Map(staff.map((member) => [member.id, member]));
+
+    for (const item of items) {
+      const member = byId.get(item.staffId);
+      if (!member) {
+        throw new BadRequestException(
+          `El profesional ${item.staffId} no existe o no está activo`,
         );
       }
-      throw error;
+
+      const offersService = (member.services ?? []).some(
+        (service) => service.id === item.serviceId,
+      );
+
+      if (!offersService) {
+        throw new BadRequestException(
+          `${member.name} no ofrece el servicio seleccionado`,
+        );
+      }
     }
+
+    return new Map(
+      staff.map((member) => [member.id, { id: member.id, name: member.name }]),
+    );
   }
 
   async findAllByTenant(
@@ -525,120 +502,6 @@ export class AppointmentsService {
   }
 
   /**
-   * La agenda de un día completo del negocio, con sus totales.
-   *
-   * `date` ausente significa hoy, que es lo que abre el panel; con una fecha se
-   * mira otro día del calendario sin cambiar nada más de la respuesta.
-   */
-  async findDayByTenant(
-    tenantId: string,
-    date?: string,
-  ): Promise<{
-    items: AppointmentItem[];
-    total: number;
-    counts: {
-      pending: number;
-      confirmed: number;
-      completed: number;
-      cancelled: number;
-    };
-    revenueTotal: number;
-  }> {
-    const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
-    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-    const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
-    const { startUtc, endUtc } = this.resolveDayRange(timezone, date);
-
-    const endInclusive = new Date(endUtc.getTime() - 1);
-    const appointments = await this.appointmentRepository.find({
-      where: {
-        tenantId,
-        startTime: Between(startUtc, endInclusive),
-      },
-      relations: {
-        client: true,
-        tenant: true,
-        reminders: true,
-        services: {
-          service: true,
-          staff: true,
-        },
-      },
-      withDeleted: true,
-      order: { startTime: 'ASC' },
-    });
-
-    const items = appointments.map((a) => toAppointmentItem(a, timezone));
-
-    const rawCounts = await this.appointmentRepository
-      .createQueryBuilder('appointment')
-      .select('COUNT(*)', 'total')
-      .addSelect(
-        `SUM(CASE WHEN appointment.status = :pending THEN 1 ELSE 0 END)`,
-        'pending',
-      )
-      .addSelect(
-        `SUM(CASE WHEN appointment.status = :confirmed THEN 1 ELSE 0 END)`,
-        'confirmed',
-      )
-      .addSelect(
-        `SUM(CASE WHEN appointment.status = :completed THEN 1 ELSE 0 END)`,
-        'completed',
-      )
-      .addSelect(
-        `SUM(CASE WHEN appointment.status = :cancelled THEN 1 ELSE 0 END)`,
-        'cancelled',
-      )
-      .where('appointment.tenantId = :tenantId', { tenantId })
-      .andWhere('appointment.startTime >= :startUtc', { startUtc })
-      .andWhere('appointment.startTime < :endUtc', { endUtc })
-      .setParameters({
-        pending: AppointmentStatus.PENDING,
-        confirmed: AppointmentStatus.CONFIRMED,
-        completed: AppointmentStatus.COMPLETED,
-        cancelled: AppointmentStatus.CANCELLED,
-      })
-      .getRawOne<{
-        total: string;
-        pending: string;
-        confirmed: string;
-        completed: string;
-        cancelled: string;
-      }>();
-
-    // Solo lo atendido, igual que el módulo de reportes. Sin este filtro sumaba
-    // también las canceladas y las que todavía no ocurrieron, y el mismo día
-    // mostraba dos cifras distintas según qué pantalla lo preguntara.
-    const rawRevenue = await this.appointmentServiceRepository
-      .createQueryBuilder('appointmentService')
-      .select('SUM(appointmentService.priceAtBooking)', 'revenue')
-      .innerJoin(
-        Appointment,
-        'appointment',
-        'appointment.id = appointmentService.appointmentId',
-      )
-      .where('appointment.tenantId = :tenantId', { tenantId })
-      .andWhere('appointment.status = :completed', {
-        completed: AppointmentStatus.COMPLETED,
-      })
-      .andWhere('appointment.startTime >= :startUtc', { startUtc })
-      .andWhere('appointment.startTime < :endUtc', { endUtc })
-      .getRawOne<{ revenue: string | null }>();
-
-    return {
-      items,
-      total: Number(rawCounts?.total ?? items.length),
-      counts: {
-        pending: Number(rawCounts?.pending ?? 0),
-        confirmed: Number(rawCounts?.confirmed ?? 0),
-        completed: Number(rawCounts?.completed ?? 0),
-        cancelled: Number(rawCounts?.cancelled ?? 0),
-      },
-      revenueTotal: Number(rawRevenue?.revenue ?? 0),
-    };
-  }
-
-  /**
    * Citas futuras de un cliente, la más próxima primero.
    *
    * Solo las que ocupan agenda: una cancelada o completada no es algo que el
@@ -721,78 +584,6 @@ export class AppointmentsService {
       relations: ['services', 'services.service', 'services.staff'],
       order: { startTime: 'DESC' },
     });
-  }
-
-  async createFromAssistant(input: {
-    tenantId: string;
-    clientId: string;
-    serviceIds: string[];
-    staffId?: string;
-    date: string;
-    time: string;
-  }): Promise<Appointment> {
-    const availability = await this.availabilityService.findAvailableSlots({
-      tenantId: input.tenantId,
-      serviceIds: input.serviceIds,
-      desiredDate: input.date,
-      desiredTime: input.time,
-      staffId: input.staffId,
-    });
-
-    if (!availability.isAvailable || availability.suggestedSlots.length === 0) {
-      throw new Error('Slot ya no disponible');
-    }
-
-    const slot = availability.suggestedSlots[0];
-    const appointment = await this.appointmentRepository.save({
-      tenantId: input.tenantId,
-      clientId: input.clientId,
-      startTime: new Date(slot.startTime),
-      endTime: new Date(slot.endTime),
-      status: AppointmentStatus.CONFIRMED,
-    });
-
-    const services = await this.serviceRepository.find({
-      where: {
-        id: In(input.serviceIds),
-        tenantId: input.tenantId,
-        isActive: true,
-      },
-    });
-
-    const servicesById = new Map(services.map((s) => [s.id, s]));
-    const orderedServices = input.serviceIds.map((id) => servicesById.get(id)!);
-
-    let cursor = appointment.startTime;
-    const appointmentServices = orderedServices.map((service, index) => {
-      const segmentStart = cursor;
-      const segmentEnd = new Date(
-        segmentStart.getTime() + service.durationMinutes * 60_000,
-      );
-      cursor = segmentEnd;
-
-      const staffIdForService =
-        slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
-        slot.staffId;
-
-      return this.appointmentServiceRepository.create({
-        appointmentId: appointment.id,
-        serviceId: service.id,
-        staffId: staffIdForService,
-        startTime: segmentStart,
-        activeStartTime: blocksAgenda(appointment.status) ? segmentStart : null,
-        endTime: segmentEnd,
-        priceAtBooking: service.price,
-        durationAtBooking: service.durationMinutes,
-        sequenceOrder: index,
-      });
-    });
-
-    if (appointmentServices.length > 0) {
-      await this.saveSegments(appointmentServices, appointment.id);
-    }
-
-    return appointment;
   }
 
   /**
@@ -905,204 +696,42 @@ export class AppointmentsService {
     }
   }
 
-  async updateFromAssistant(input: {
-    appointmentId: string;
-    tenantId: string;
-    serviceIds: string[];
-    staffId?: string;
-    date: string;
-    time: string;
-  }): Promise<Appointment> {
-    const appointment = await this.appointmentRepository.findOne({
-      where: { id: input.appointmentId },
-    });
-
-    if (!appointment) {
-      throw new Error('Cita no encontrada');
-    }
-
-    const availability = await this.availabilityService.findAvailableSlots({
-      tenantId: input.tenantId,
-      serviceIds: input.serviceIds,
-      desiredDate: input.date,
-      desiredTime: input.time,
-      staffId: input.staffId,
-    });
-
-    if (!availability.isAvailable || availability.suggestedSlots.length === 0) {
-      throw new Error('Nuevo horario no disponible');
-    }
-
-    const slot = availability.suggestedSlots[0];
-    appointment.startTime = new Date(slot.startTime);
-    appointment.endTime = new Date(slot.endTime);
-
-    await this.appointmentRepository.save(appointment);
-
-    await this.appointmentServiceRepository.delete({
-      appointmentId: appointment.id,
-    });
-
-    const services = await this.serviceRepository.find({
-      where: {
-        id: In(input.serviceIds),
-        tenantId: input.tenantId,
-        isActive: true,
-      },
-    });
-
-    const servicesById = new Map(services.map((s) => [s.id, s]));
-    const orderedServices = input.serviceIds.map((id) => servicesById.get(id)!);
-
-    let cursor = appointment.startTime;
-    const appointmentServices = orderedServices.map((service, index) => {
-      const segmentStart = cursor;
-      const segmentEnd = new Date(
-        segmentStart.getTime() + service.durationMinutes * 60_000,
-      );
-      cursor = segmentEnd;
-
-      const staffIdForService =
-        slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
-        slot.staffId;
-
-      return this.appointmentServiceRepository.create({
-        appointmentId: appointment.id,
-        serviceId: service.id,
-        staffId: staffIdForService,
-        startTime: segmentStart,
-        activeStartTime: blocksAgenda(appointment.status) ? segmentStart : null,
-        endTime: segmentEnd,
-        priceAtBooking: service.price,
-        durationAtBooking: service.durationMinutes,
-        sequenceOrder: index,
-      });
-    });
-
-    if (appointmentServices.length > 0) {
-      await this.saveSegments(appointmentServices);
-    }
-
-    return appointment;
-  }
-
   async remove(id: string) {
     await this.appointmentRepository.delete(id);
     return { deleted: true };
   }
 
+  /**
+   * Cambia el estado de una cita.
+   *
+   * Es lo único que edita este método, y por eso es tan corto. Antes recibía
+   * también servicios y horario y los revalidaba con el motor conversacional,
+   * pero eso ya vive en `editBookingByTenant`, que recibe el estado deseado
+   * completo y lo escribe en una transacción. Mantener dos formas de reescribir
+   * una reserva era garantizar que se separaran.
+   */
   async updateByTenant(
     id: string,
     tenantId: string,
     dto: UpdateAppointmentDto,
   ) {
-    const { serviceIds, staffId, segments, ...appointmentUpdates } = dto as {
-      serviceIds?: string[];
-      staffId?: string;
-      segments?: Array<{ serviceId: string; staffId: string }>;
-      startTime?: Date;
-      endTime?: Date;
+    const { status, googleEventId } = dto as {
       status?: AppointmentStatus;
       googleEventId?: string;
-      clientId?: string;
     };
 
     await this.appointmentRepository.update(
       { id, tenantId },
-      appointmentUpdates,
+      {
+        ...(status ? { status } : {}),
+        ...(googleEventId ? { googleEventId } : {}),
+      },
     );
 
     // Un cambio de estado libera o reclama el horario en el índice único.
-    await this.syncActiveSlot(id, appointmentUpdates.status);
+    await this.syncActiveSlot(id, status);
 
-    if (serviceIds && serviceIds.length > 0) {
-      const appointment = await this.appointmentRepository.findOne({
-        where: { id, tenantId },
-      });
-
-      if (appointment) {
-        const tenantRepo =
-          this.appointmentRepository.manager.getRepository(Tenant);
-        const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
-        const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
-        const { date, time } = this.getDateTimeParts(
-          appointment.startTime,
-          timezone,
-        );
-
-        const isMultiStaff = Array.isArray(segments) && segments.length > 0;
-        const availability = await this.availabilityService.findAvailableSlots({
-          tenantId,
-          serviceIds,
-          desiredDate: date,
-          desiredTime: time,
-          staffId: isMultiStaff ? undefined : staffId,
-        });
-
-        if (
-          !availability.isAvailable ||
-          availability.suggestedSlots.length === 0
-        ) {
-          throw new ConflictException({
-            message: 'Nuevo horario no disponible',
-            suggestedSlots: availability.suggestedSlots,
-          });
-        }
-
-        const slot = availability.suggestedSlots[0];
-
-        await this.appointmentServiceRepository.delete({ appointmentId: id });
-        const services = await this.serviceRepository.find({
-          where: {
-            id: In(serviceIds),
-            tenantId,
-            isActive: true,
-          },
-        });
-
-        const servicesById = new Map(services.map((s) => [s.id, s]));
-        const orderedServices = serviceIds.map((sid) => servicesById.get(sid)!);
-
-        let cursor = appointment.startTime;
-        const appointmentServices = orderedServices.map((service, index) => {
-          const segmentStart = cursor;
-          const segmentEnd = new Date(
-            segmentStart.getTime() + service.durationMinutes * 60_000,
-          );
-          cursor = segmentEnd;
-
-          const staffIdForService =
-            slot.segments?.find((s) => s.serviceId === service.id)?.staffId ??
-            staffId;
-
-          if (!staffIdForService) {
-            throw new BadRequestException(
-              'No se pudo determinar staff para el servicio',
-            );
-          }
-
-          return this.appointmentServiceRepository.create({
-            appointmentId: appointment.id,
-            serviceId: service.id,
-            staffId: staffIdForService,
-            startTime: segmentStart,
-            activeStartTime: blocksAgenda(appointment.status)
-              ? segmentStart
-              : null,
-            endTime: segmentEnd,
-            priceAtBooking: service.price,
-            durationAtBooking: service.durationMinutes,
-            sequenceOrder: index,
-          });
-        });
-
-        if (appointmentServices.length > 0) {
-          await this.saveSegments(appointmentServices);
-        }
-      }
-    }
-
-    return this.findOneByTenant(id, tenantId);
+    return this.findDetailByTenant(id, tenantId);
   }
 
   /**
@@ -1285,20 +914,6 @@ export class AppointmentsService {
   async removeByTenant(id: string, tenantId: string) {
     await this.appointmentRepository.delete({ id, tenantId });
     return { deleted: true };
-  }
-
-  /**
-   * Rango del día pedido, o del día en curso si no vino ninguno.
-   *
-   * El cálculo vive en `appointment-window`; acá solo se traduce una fecha
-   * inválida al error que corresponde devolver por HTTP.
-   */
-  private resolveDayRange(timezone: string, date?: string) {
-    if (!date) {
-      return dayWindow(timezone, currentCalendarDate(timezone, new Date()));
-    }
-
-    return dayWindow(timezone, this.parseDateOrFail(date, 'date'));
   }
 
   /**

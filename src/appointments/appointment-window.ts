@@ -97,12 +97,6 @@ const nextDay = (date: CalendarDate): CalendarDate => {
   };
 };
 
-/** Un día completo del negocio. */
-export const dayWindow = (timezone: string, date: CalendarDate): UtcWindow => ({
-  startUtc: startOfDayUtc(timezone, date),
-  endUtc: startOfDayUtc(timezone, nextDay(date)),
-});
-
 /**
  * Varios días seguidos, con los dos extremos incluidos.
  *
