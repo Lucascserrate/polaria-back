@@ -49,6 +49,7 @@ export class AvailabilityController {
       serviceId: query.serviceId,
       staffId: query.staffId,
       excludeAppointmentId: query.excludeAppointmentId,
+      scope: query.scope,
     });
   }
 

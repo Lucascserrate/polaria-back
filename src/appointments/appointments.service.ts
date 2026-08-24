@@ -23,6 +23,8 @@ import { AppointmentService as AppointmentServiceEntity } from './entities/appoi
 import { Service } from '../services/entities/service.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { Staff } from '../staff/entities/staff.entity';
+import type { BookingWarning } from './booking-warnings';
 import {
   isDuplicateEntryError,
   SlotAlreadyTakenError,
@@ -65,129 +67,217 @@ export class AppointmentsService {
     private readonly bookingAvailabilityService: BookingAvailabilityService,
   ) {}
 
-  async create(createAppointmentDto: CreateAppointmentDto) {
-    const { serviceIds, segments, ...appointmentData } = createAppointmentDto;
-
-    const startTime = this.parseDate(appointmentData.startTime, 'startTime');
-    const endTimeInput = this.parseDate(appointmentData.endTime, 'endTime');
+  /**
+   * Crea una reserva desde el panel.
+   *
+   * Antes preguntaba al motor conversacional —el que le sugiere horarios a un
+   * cliente por WhatsApp— y tomaba su primera sugerencia como permiso. Eso tenía
+   * dos consecuencias: un horario ocupado se guardaba igual si ese día había
+   * *otro* libre, y el reparto de profesionales salía de un horario distinto del
+   * pedido.
+   *
+   * Ahora el panel pide un horario exacto y se registra tal cual. Lo que no
+   * cierra —pasado, día cerrado, fuera de horario, alguien fuera de turno—
+   * vuelve como **advertencias**, porque registrar una excepción es trabajo
+   * legítimo del dueño. Los bloqueos son los que no admiten interpretación: un
+   * servicio que no existe, una duración inválida, un profesional que no hace
+   * ese servicio, y el índice único.
+   *
+   * WhatsApp no pasa por acá: entra por `createFromBookingFlow` y sigue con las
+   * reglas estrictas del cliente.
+   */
+  async create(dto: CreateAppointmentDto): Promise<{
+    appointment: AppointmentDetail;
+    warnings: BookingWarning[];
+  }> {
+    const tenantId = dto.tenantId;
+    const startTime = this.parseDate(dto.startTime, 'startTime');
 
     const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
-    const tenant = await tenantRepo.findOne({
-      where: { id: appointmentData.tenantId },
-    });
+    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
     const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
-    const { date, time } = this.getDateTimeParts(startTime, timezone);
 
+    const serviceIds = [...new Set(dto.items.map((item) => item.serviceId))];
     const services = await this.serviceRepository.find({
-      where: {
-        id: In(serviceIds),
-        tenantId: appointmentData.tenantId,
-        isActive: true,
-      },
+      where: { id: In(serviceIds), tenantId, isActive: true },
     });
 
-    if (services.length !== serviceIds.length) {
-      throw new BadRequestException(
-        'Uno o más servicios no existen para este tenant',
-      );
-    }
-
-    const servicesById = new Map(services.map((s) => [s.id, s]));
-    const orderedServices = serviceIds.map((id) => servicesById.get(id)!);
-
-    const expectedTotalMinutes = orderedServices.reduce(
-      (sum, s) => sum + (s.durationMinutes || 0),
-      0,
-    );
-    if (expectedTotalMinutes <= 0) {
-      throw new BadRequestException('Duración total inválida');
-    }
-
-    const expectedEndTime = new Date(
-      startTime.getTime() + expectedTotalMinutes * 60_000,
-    );
-    const diffMs = Math.abs(expectedEndTime.getTime() - endTimeInput.getTime());
-    if (diffMs > 60_000) {
-      throw new BadRequestException(
-        'endTime no coincide con la duración total de los servicios',
-      );
-    }
-
-    const isMultiStaff = Array.isArray(segments) && segments.length > 0;
-    if (!appointmentData.staffId && !isMultiStaff) {
-      throw new BadRequestException('Staff requerido');
-    }
-
-    const availability = await this.availabilityService.findAvailableSlots({
-      tenantId: appointmentData.tenantId,
-      serviceIds,
-      desiredDate: date,
-      desiredTime: time,
-      staffId: isMultiStaff ? undefined : appointmentData.staffId,
-    });
-
-    if (!availability.isAvailable || availability.suggestedSlots.length === 0) {
-      throw new ConflictException({
-        message: isMultiStaff
-          ? 'Horario no disponible para los servicios solicitados'
-          : 'Horario no disponible para este staff',
-        suggestedSlots: availability.suggestedSlots,
-      });
-    }
-
-    const chosen = availability.suggestedSlots[0];
-    const derivedSegments = chosen.segments;
-
-    const appointment = this.appointmentRepository.create({
-      ...appointmentData,
+    const plan = planBookingSegments({
       startTime,
-      endTime: expectedEndTime,
+      items: dto.items,
+      services: new Map(
+        services.map((service) => [
+          service.id,
+          {
+            durationMinutes: service.durationMinutes,
+            price: Number(service.price),
+          },
+        ]),
+      ),
     });
-    const saved = await this.appointmentRepository.save(appointment);
 
-    let cursor = saved.startTime;
-    const appointmentServices = orderedServices.map((service, index) => {
-      const segmentStart = cursor;
-      const segmentEnd = new Date(
-        segmentStart.getTime() + service.durationMinutes * 60_000,
+    if (!plan.ok) {
+      throw new BadRequestException(
+        `Servicio inexistente o inactivo: ${plan.missingServiceIds.join(', ')}`,
       );
-      cursor = segmentEnd;
-
-      const staffIdForService =
-        derivedSegments?.find((s) => s.serviceId === service.id)?.staffId ??
-        appointmentData.staffId;
-
-      if (!staffIdForService) {
-        throw new BadRequestException(
-          'No se pudo determinar staff para el servicio',
-        );
-      }
-
-      return this.appointmentServiceRepository.create({
-        appointmentId: saved.id,
-        serviceId: service.id,
-        staffId: staffIdForService,
-        startTime: segmentStart,
-        activeStartTime: blocksAgenda(saved.status) ? segmentStart : null,
-        endTime: segmentEnd,
-        priceAtBooking: service.price,
-        durationAtBooking: service.durationMinutes,
-        sequenceOrder: index,
-      });
-    });
-
-    if (appointmentServices.length > 0) {
-      await this.saveSegments(appointmentServices, saved.id);
     }
 
-    return saved;
+    const staffById = await this.resolveBookingStaff(tenantId, dto.items);
+
+    const segments = plan.segments.map((segment) => ({
+      staffId: segment.staffId,
+      staffName: staffById.get(segment.staffId)?.name ?? null,
+      startTime: segment.startTime,
+      endTime: segment.endTime,
+    }));
+
+    const { date } = this.getDateTimeParts(startTime, timezone);
+
+    const warnings =
+      await this.bookingAvailabilityService.inspectRequestedBooking({
+        tenantId,
+        date,
+        segments,
+      });
+
+    /*
+     * Una cita cuya **fecha** ya pasó nace atendida: lo que se está haciendo es
+     * registrar historia, no agendar. Se decide por fecha y no por instante a
+     * propósito: una hora que ya pasó hoy sigue siendo parte de la jornada en
+     * curso, y el dueño la resuelve desde la agenda como cualquier otra.
+     *
+     * De paso, una atendida no ocupa la agenda —`activeStartTime` queda en
+     * `null`—, así que cargar historia nunca choca con el índice único ni le
+     * quita disponibilidad a nadie.
+     */
+    const today = currentCalendarDate(timezone, new Date());
+    const requested = parseCalendarDate(date);
+    const isHistorical = requested ? daysInRange(requested, today) > 1 : false;
+
+    const status = isHistorical
+      ? AppointmentStatus.COMPLETED
+      : AppointmentStatus.PENDING;
+
+    const appointmentId = await this.insertBooking({
+      tenantId,
+      clientId: dto.clientId,
+      status,
+      startTime,
+      plan,
+    });
+
+    return {
+      appointment: await this.findDetailByTenant(appointmentId, tenantId),
+      warnings,
+    };
   }
 
   /**
-   * Persiste segmentos traduciendo el fallo del índice único a un conflicto
-   * explicable. `rollbackAppointmentId` borra la cita huérfana cuando la carrera
-   * se pierde: sin eso quedaría una cita sin segmentos.
+   * Los profesionales de una reserva, verificando que puedan hacer su servicio.
+   *
+   * Es un bloqueo y no una advertencia: que alguien no ofrezca ese servicio no es
+   * una excepción que el negocio quiera registrar, es un dato incoherente. El
+   * panel elige de listas filtradas, así que llegar acá con un par inválido
+   * significa que algo se desincronizó.
    */
+  private async resolveBookingStaff(
+    tenantId: string,
+    items: Array<{ serviceId: string; staffId: string }>,
+  ): Promise<Map<string, { id: string; name: string }>> {
+    const staffRepo = this.appointmentRepository.manager.getRepository(Staff);
+
+    const staffIds = [...new Set(items.map((item) => item.staffId))];
+    const staff = await staffRepo.find({
+      where: { id: In(staffIds), tenantId, isActive: true },
+      relations: { services: true },
+    });
+
+    const byId = new Map(staff.map((member) => [member.id, member]));
+
+    for (const item of items) {
+      const member = byId.get(item.staffId);
+      if (!member) {
+        throw new BadRequestException(
+          `El profesional ${item.staffId} no existe o no está activo`,
+        );
+      }
+
+      const offersService = (member.services ?? []).some(
+        (service) => service.id === item.serviceId,
+      );
+
+      if (!offersService) {
+        throw new BadRequestException(
+          `${member.name} no ofrece el servicio seleccionado`,
+        );
+      }
+    }
+
+    return new Map(
+      staff.map((member) => [member.id, { id: member.id, name: member.name }]),
+    );
+  }
+
+  /**
+   * Inserta la cita y sus tramos, todo o nada.
+   *
+   * Es la contraparte de `replaceSegments`: la misma transacción y la misma
+   * traducción del índice único a "ese horario acaba de ocuparse". Sin
+   * transacción, un choque en los tramos deja una cita sin servicios, que no
+   * tiene profesional, ni precio, ni lugar en la agenda.
+   */
+  private async insertBooking(input: {
+    tenantId: string;
+    clientId: string;
+    status: AppointmentStatus;
+    startTime: Date;
+    plan: Extract<ReturnType<typeof planBookingSegments>, { ok: true }>;
+  }): Promise<string> {
+    const { tenantId, clientId, status, startTime, plan } = input;
+    const claimsSlot = blocksAgenda(status);
+
+    try {
+      return await this.appointmentRepository.manager.transaction(
+        async (manager) => {
+          const appointment = await manager.save(
+            manager.create(Appointment, {
+              tenantId,
+              clientId,
+              status,
+              startTime,
+              endTime: plan.endTime,
+            }),
+          );
+
+          await manager.save(
+            plan.segments.map((segment) =>
+              manager.create(AppointmentServiceEntity, {
+                appointmentId: appointment.id,
+                serviceId: segment.serviceId,
+                staffId: segment.staffId,
+                startTime: segment.startTime,
+                endTime: segment.endTime,
+                activeStartTime: claimsSlot ? segment.startTime : null,
+                priceAtBooking: segment.price,
+                durationAtBooking: segment.durationMinutes,
+                sequenceOrder: segment.sequenceOrder,
+              }),
+            ),
+          );
+
+          return appointment.id;
+        },
+      );
+    } catch (error: unknown) {
+      if (isDuplicateEntryError(error)) {
+        throw new ConflictException(
+          'Ese horario acaba de ocuparse. Elegí otro.',
+        );
+      }
+      throw error;
+    }
+  }
+
   private async saveSegments(
     segments: AppointmentServiceEntity[],
     rollbackAppointmentId?: string,

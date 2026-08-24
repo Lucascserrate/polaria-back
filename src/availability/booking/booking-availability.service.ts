@@ -4,12 +4,22 @@ import type { Service } from '../../services/entities/service.entity';
 import type { Staff } from '../../staff/entities/staff.entity';
 import { AvailabilityCalculator } from '../availability.calculator';
 import { AvailabilityRepository } from '../availability.repository';
-import { addMinutes, makeDateInTimeZone } from '../utils/availability.helpers';
+import {
+  addMinutes,
+  currentDateInTimeZone,
+  makeDateInTimeZone,
+} from '../utils/availability.helpers';
 import {
   datesWithCoverage,
+  mergeRanges,
   resolveWorkingRangesByStaff,
   unionWorkingRanges,
 } from '../utils/working-hours.resolver';
+import {
+  collectBookingWarnings,
+  type BookingWarning,
+  type RequestedSegment,
+} from '../../appointments/booking-warnings';
 import type { SlotRange } from '../utils/availability.types';
 import {
   DEFAULT_SLOT_STEP_MINUTES,
@@ -41,7 +51,28 @@ export type BookingSlotsQuery = {
    * de 09:00 a 09:15 daría "ocupado" contra sí misma, que es el caso más común.
    */
   excludeAppointmentId?: string;
+  /**
+   * Quién pregunta, que es lo que define desde cuándo se ofrecen horarios.
+   *
+   * - `client`: desde ahora más la anticipación mínima. Es la regla de WhatsApp:
+   *   nadie reserva para dentro de dos minutos.
+   * - `panel`: desde este momento, sin anticipación —el administrador registra,
+   *   no avisa— y sin piso alguno cuando la fecha ya pasó, porque ahí todo el
+   *   día es válido para cargar historia.
+   *
+   * Es un solo eje en lugar de tres banderas sueltas: así no hay combinaciones
+   * que nadie pensó, y el nombre dice por qué cambia la regla.
+   */
+  scope?: 'client' | 'panel';
 };
+
+/**
+ * Clave con la que se pide la envolvente del negocio al resolver franjas.
+ *
+ * No es un profesional: es la forma de reusar el resolver para preguntar por el
+ * horario del local, que es lo que resuelve para alguien sin jornada propia.
+ */
+const BUSINESS_PROBE = '__business__';
 
 export type SlotConfirmation =
   | { available: true; startTime: Date; endTime: Date; staffId: string }
@@ -243,6 +274,81 @@ export class BookingAvailabilityService {
   }
 
   /**
+   * Qué problemas tiene un horario que el panel pidió explícitamente.
+   *
+   * Es la otra pregunta, la que no responde `getAvailableSlots`. Ese enumera lo
+   * ofrecible a un cliente; esto examina un pedido concreto del administrador y
+   * devuelve advertencias, no un permiso. Quién decide qué hacer con ellas es la
+   * pantalla: el panel es una herramienta administrativa y registrar una
+   * excepción es trabajo legítimo.
+   *
+   * Carga el horario del negocio y las jornadas una sola vez para todos los
+   * tramos, y las decisiones las toma el módulo puro `booking-warnings`.
+   */
+  async inspectRequestedBooking(input: {
+    tenantId: string;
+    /** Fecha del pedido, `YYYY-MM-DD` en la zona del negocio. */
+    date: string;
+    segments: RequestedSegment[];
+    now?: Date;
+  }): Promise<BookingWarning[]> {
+    const { tenantId, date, segments } = input;
+    if (segments.length === 0) return [];
+
+    const tenant = await this.availabilityRepository.getTenant(tenantId);
+    const timeZone = tenant?.timezone;
+    if (!timeZone) {
+      this.logger.warn(`Tenant sin timezone (tenantId=${tenantId}).`);
+      return [];
+    }
+
+    const staffIds = [...new Set(segments.map((segment) => segment.staffId))];
+
+    const [businessHours, schedulesByStaff, staffList] = await Promise.all([
+      this.availabilityRepository.getBusinessHours(tenantId),
+      this.availabilityRepository.getStaffSchedules(staffIds),
+      this.availabilityRepository.getActiveStaffWithServices(tenantId),
+    ]);
+
+    const staff = staffIds.map((id) => ({
+      id,
+      usesCustomSchedule:
+        staffList.find((member) => member.id === id)?.usesCustomSchedule ??
+        false,
+    }));
+
+    const workingRangesByStaff = resolveWorkingRangesByStaff({
+      date,
+      timeZone,
+      businessHours,
+      staff,
+      schedulesByStaff,
+    });
+
+    /*
+     * El horario del negocio se resuelve como la jornada de alguien sin jornada
+     * propia: es exactamente la definición de la envolvente, sin repetir el
+     * cálculo de franjas ni el manejo de zona horaria.
+     */
+    const businessRanges = mergeRanges(
+      resolveWorkingRangesByStaff({
+        date,
+        timeZone,
+        businessHours,
+        staff: [{ id: BUSINESS_PROBE, usesCustomSchedule: false }],
+        schedulesByStaff: {},
+      })[BUSINESS_PROBE],
+    );
+
+    return collectBookingWarnings({
+      now: input.now ?? new Date(),
+      segments,
+      businessRanges,
+      workingRangesByStaff,
+    });
+  }
+
+  /**
    * Revalida un horario justo antes de crear la reserva y resuelve qué
    * profesional lo atiende.
    *
@@ -301,7 +407,14 @@ export class BookingAvailabilityService {
     /** Ausente en el registro manual: ahí no hay hora mínima que respetar. */
     minStartTime?: Date;
   } | null> {
-    const { tenantId, date, serviceId, staffId, excludeAppointmentId } = query;
+    const {
+      tenantId,
+      date,
+      serviceId,
+      staffId,
+      excludeAppointmentId,
+      scope = 'client',
+    } = query;
 
     const tenant = await this.availabilityRepository.getTenant(tenantId);
     const timeZone = tenant?.timezone;
@@ -365,8 +478,44 @@ export class BookingAvailabilityService {
       staffIds,
       workingRangesByStaff,
       appointmentsByStaff,
-      minStartTime: this.calculateMinStartTime(timeZone),
+      minStartTime: this.resolveEarliestStart(timeZone, date, scope),
     };
+  }
+
+  /**
+   * Desde qué instante se ofrecen horarios, o `undefined` cuando no hay piso.
+   *
+   * Sin piso solo en el panel y sobre una fecha pasada: es la única situación en
+   * la que ofrecer un horario que ya pasó tiene sentido, porque lo que se está
+   * haciendo es registrar lo que ocurrió.
+   */
+  private resolveEarliestStart(
+    timeZone: string,
+    date: string,
+    scope: 'client' | 'panel',
+  ): Date | undefined {
+    if (scope === 'client') return this.calculateMinStartTime(timeZone);
+
+    const today = currentDateInTimeZone(timeZone, new Date());
+    if (date < today) return undefined;
+
+    // Hoy, para el panel: desde ahora, sin la anticipación del cliente.
+    return this.currentInstantIn(timeZone);
+  }
+
+  private currentInstantIn(timeZone: string): Date {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date());
+
+    const [today, now] = parts.split(', ');
+    return makeDateInTimeZone(today, now, timeZone);
   }
 
   private calculateMinStartTime(timeZone: string): Date {

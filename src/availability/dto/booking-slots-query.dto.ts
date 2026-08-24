@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID, Matches } from 'class-validator';
+import { IsIn, IsOptional, IsUUID, Matches } from 'class-validator';
 
 /**
  * Consulta de horarios para la creación manual desde el panel.
@@ -33,4 +33,13 @@ export class BookingSlotsQueryDto {
   @IsOptional()
   @IsUUID()
   excludeAppointmentId?: string;
+
+  @ApiPropertyOptional({
+    enum: ['client', 'panel'],
+    description:
+      'Quién pregunta. `panel` no aplica la anticipación mínima y, en fechas pasadas, no pone piso.',
+  })
+  @IsOptional()
+  @IsIn(['client', 'panel'])
+  scope?: 'client' | 'panel';
 }
