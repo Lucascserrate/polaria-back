@@ -2,6 +2,7 @@
   BadRequestException,
   ConflictException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -54,6 +55,8 @@ const MAX_RANGE_DAYS = 62;
 
 @Injectable()
 export class AppointmentsService {
+  private readonly logger = new Logger(AppointmentsService.name);
+
   constructor(
     @InjectRepository(Appointment)
     private appointmentRepository: Repository<Appointment>,
@@ -911,8 +914,36 @@ export class AppointmentsService {
     });
   }
 
+  /**
+   * Borra una reserva de verdad, en cualquier estado.
+   *
+   * No es cancelar: cancelar deja la reserva en la historia del negocio con su
+   * horario liberado, y es lo que corresponde cuando un cliente no viene. Esto es
+   * la herramienta administrativa para lo que **nunca debió existir**: una prueba,
+   * una carga duplicada, un error de tipeo. Por eso vale en cualquier estado y por
+   * eso no se puede deshacer.
+   *
+   * Los tramos y los recordatorios se van con ella: las dos claves foráneas están
+   * en cascada, así que no hace falta borrarlos a mano ni queda nada colgado.
+   *
+   * Se registra en el log antes de perderla. Es lo único que va a quedar de una
+   * reserva que ya no se puede recuperar.
+   */
   async removeByTenant(id: string, tenantId: string) {
+    const appointment = await this.appointmentRepository.findOne({
+      where: { id, tenantId },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('La cita no existe');
+    }
+
     await this.appointmentRepository.delete({ id, tenantId });
+
+    this.logger.warn(
+      `Reserva eliminada del panel (tenantId=${tenantId}, appointmentId=${id}, estado=${appointment.status}, inicio=${appointment.startTime.toISOString()}).`,
+    );
+
     return { deleted: true };
   }
 
