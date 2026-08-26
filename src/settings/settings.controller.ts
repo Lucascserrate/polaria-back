@@ -11,7 +11,9 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
-import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
+import { AdminOnly, Roles, RolesGuard } from '../auth/guards/roles.guard';
+import { Actor, type AuthenticatedActor } from '../auth/actor';
+import { STAFF_ACCESS_ROLES } from '../staff/staff-role';
 import type { Request } from 'express';
 import { SettingsService } from './settings.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
@@ -25,6 +27,23 @@ export class SettingsController {
   private readonly logger = new Logger(SettingsController.name);
 
   constructor(private readonly settingsService: SettingsService) {}
+
+  /**
+   * El marco del negocio: zona horaria, moneda y horario.
+   *
+   * Abierto a cualquier rol, y es la única excepción al `@AdminOnly` de la clase.
+   * No es una concesión: sin la zona horaria no se puede saber qué día es hoy, y sin
+   * el horario no se puede sombrear lo que está abierto. La agenda de un profesional
+   * necesita las dos cosas para dibujarse, y ninguna es un dato de administración.
+   *
+   * Lo que **no** viaja acá es lo de la conexión con Meta —ids de la WABA y del
+   * número— que sí lo es. Ver `getBusinessContext`.
+   */
+  @Get('context')
+  @Roles(...STAFF_ACCESS_ROLES)
+  getBusinessContext(@Actor() actor: AuthenticatedActor) {
+    return this.settingsService.getBusinessContext(actor.tenantId);
+  }
 
   @UseGuards(AuthGuard('jwt'))
   @Get()

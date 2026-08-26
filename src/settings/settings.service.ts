@@ -57,6 +57,21 @@ const toLocation = (
     ? { latitude, longitude }
     : null;
 
+/**
+ * El marco del negocio: lo mínimo para dibujar cualquiera de sus pantallas.
+ *
+ * Es un subconjunto de `SettingsResponse` y no un tipo derivado con `Pick` a
+ * propósito: lo que hace útil a este contrato es justamente que su forma no
+ * dependa del otro. Si mañana la configuración gana un campo sensible, este no
+ * tiene que enterarse.
+ */
+export type BusinessContextResponse = {
+  polariaName: string;
+  timezone: string;
+  currency: string;
+  businessHours: WeeklyScheduleRange[];
+};
+
 type SettingsResponse = {
   polariaName: string;
   /** Ver `BUSINESS_TYPES`. `null` mientras la configuración inicial no lo cargó. */
@@ -149,6 +164,38 @@ export class SettingsService {
     private readonly bookingSessionService: BookingSessionService,
     private readonly whatsAppTemplateService: WhatsAppTemplateService,
   ) {}
+
+  /**
+   * Lo del negocio que cualquiera de sus pantallas necesita para dibujar.
+   *
+   * Existe aparte de `getSettings` porque ese payload es de administración: lleva
+   * el id de la WABA, el del número y el estado de la conexión con Meta, que son
+   * datos de infraestructura y no le corresponden a un profesional. Y la
+   * alternativa —devolver el mismo objeto recortado según quién pregunta— daría una
+   * respuesta que cambia de forma con el lector, imposible de tipar sin campos
+   * opcionales que después nadie sabe cuándo están.
+   *
+   * Lo de acá no es sensible y sin ello no se puede dibujar un calendario: la zona
+   * horaria decide qué día es hoy, y el horario decide qué franja se sombrea como
+   * abierta.
+   */
+  async getBusinessContext(tenantId: string): Promise<BusinessContextResponse> {
+    const tenant = await this.tenantsService.findOne(tenantId);
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    const scheduleService = this.businessHoursService as unknown as {
+      getTenantSchedule: (id: string) => Promise<WeeklyScheduleRange[]>;
+    };
+
+    return {
+      polariaName: tenant.name,
+      timezone: tenant.timezone,
+      currency: tenant.currency,
+      businessHours: await scheduleService.getTenantSchedule(tenantId),
+    };
+  }
 
   async getSettings(tenantId: string): Promise<SettingsResponse> {
     const tenant = await this.tenantsService.findOne(tenantId);
