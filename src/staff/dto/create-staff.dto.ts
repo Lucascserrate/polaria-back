@@ -4,16 +4,23 @@ import {
   IsArray,
   IsBoolean,
   IsEmail,
+  IsIn,
   IsNumber,
   IsOptional,
   IsString,
   IsUUID,
   Matches,
   Max,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
 import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
+import { STAFF_ACCESS_ROLES, StaffAccessRole } from '../staff-role';
+import {
+  STAFF_CALENDAR_COLORS,
+  type StaffCalendarColor,
+} from '../staff-calendar-color';
 
 export class CreateStaffDto {
   @ApiPropertyOptional()
@@ -21,9 +28,53 @@ export class CreateStaffDto {
   @IsUUID()
   tenantId!: string;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Nombre de pila.' })
   @IsString()
-  name!: string;
+  @MaxLength(255)
+  firstName!: string;
+
+  @ApiPropertyOptional({
+    description: 'Apellido. La cadena vacía lo deja sin apellido.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  lastName?: string;
+
+  @ApiPropertyOptional({
+    description: 'Cargo, texto libre. Visible para el equipo.',
+    example: 'Barbero',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  jobTitle?: string;
+
+  @ApiPropertyOptional({
+    enum: STAFF_CALENDAR_COLORS,
+    description:
+      'Con qué color se lo distingue en la agenda. Token, no hexadecimal.',
+  })
+  @IsOptional()
+  @IsIn([...STAFF_CALENDAR_COLORS])
+  calendarColor?: StaffCalendarColor;
+
+  @ApiPropertyOptional({
+    enum: STAFF_ACCESS_ROLES,
+    description:
+      'Qué puede hacer en Polaria. Independiente de si atiende clientes.',
+  })
+  @IsOptional()
+  @IsIn([...STAFF_ACCESS_ROLES])
+  accessRole?: StaffAccessRole;
+
+  @ApiPropertyOptional({
+    description:
+      'Si atiende clientes. Junto con isActive, es lo único que lo hace reservable.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  providesServices?: boolean;
 
   @ApiPropertyOptional()
   @IsOptional()

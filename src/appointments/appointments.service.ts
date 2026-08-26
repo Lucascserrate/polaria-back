@@ -24,6 +24,7 @@ import { Service } from '../services/entities/service.entity';
 import { AppointmentStatus } from './entities/appointment.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { Staff } from '../staff/entities/staff.entity';
+import { BOOKABLE_STAFF_WHERE } from '../staff/staff-role';
 import type { BookingWarning } from './booking-warnings';
 import {
   isDuplicateEntryError,
@@ -248,7 +249,7 @@ export class AppointmentsService {
 
     const staffIds = [...new Set(items.map((item) => item.staffId))];
     const staff = await staffRepo.find({
-      where: { id: In(staffIds), tenantId, isActive: true },
+      where: { id: In(staffIds), tenantId, ...BOOKABLE_STAFF_WHERE },
       relations: { services: true },
     });
 
@@ -258,7 +259,7 @@ export class AppointmentsService {
       const member = byId.get(item.staffId);
       if (!member) {
         throw new BadRequestException(
-          `El profesional ${item.staffId} no existe o no está activo`,
+          `El profesional ${item.staffId} no existe, no está activo o no atiende clientes`,
         );
       }
 

@@ -3,6 +3,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { ServicesService } from '../services/services.service';
 import { StaffService } from '../staff/staff.service';
+import { isBookableStaff } from '../staff/staff-role';
 import { TenantsService } from '../tenants/tenants.service';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import {
@@ -62,8 +63,14 @@ export class OnboardingService {
       hasBusinessType: Boolean(tenant.businessType?.trim()),
       businessHoursCount: businessHours.length,
       activeServicesCount: services.length,
+      /*
+       * Un administrativo no cuenta para este paso. Si contara, cargar a quien
+       * lleva la caja marcaría "Personal" como resuelto y el negocio quedaría
+       * creyendo que está listo mientras la reserva no ofrece a nadie.
+       */
       bookableStaffCount: staff.filter(
-        (member) => member.isActive && (member.services?.length ?? 0) > 0,
+        (member) =>
+          isBookableStaff(member) && (member.services?.length ?? 0) > 0,
       ).length,
       whatsappConnected,
     });

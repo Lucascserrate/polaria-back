@@ -13,6 +13,7 @@ import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
 import { WeeklyRangeDto } from '../schedule/weekly-range.dto';
 import { assertValidStaffSchedules } from './utils/staff-schedule.util';
+import { displayNameOf } from './utils/display-name';
 import { Service } from '../services/entities/service.entity';
 import {
   Appointment,
@@ -75,6 +76,8 @@ export class StaffService {
 
     const staff = this.staffRepository.create({
       ...rest,
+      // `name` es una proyección, no un dato de entrada: ver `display-name.ts`.
+      name: displayNameOf(rest),
       phone: normalizeStaffPhone(rest.phone),
     });
 
@@ -195,6 +198,14 @@ export class StaffService {
       ...rest,
       phone: normalizeStaffPhone(rest.phone),
     });
+
+    /*
+     * El nombre para mostrar se recalcula sobre la entidad ya combinada y no
+     * sobre el patch: un cambio de apellido llega sin el nombre, y derivarlo del
+     * patch produciría "Serrate" a secas. Después de `merge`, la entidad tiene el
+     * estado final de los dos campos.
+     */
+    staff.name = displayNameOf(staff);
 
     if (Array.isArray(serviceIds)) {
       staff.services = serviceIds.length

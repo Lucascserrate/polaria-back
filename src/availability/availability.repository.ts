@@ -9,6 +9,7 @@ import { AppointmentService as AppointmentServiceEntity } from '../appointments/
 import { BusinessHour } from '../business_hours/entities/business_hour.entity';
 import { Service } from '../services/entities/service.entity';
 import { Staff } from '../staff/entities/staff.entity';
+import { BOOKABLE_STAFF_WHERE } from '../staff/staff-role';
 import { StaffSchedule } from '../staff/entities/staff_schedule.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { makeDateInTimeZone, addMinutes } from './utils/availability.helpers';
@@ -112,7 +113,7 @@ export class AvailabilityRepository {
 
     if (staffId) {
       const staff = await this.staffRepository.findOne({
-        where: { id: staffId, tenantId, isActive: true },
+        where: { id: staffId, tenantId, ...BOOKABLE_STAFF_WHERE },
         relations: { services: true },
       });
       if (!staff) return [];
@@ -125,14 +126,19 @@ export class AvailabilityRepository {
         return canDoAll ? [staff] : [];
       }
 
-      return staff && staff.isActive ? [staff] : [];
+      return [staff];
     }
 
     const qb = this.staffRepository
       .createQueryBuilder('staff')
       .leftJoin('staff.services', 'service')
       .where('staff.tenantId = :tenantId', { tenantId })
-      .andWhere('staff.isActive = :isActive', { isActive: true });
+      .andWhere('staff.isActive = :isActive', {
+        isActive: BOOKABLE_STAFF_WHERE.isActive,
+      })
+      .andWhere('staff.providesServices = :providesServices', {
+        providesServices: BOOKABLE_STAFF_WHERE.providesServices,
+      });
 
     if (uniqueServiceIds.length) {
       qb.andWhere('service.id IN (:...serviceIds)', {
@@ -147,9 +153,16 @@ export class AvailabilityRepository {
     return qb.orderBy('staff.name', 'ASC').getMany();
   }
 
+  /**
+   * Quiénes pueden recibir reservas, con sus servicios.
+   *
+   * "Activo" no alcanza: un administrativo puede estar activo y no atender a
+   * nadie. El criterio completo es `BOOKABLE_STAFF_WHERE`, que es el mismo que
+   * aplica `getStaffList` y el que valida el guardado de una cita.
+   */
   async getActiveStaffWithServices(tenantId: string): Promise<Staff[]> {
     return this.staffRepository.find({
-      where: { tenantId, isActive: true },
+      where: { tenantId, ...BOOKABLE_STAFF_WHERE },
       order: { name: 'ASC' },
       relations: { services: true },
     });
