@@ -455,10 +455,43 @@ export class AppointmentsService {
    * ocupa lugar en el calendario igual que el resto— ni por profesional: eso lo
    * decide la vista con `segments`.
    */
+  /** Las citas del rango en las que ese profesional tiene algún segmento. */
+  private async appointmentIdsForStaff(
+    tenantId: string,
+    staffId: string,
+    startUtc: Date,
+    endUtc: Date,
+  ): Promise<string[]> {
+    const rows = await this.appointmentRepository.manager
+      .createQueryBuilder(AppointmentServiceEntity, 'segment')
+      .innerJoin(
+        Appointment,
+        'appointment',
+        'appointment.id = segment.appointmentId',
+      )
+      .select('DISTINCT segment.appointmentId', 'appointmentId')
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('segment.staffId = :staffId', { staffId })
+      .andWhere('appointment.startTime >= :startUtc', { startUtc })
+      .andWhere('appointment.startTime < :endUtc', { endUtc })
+      .getRawMany<{ appointmentId: string }>();
+
+    return rows.map((row) => row.appointmentId);
+  }
+
+  /**
+   * Las citas de un rango de días.
+   *
+   * @param onlyStaffId Cuando viene, se devuelven **solo** las citas en las que
+   * ese profesional atiende. Es lo que acota la agenda de un profesional a lo
+   * suyo, y quien lo pasa es el controlador tomándolo del token: nunca llega
+   * desde el request. Ver el comentario de `findRange`.
+   */
   async findRangeByTenant(
     tenantId: string,
     from: string,
     to: string,
+    onlyStaffId?: string,
   ): Promise<{
     items: AppointmentItem[];
     from: string;
@@ -472,6 +505,32 @@ export class AppointmentsService {
     const { startUtc, endUtc } = this.resolveRangeWindow(timezone, from, to);
 
     /*
+     * Con filtro por profesional se resuelven primero los ids y después se cargan
+     * las citas enteras.
+     *
+     * Son dos consultas donde parecía alcanzar una con `where: { services: {
+     * staffId } }`, y el motivo es que ese `where` no filtra solo **qué citas**
+     * vuelven: también recorta los segmentos que se cargan de cada una. Una cita
+     * compartida entre dos personas llegaría con un solo segmento, y todo lo que
+     * `toAppointmentItem` deriva de ahí —el precio, la duración, quién atiende—
+     * quedaría contando la mitad de la cita sin que nada avisara.
+     *
+     * Así, el profesional ve completas las citas en las que participa.
+     */
+    const scopedIds = onlyStaffId
+      ? await this.appointmentIdsForStaff(
+          tenantId,
+          onlyStaffId,
+          startUtc,
+          endUtc,
+        )
+      : null;
+
+    if (scopedIds && scopedIds.length === 0) {
+      return { items: [], from, to, timezone };
+    }
+
+    /*
      * El filtro es por inicio, igual que la consulta del día: una cita que
      * empieza antes del rango y termina dentro queda afuera. Con jornadas que
      * cierran antes de medianoche eso no puede pasar, y filtrar por
@@ -481,6 +540,7 @@ export class AppointmentsService {
       where: {
         tenantId,
         startTime: Between(startUtc, new Date(endUtc.getTime() - 1)),
+        ...(scopedIds ? { id: In(scopedIds) } : {}),
       },
       relations: {
         client: true,

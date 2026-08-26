@@ -12,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 import type { Request } from 'express';
 import { ServicesService } from './services.service';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -19,6 +20,8 @@ import { UpdateServiceDto } from './dto/update-service.dto';
 
 @ApiTags('services')
 @UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@AdminOnly()
 @Controller('services')
 export class ServicesController {
   constructor(private readonly servicesService: ServicesService) {}

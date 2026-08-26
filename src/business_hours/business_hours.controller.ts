@@ -6,13 +6,18 @@ import {
   Patch,
   Param,
   Delete,
+  UseGuards,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import { AuthGuard } from '@nestjs/passport';
+import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 import { BusinessHoursService } from './business_hours.service';
 import { CreateBusinessHourDto } from './dto/create-business_hour.dto';
 import { UpdateBusinessHourDto } from './dto/update-business_hour.dto';
 
 @ApiTags('business-hours')
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@AdminOnly()
 @Controller('business-hours')
 export class BusinessHoursController {
   constructor(private readonly businessHoursService: BusinessHoursService) {}

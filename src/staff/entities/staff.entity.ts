@@ -8,6 +8,7 @@ import {
   CreateDateColumn,
   DeleteDateColumn,
   UpdateDateColumn,
+  Index,
   JoinColumn,
   JoinTable,
 } from 'typeorm';
@@ -18,6 +19,19 @@ import { StaffSchedule } from './staff_schedule.entity';
 import { StaffAccessRole } from '../staff-role';
 import type { StaffCalendarColor } from '../staff-calendar-color';
 
+/*
+ * Los dos índices sostienen la regla de que una identidad es un solo asiento.
+ *
+ * `accessGoogleId` único a nivel global impide que la misma cuenta de Google
+ * quede vinculada a dos fichas, que dejaría el login sin forma de decidir a cuál
+ * entrar. `accessEmail` igual: si dos negocios invitaran al mismo correo, la
+ * búsqueda del login devolvería dos filas.
+ *
+ * MySQL admite varios `NULL` bajo un índice único, así que el equipo sin acceso
+ * —que es la mayoría— no compite por nada.
+ */
+@Index(['accessGoogleId'], { unique: true })
+@Index(['accessEmail'], { unique: true })
 @Entity('staff')
 export class Staff {
   @PrimaryGeneratedColumn('uuid')
@@ -143,6 +157,36 @@ export class Staff {
    */
   @Column({ default: true })
   providesServices!: boolean;
+
+  /**
+   * Con qué correo entra a Polaria. `NULL` significa que no tiene acceso.
+   *
+   * Columna aparte de `email` y no la misma: `email` es de contacto y se corrige
+   * cuando alguien detecta un typo, y la identidad con la que se inicia sesión no
+   * puede cambiar como efecto secundario de esa corrección. Además `email` no
+   * podría llevar el índice único, porque también guarda correos de gente sin
+   * acceso.
+   *
+   * Se guarda normalizado en minúsculas: ver `normalizeAccessEmail`.
+   */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  accessEmail?: string | null;
+
+  /**
+   * La cuenta de Google que quedó vinculada al entrar por primera vez.
+   *
+   * `NULL` con `accessEmail` cargado es una invitación pendiente. Único a nivel
+   * global —no por negocio— así que una cuenta de Google es un solo asiento: es la
+   * simplificación de esta etapa, y es lo que hace imposible que el login sea
+   * ambiguo. Cuando alguien trabaje en dos negocios, esto se convierte en una
+   * tabla aparte y nada más cambia.
+   */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  accessGoogleId?: string | null;
+
+  /** Cuándo se le habilitó el acceso. Es lo que se muestra como "invitado el…". */
+  @Column({ type: 'datetime', nullable: true })
+  accessGrantedAt?: Date | null;
 
   /**
    * Apagado (por defecto): el profesional atiende en el horario del negocio y

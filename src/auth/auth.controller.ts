@@ -12,6 +12,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { Actor, type AuthenticatedActor } from './actor';
 import type { GoogleUserDto } from './dto/google-user.dto';
 
 type GoogleAuthRequest = Request & { user: GoogleUserDto };
@@ -68,12 +69,11 @@ export class AuthController {
 
   @Get('account')
   @UseGuards(AuthGuard('jwt'))
-  getAccount(@Req() req: JwtAuthRequest) {
-    const tenantId = req.user?.sub;
-    if (!tenantId) {
+  getAccount(@Actor() actor: AuthenticatedActor) {
+    if (!actor.tenantId) {
       throw new UnauthorizedException('Missing tenant id');
     }
-    return this.authService.getAccount(tenantId);
+    return this.authService.getAccount(actor);
   }
 
   @Post('logout')

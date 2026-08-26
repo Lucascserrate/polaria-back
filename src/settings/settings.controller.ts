@@ -11,12 +11,15 @@ import {
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 import type { Request } from 'express';
 import { SettingsService } from './settings.service';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { CompleteWhatsappEmbeddedSignupDto } from './dto/complete-whatsapp-embedded-signup.dto';
 
 @ApiTags('settings')
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@AdminOnly()
 @Controller('settings')
 export class SettingsController {
   private readonly logger = new Logger(SettingsController.name);

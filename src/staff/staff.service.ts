@@ -25,6 +25,9 @@ import {
   type StaffDeletionCounts,
 } from './utils/staff-deletion.util';
 import { normalizePhoneNumber } from '../webhook/webhook-meta.util';
+import { normalizeAccessEmail } from './staff-access';
+import { Tenant } from '../tenants/entities/tenant.entity';
+import { isDuplicateEntryError } from '../database/duplicate-entry.util';
 
 /**
  * Deja el teléfono como lo espera la API de Meta: solo `+` y dígitos.
@@ -64,7 +67,134 @@ export class StaffService {
     private staffRepository: Repository<Staff>,
     @InjectRepository(Service)
     private serviceRepository: Repository<Service>,
+    @InjectRepository(Tenant)
+    private tenantRepository: Repository<Tenant>,
   ) {}
+
+  /**
+   * Habilita el acceso de un miembro del equipo con un correo.
+   *
+   * Se comprueba contra `tenants.email` además del propio equipo, y esa es la
+   * comprobación que importa: si el correo de un dueño se pudiera invitar como
+   * miembro, el login tendría dos respuestas válidas para la misma cuenta de
+   * Google —el negocio y la ficha— y elegiría una de las dos según el orden de las
+   * consultas. Es la clase de ambigüedad que después se manifiesta como "a veces
+   * entro y veo otra cosa".
+   *
+   * Los choques dentro del equipo los ataja el índice único, pero se consultan
+   * primero para poder responder de quién es el correo en lugar de un error de
+   * base de datos.
+   */
+  async grantAccess(id: string, email: string): Promise<Staff | null> {
+    const accessEmail = normalizeAccessEmail(email);
+
+    const staff = await this.staffRepository.findOne({ where: { id } });
+    if (!staff) return null;
+
+    const owner = await this.tenantRepository.findOne({
+      where: { email: accessEmail },
+    });
+    if (owner) {
+      throw new ConflictException(
+        'Ese correo ya es de una cuenta de Polaria. Usá otro para este miembro del equipo.',
+      );
+    }
+
+    const taken = await this.staffRepository.findOne({
+      where: { accessEmail },
+    });
+    if (taken && taken.id !== id) {
+      throw new ConflictException(
+        'Ese correo ya tiene acceso a Polaria con otra ficha.',
+      );
+    }
+
+    /*
+     * Cambiar el correo desvincula la cuenta de Google.
+     *
+     * Si no, corregir el correo dejaría a la persona entrando con la cuenta
+     * anterior: lo que autentica es `accessGoogleId`, y el correo nuevo no sería
+     * más que decoración. Al borrarlo, la invitación vuelve a estar pendiente y se
+     * revincula con la cuenta que efectivamente entre.
+     */
+    if (staff.accessEmail !== accessEmail) {
+      staff.accessGoogleId = null;
+    }
+
+    staff.accessEmail = accessEmail;
+    staff.accessGrantedAt = staff.accessGrantedAt ?? new Date();
+
+    try {
+      await this.staffRepository.save(staff);
+    } catch (error: unknown) {
+      // El índice único cerró una carrera entre dos invitaciones al mismo correo.
+      if (!isDuplicateEntryError(error)) throw error;
+      throw new ConflictException(
+        'Ese correo ya tiene acceso a Polaria con otra ficha.',
+      );
+    }
+
+    this.logger.log(
+      `Acceso habilitado (staffId=${id}, tenantId=${staff.tenantId}, role=${staff.accessRole}).`,
+    );
+
+    return this.findOne(id);
+  }
+
+  /**
+   * Quita el acceso. La ficha y su historial quedan intactos.
+   *
+   * Se borran los dos campos y no solo el correo: dejar el `accessGoogleId` haría
+   * que volver a invitar al mismo correo reviviera la sesión de una cuenta que ya
+   * no debería entrar, sin que nadie lo pidiera.
+   */
+  async revokeAccess(id: string): Promise<Staff | null> {
+    const staff = await this.staffRepository.findOne({ where: { id } });
+    if (!staff) return null;
+
+    staff.accessEmail = null;
+    staff.accessGoogleId = null;
+    staff.accessGrantedAt = null;
+    await this.staffRepository.save(staff);
+
+    this.logger.log(`Acceso revocado (staffId=${id}).`);
+    return this.findOne(id);
+  }
+
+  /**
+   * A quién le corresponde una cuenta de Google que está entrando.
+   *
+   * Primero por `accessGoogleId`, que es la vinculación ya hecha. Si no hay, por
+   * correo: esa es la invitación pendiente, y entrar es lo que la acepta.
+   *
+   * Se exige que la ficha esté activa y sin baja lógica. Desactivar a alguien tiene
+   * que cerrarle la puerta además de sacarlo de la agenda; si no, el negocio creería
+   * que lo dio de baja y la persona seguiría entrando a ver sus números.
+   */
+  async findByGoogleAccount(params: {
+    googleId: string;
+    email?: string;
+  }): Promise<Staff | null> {
+    const linked = await this.staffRepository.findOne({
+      where: { accessGoogleId: params.googleId, isActive: true },
+    });
+    if (linked) return linked;
+
+    if (!params.email) return null;
+
+    return this.staffRepository.findOne({
+      where: {
+        accessEmail: normalizeAccessEmail(params.email),
+        isActive: true,
+      },
+    });
+  }
+
+  /** Vincula la cuenta al aceptar la invitación entrando por primera vez. */
+  async linkGoogleAccount(id: string, googleId: string): Promise<void> {
+    await this.staffRepository.update(id, { accessGoogleId: googleId });
+    this.logger.log(`Invitación aceptada (staffId=${id}).`);
+  }
 
   async create(createStaffDto: CreateStaffDto): Promise<Staff> {
     const { serviceIds, schedules, ...rest } = createStaffDto;

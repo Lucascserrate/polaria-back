@@ -13,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 import type { Request } from 'express';
 import { ConversationControlService } from './conversation-control.service';
 import { ConversationsService } from './conversations.service';
@@ -28,6 +29,8 @@ import { UpdateConversationDto } from './dto/update-conversation.dto';
  */
 @ApiTags('conversations')
 @UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@AdminOnly()
 @Controller('conversations')
 export class ConversationsController {
   constructor(

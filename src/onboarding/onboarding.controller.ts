@@ -6,12 +6,15 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request } from 'express';
 
 import { OnboardingService } from './onboarding.service';
 
 @ApiTags('onboarding')
+@UseGuards(AuthGuard('jwt'), RolesGuard)
+@AdminOnly()
 @Controller('onboarding')
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}

@@ -19,13 +19,24 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AppointmentsRangeQueryDto } from './dto/appointments-range-query.dto';
 import { EditBookingDto } from './dto/edit-booking.dto';
+import { Actor, canAdminister, type AuthenticatedActor } from '../auth/actor';
+import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 
 @ApiTags('appointments')
+/*
+ * El guard de roles se monta acá y los permisos se declaran método por método.
+ *
+ * A nivel de clase quedaría más corto, pero este controlador tiene las dos clases
+ * de endpoint: los que solo administra el negocio y los que un profesional lee
+ * acotados a él. Declararlo en cada uno obliga a decidir para cada endpoint nuevo,
+ * en lugar de que herede el permiso de la clase sin que nadie lo piense.
+ */
+@UseGuards(AuthGuard('jwt'), RolesGuard)
 @Controller('appointments')
 export class AppointmentsController {
   constructor(private readonly appointmentsService: AppointmentsService) {}
 
-  @UseGuards(AuthGuard('jwt'))
+  @AdminOnly()
   @Post()
   create(
     @Req() req: Request,
@@ -39,7 +50,7 @@ export class AppointmentsController {
     return this.appointmentsService.create(createAppointmentDto);
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @AdminOnly()
   @Get()
   findAll(
     @Req() req: Request,
@@ -70,22 +81,27 @@ export class AppointmentsController {
   /**
    * Las citas de un rango de días. Va antes de `:id` para que `range` no se lea
    * como el identificador de una cita.
+   *
+   * Un profesional recibe solo las citas en las que atiende. El recorte lo decide
+   * **el servidor con el `staffId` del token**, y no hay parámetro que lo cambie:
+   * si el filtro viniera por query —aunque el panel siempre lo mandara bien—
+   * bastaría con editarlo a mano para leer la agenda de un compañero. Que la regla
+   * no sea expresable desde el request es lo que la hace una regla.
    */
-  @UseGuards(AuthGuard('jwt'))
   @Get('range')
-  findRange(@Req() req: Request, @Query() query: AppointmentsRangeQueryDto) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
+  findRange(
+    @Actor() actor: AuthenticatedActor,
+    @Query() query: AppointmentsRangeQueryDto,
+  ) {
     return this.appointmentsService.findRangeByTenant(
-      tenantId,
+      actor.tenantId,
       query.from,
       query.to,
+      canAdminister(actor) ? undefined : (actor.staffId ?? undefined),
     );
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @AdminOnly()
   @Get(':id')
   findOne(@Req() req: Request, @Param('id') id: string) {
     const tenantId = (req.user as { sub?: string }).sub;
@@ -95,7 +111,7 @@ export class AppointmentsController {
     return this.appointmentsService.findDetailByTenant(id, tenantId);
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @AdminOnly()
   @Patch(':id')
   update(
     @Req() req: Request,
@@ -120,7 +136,7 @@ export class AppointmentsController {
    * propia ruta y no en `PATCH :id` porque ese recibe parches campo por campo
    * —hoy lo usa el cambio de estado— y esto es un estado deseado completo.
    */
-  @UseGuards(AuthGuard('jwt'))
+  @AdminOnly()
   @Patch(':id/booking')
   editBooking(
     @Req() req: Request,
@@ -138,7 +154,7 @@ export class AppointmentsController {
     );
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @AdminOnly()
   @Delete(':id')
   remove(@Req() req: Request, @Param('id') id: string) {
     const tenantId = (req.user as { sub?: string }).sub;

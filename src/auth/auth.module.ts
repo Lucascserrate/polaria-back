@@ -6,6 +6,8 @@ import { AuthService } from './auth.service';
 import { GoogleStrategy } from './strategies/google.strategy';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { TenantsModule } from '../tenants/tenants.module';
+import { StaffModule } from '../staff/staff.module';
+import { RolesGuard } from './guards/roles.guard';
 
 const jwtSecret = process.env.SECRET_JWT ?? '';
 
@@ -13,6 +15,7 @@ const jwtSecret = process.env.SECRET_JWT ?? '';
   imports: [
     PassportModule,
     TenantsModule,
+    StaffModule,
     JwtModule.register({
       global: true,
       secret: jwtSecret,
@@ -20,7 +23,7 @@ const jwtSecret = process.env.SECRET_JWT ?? '';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, GoogleStrategy, JwtStrategy],
-  exports: [AuthService],
+  providers: [AuthService, GoogleStrategy, JwtStrategy, RolesGuard],
+  exports: [AuthService, RolesGuard],
 })
 export class AuthModule {}
