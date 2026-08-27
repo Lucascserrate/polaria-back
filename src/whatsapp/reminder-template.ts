@@ -26,12 +26,7 @@ export const REMINDER_TEMPLATE_NAME = 'polaria_appointment_reminder';
  */
 export const REMINDER_TEMPLATE_LANGUAGE = 'es';
 
-/**
- * `UTILITY` y no `MARKETING`: es un aviso sobre una transacción que el cliente
- * ya inició. La categoría cambia el precio y las reglas de aprobación, y una
- * plantilla de recordatorio clasificada como marketing sería rechazada.
- */
-const REMINDER_TEMPLATE_CATEGORY = 'UTILITY';
+/* La categoría y el payload de creación se fueron a `template-registry`. */
 
 /**
  * Variables del cuerpo, en orden. El envío debe respetarlo.
@@ -76,90 +71,13 @@ export const REMINDER_TEMPLATE_BODY = [
  */
 export const REMINDER_TEMPLATE_BUTTONS = ['Reagendar', 'Cancelar'] as const;
 
-/**
- * Estado de la plantilla, en los términos que le importan a Polaria.
- *
- * Meta maneja nueve estados (`APPROVED`, `PENDING`, `IN_APPEAL`, `REJECTED`,
- * `PAUSED`, `DISABLED`, `LIMIT_EXCEEDED`, `PENDING_DELETION`, `DELETED`). Se
- * traducen a cuatro porque el planificador de recordatorios solo tiene una
- * pregunta —¿puedo enviar?— y obligar a cada consumidor a conocer los nueve
- * garantiza que alguno olvide tratar `PAUSED` como "no".
+/*
+ * El estado de una plantilla se mudó a `template-status.ts` cuando dejó de haber
+ * una sola. Se reexporta con los nombres viejos para no obligar a renombrar en el
+ * mismo cambio que mueve el modelo.
  */
-export enum ReminderTemplateStatus {
-  /** No se creó todavía, o el negocio no tiene WhatsApp conectado. */
-  NOT_CREATED = 'NOT_CREATED',
-  /** Creada y esperando revisión de Meta. Se resuelve sola. */
-  PENDING = 'PENDING',
-  /** Lista para enviar. */
-  APPROVED = 'APPROVED',
-  /** No se puede enviar y no se resuelve esperando: hace falta intervenir. */
-  UNAVAILABLE = 'UNAVAILABLE',
-}
-
-/** Traduce el estado que informa Meta al de Polaria. */
-export function toReminderTemplateStatus(
-  metaStatus: string | null | undefined,
-): ReminderTemplateStatus {
-  switch (metaStatus?.toUpperCase()) {
-    case 'APPROVED':
-      return ReminderTemplateStatus.APPROVED;
-    case 'PENDING':
-    case 'IN_APPEAL':
-    case 'PENDING_DELETION':
-      return ReminderTemplateStatus.PENDING;
-    case undefined:
-      return ReminderTemplateStatus.NOT_CREATED;
-    default:
-      // `REJECTED`, `PAUSED`, `DISABLED`, `LIMIT_EXCEEDED`, `DELETED` y
-      // cualquier estado que Meta agregue: sin enviar hasta saber qué es.
-      return ReminderTemplateStatus.UNAVAILABLE;
-  }
-}
-
-/** Solo con la plantilla aprobada se puede iniciar una conversación. */
-export function canSendReminders(status: string | null | undefined): boolean {
-  return status === ReminderTemplateStatus.APPROVED;
-}
-
-/**
- * Cuerpo del `POST /{waba-id}/message_templates`.
- *
- * Ojo con el uso de mayúsculas: al **crear** una plantilla los componentes van
- * en mayúsculas (`BODY`, `BUTTONS`, `QUICK_REPLY`) y al **enviarla** en
- * minúsculas (`body`, `button`, `quick_reply`). Es asimétrico en la API de Meta
- * y no es un error de tipeo.
- *
- * Los ejemplos son obligatorios cuando el cuerpo tiene variables: sin ellos
- * Meta rechaza la plantilla porque no puede evaluar el texto real.
- */
-export function buildReminderTemplateCreatePayload(): Record<string, unknown> {
-  return {
-    name: REMINDER_TEMPLATE_NAME,
-    language: REMINDER_TEMPLATE_LANGUAGE,
-    category: REMINDER_TEMPLATE_CATEGORY,
-    components: [
-      {
-        type: 'BODY',
-        text: REMINDER_TEMPLATE_BODY,
-        example: {
-          body_text: [
-            [
-              'María',
-              'Studio Nova',
-              'Corte',
-              'Diego',
-              'jueves 21 de agosto, 16:00',
-            ],
-          ],
-        },
-      },
-      {
-        type: 'BUTTONS',
-        buttons: REMINDER_TEMPLATE_BUTTONS.map((text) => ({
-          type: 'QUICK_REPLY',
-          text,
-        })),
-      },
-    ],
-  };
-}
+export {
+  TemplateStatus as ReminderTemplateStatus,
+  toTemplateStatus as toReminderTemplateStatus,
+  canSendTemplate as canSendReminders,
+} from './template-status';

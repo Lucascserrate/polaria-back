@@ -25,6 +25,8 @@ import { AppointmentStatus } from './entities/appointment.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { Staff } from '../staff/entities/staff.entity';
 import { BOOKABLE_STAFF_WHERE } from '../staff/staff-role';
+import { StaffNotificationsService } from '../notifications/staff-notifications.service';
+import { StaffNotificationsJob } from '../notifications/staff-notifications.job';
 import type { BookingWarning } from './booking-warnings';
 import {
   isDuplicateEntryError,
@@ -66,6 +68,8 @@ export class AppointmentsService {
     @InjectRepository(Service)
     private serviceRepository: Repository<Service>,
     private readonly bookingAvailabilityService: BookingAvailabilityService,
+    private readonly staffNotifications: StaffNotificationsService,
+    private readonly staffNotificationsJob: StaffNotificationsJob,
   ) {}
 
   /**
@@ -87,6 +91,18 @@ export class AppointmentsService {
    * WhatsApp no pasa por acá: entra por `createFromBookingFlow` y sigue con las
    * reglas estrictas del cliente.
    */
+  /**
+   * Empuja los avisos encolados sin dejar que su fallo llegue al llamador.
+   *
+   * Se despacha en el propio request para que el profesional se entere en segundos y
+   * no en el próximo minuto. El `catch` vacío no es descuido: la cita ya está
+   * escrita, y el barrido de red va a reintentar lo que quede pendiente. Ver el
+   * punto 9.
+   */
+  private dispatchStaffAlerts(): void {
+    void this.staffNotificationsJob.flush().catch(() => undefined);
+  }
+
   async create(dto: CreateAppointmentDto): Promise<{
     appointment: AppointmentDetail;
     warnings: BookingWarning[];
@@ -166,6 +182,22 @@ export class AppointmentsService {
       startTime,
       plan,
     });
+
+    /*
+     * La cita histórica no se avisa.
+     *
+     * Nace `COMPLETED` porque se está registrando algo que ya pasó, y avisarle a
+     * quien la atendió que "tiene una cita nueva" para el mes pasado sería contarle
+     * una novedad que no lo es.
+     */
+    if (status !== AppointmentStatus.COMPLETED) {
+      await this.staffNotifications.appointmentCreated({
+        tenantId,
+        appointmentId,
+        segments: plan.segments,
+      });
+      this.dispatchStaffAlerts();
+    }
 
     return {
       appointment: await this.findDetailByTenant(appointmentId, tenantId),
@@ -635,7 +667,33 @@ export class AppointmentsService {
     await this.appointmentRepository.save(appointment);
     await this.syncActiveSlot(appointment.id, AppointmentStatus.CANCELLED);
 
+    await this.notifyCancelled(params.tenantId, appointment.id);
+
     return appointment;
+  }
+
+  /**
+   * Encola el aviso de una cancelación, leyendo los tramos de la base.
+   *
+   * Hace una consulta más en lugar de recibirlos, y es a propósito: los tres caminos
+   * que cancelan —el panel, WhatsApp, el borrado— tienen a mano la cita pero no
+   * siempre sus tramos cargados, y pasarlos obligaría a que cada uno se acuerde de
+   * pedir la relación. Cancelar no es una operación de alta frecuencia.
+   */
+  private async notifyCancelled(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<void> {
+    const segments = await this.appointmentServiceRepository.find({
+      where: { appointmentId },
+    });
+
+    await this.staffNotifications.appointmentCancelled({
+      tenantId,
+      appointmentId,
+      segments,
+    });
+    this.dispatchStaffAlerts();
   }
 
   async findLastByClient(tenantId: string, clientId: string) {
@@ -719,6 +777,19 @@ export class AppointmentsService {
       throw error;
     }
 
+    await this.staffNotifications.appointmentCreated({
+      tenantId: input.tenantId,
+      appointmentId: appointment.id,
+      segments: [
+        {
+          staffId: input.staffId,
+          serviceId: service.id,
+          startTime: input.startTime,
+        },
+      ],
+    });
+    this.dispatchStaffAlerts();
+
     return appointment;
   }
 
@@ -791,6 +862,28 @@ export class AppointmentsService {
 
     // Un cambio de estado libera o reclama el horario en el índice único.
     await this.syncActiveSlot(id, dto.status);
+
+    /*
+     * Solo la cancelación se avisa.
+     *
+     * Por acá pasan las dos resoluciones del panel —atendida y cancelada— y marcar
+     * una cita como atendida no es novedad para quien la atendió. Lo decide
+     * `appointmentStatusChanged`, para que la regla esté en un lugar y no en cada
+     * llamador.
+     */
+    if (dto.status) {
+      const segments = await this.appointmentServiceRepository.find({
+        where: { appointmentId: id },
+      });
+
+      await this.staffNotifications.appointmentStatusChanged({
+        tenantId,
+        appointmentId: id,
+        status: dto.status,
+        segments,
+      });
+      this.dispatchStaffAlerts();
+    }
 
     return this.findDetailByTenant(id, tenantId);
   }
@@ -906,6 +999,20 @@ export class AppointmentsService {
     const claimsSlot = blocksAgenda(appointment.status);
 
     /*
+     * Los tramos de **antes**, copiados antes de reemplazarlos.
+     *
+     * `replaceSegments` los borra e inserta de nuevo, así que después de esa llamada
+     * el estado anterior ya no existe en ninguna parte. Sin esta copia no habría con
+     * qué comparar, y la única opción sería avisarle a todos que "la cita cambió"
+     * —incluido a quien no lo tocó—. Ver `planEdited`.
+     */
+    const segmentsBefore = (appointment.services ?? []).map((segment) => ({
+      staffId: segment.staffId,
+      serviceId: segment.serviceId,
+      startTime: segment.startTime,
+    }));
+
+    /*
      * Los tramos se reemplazan dentro de una transacción. Borrarlos e insertarlos
      * sueltos deja la cita sin tramos si el insert falla —por ejemplo contra el
      * índice único—, y una cita sin tramos no tiene profesional, ni precio, ni
@@ -926,6 +1033,14 @@ export class AppointmentsService {
       }
       throw error;
     }
+
+    await this.staffNotifications.appointmentEdited({
+      tenantId,
+      appointmentId: id,
+      before: segmentsBefore,
+      after: plan.segments,
+    });
+    this.dispatchStaffAlerts();
 
     return {
       appointment: await this.findDetailByTenant(id, tenantId),
@@ -1001,6 +1116,43 @@ export class AppointmentsService {
     if (!appointment) {
       throw new NotFoundException('La cita no existe');
     }
+
+    /*
+     * Los tramos y los avisos se leen **antes** del borrado.
+     *
+     * Las dos claves foráneas están en cascada, así que después del `delete` no
+     * queda nada: ni los tramos para saber de quién era la cita, ni las filas de
+     * aviso para saber a quién ya se le había contado.
+     *
+     * `appointmentDeleted` solo avisa a quienes ya recibieron el aviso de que la
+     * cita existía: el borrado físico es la herramienta para lo que nunca debió
+     * existir, y mandarle un "se canceló" a alguien que nunca supo de esa carga de
+     * prueba es ruido sobre algo que para él no ocurrió.
+     */
+    const segments = await this.appointmentServiceRepository.find({
+      where: { appointmentId: id },
+    });
+
+    await this.staffNotifications.appointmentDeleted({
+      tenantId,
+      appointmentId: id,
+      segments,
+    });
+
+    /*
+     * Acá el despacho va **antes** del borrado, y es el único caso donde importa el
+     * orden.
+     *
+     * La fila del aviso tiene una clave foránea a la cita con `ON DELETE CASCADE`,
+     * así que borrar la cita se lleva el aviso encolado. Despachando después, el
+     * mensaje no saldría nunca y el barrido de red no tendría qué recoger.
+     *
+     * Se espera el envío, a diferencia del resto: no es fire-and-forget porque hay
+     * una carrera real contra el `DELETE` de la línea siguiente. Si WhatsApp está
+     * caído en ese momento el aviso se pierde, y es un costo aceptable para la
+     * operación que existe para sacar de la agenda lo que nunca debió estar ahí.
+     */
+    await this.staffNotificationsJob.flush().catch(() => undefined);
 
     await this.appointmentRepository.delete({ id, tenantId });
 

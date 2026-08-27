@@ -13,7 +13,9 @@ import { Tenant } from '../tenants/entities/tenant.entity';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { BookingSessionService } from '../booking-flow/booking-session.service';
 import { WhatsAppTemplateService } from '../whatsapp/whatsapp-template.service';
-import { ReminderTemplateStatus } from '../whatsapp/reminder-template';
+import { TEMPLATE_KEYS, TemplateKey } from '../whatsapp/template-registry';
+import { TemplateStatus } from '../whatsapp/template-status';
+import { WhatsAppTemplatesRepository } from '../whatsapp/whatsapp-templates.repository';
 import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
 import { normalizeReminderOffsets } from '../reminders/reminder-offsets';
 import { buildReminderPreview } from '../reminders/reminder-message';
@@ -163,6 +165,7 @@ export class SettingsService {
     private readonly dataSource: DataSource,
     private readonly bookingSessionService: BookingSessionService,
     private readonly whatsAppTemplateService: WhatsAppTemplateService,
+    private readonly whatsAppTemplatesRepository: WhatsAppTemplatesRepository,
   ) {}
 
   /**
@@ -211,6 +214,18 @@ export class SettingsService {
       getTenantSchedule: (id: string) => Promise<WeeklyScheduleRange[]>;
     };
     const businessHours = await scheduleService.getTenantSchedule(tenantId);
+
+    /*
+     * El estado de la plantilla sale de `whatsapp_templates`.
+     *
+     * La respuesta sigue llamándolo `reminderTemplateStatus` porque es lo que el
+     * panel muestra —el estado del canal de recordatorios— y renombrar el contrato
+     * en el mismo cambio que muda el modelo habría mezclado dos cosas.
+     */
+    const reminderTemplate = await this.whatsAppTemplatesRepository.find(
+      tenantId,
+      TemplateKey.REMINDER,
+    );
 
     return {
       polariaName: tenant.name,
@@ -261,8 +276,8 @@ export class SettingsService {
          * conexión no hay plantilla de la que hablar.
          */
         reminderTemplateStatus:
-          tenant.reminderTemplateStatus ?? ReminderTemplateStatus.NOT_CREATED,
-        reminderTemplateMetaStatus: tenant.reminderTemplateMetaStatus ?? null,
+          reminderTemplate?.status ?? TemplateStatus.NOT_CREATED,
+        reminderTemplateMetaStatus: reminderTemplate?.metaStatus ?? null,
       },
     };
   }
@@ -631,6 +646,15 @@ export class SettingsService {
       );
     }
 
+    /*
+     * Si el negocio cambia de WABA, las plantillas de la anterior se sueltan.
+     *
+     * La bandera se levanta dentro de la transacción y se actúa afuera: las
+     * plantillas están en otra tabla y su borrado no tiene por qué compartir el
+     * bloqueo de la fila del tenant.
+     */
+    let releasesTemplates = false;
+
     const updatedTenant = await this.dataSource.transaction(async (manager) => {
       const tenantRepository = manager.getRepository(Tenant);
 
@@ -707,12 +731,16 @@ export class SettingsService {
           )} newWabaId=${discoveredWabaId}; clearing whatsappFlowId`,
         );
         lockedTenant.whatsappFlowId = null;
-        // Igual que el Flow: la plantilla pertenece a la WABA anterior. Se
-        // reaprovisiona más abajo contra la nueva.
-        lockedTenant.reminderTemplateName = null;
-        lockedTenant.reminderTemplateLanguage = null;
-        lockedTenant.reminderTemplateStatus = null;
-        lockedTenant.reminderTemplateMetaStatus = null;
+        /*
+         * Igual que el Flow: las plantillas pertenecen a la WABA anterior y no se
+         * pueden enviar desde la nueva.
+         *
+         * Se anota para borrarlas **después** de la transacción y no adentro: viven
+         * en otra tabla y su borrado no tiene por qué compartir el bloqueo de la
+         * fila del tenant. `provisionTemplates`, más abajo, las vuelve a crear
+         * contra la WABA nueva.
+         */
+        releasesTemplates = true;
       }
 
       lockedTenant.whatsappBusinessId = discoveredBusinessId;
@@ -740,7 +768,11 @@ export class SettingsService {
       throw new NotFoundException('Tenant not found');
     }
 
-    await this.provisionReminderTemplate({
+    if (releasesTemplates) {
+      await this.whatsAppTemplatesRepository.deleteByTenant(tenantId);
+    }
+
+    await this.provisionTemplates({
       tenantId,
       wabaId: discoveredWabaId,
       accessToken: systemUserAccessToken,
@@ -782,32 +814,40 @@ export class SettingsService {
   }
 
   /**
-   * Deja lista la plantilla de recordatorios de este negocio.
+   * Deja listas las plantillas de este negocio.
    *
    * Corre después de guardar la conexión y es best-effort, como la suscripción a
-   * webhooks: si Meta rechaza la creación, el negocio queda conectado y sin
-   * recordatorios. Fallar el signup entero por esto sería desproporcionado —el
-   * canal principal, que es recibir y responder mensajes, funciona igual.
+   * webhooks: si Meta rechaza una creación, el negocio queda conectado y sin esa
+   * plantilla. Fallar el signup entero por esto sería desproporcionado —el canal
+   * principal, que es recibir y responder mensajes, funciona igual.
+   *
+   * Se recorren todas y no solo la de recordatorios: cada una se aprueba por
+   * separado, así que una rechazada no puede impedir que las otras se creen.
    */
-  private async provisionReminderTemplate(params: {
+  private async provisionTemplates(params: {
     tenantId: string;
     wabaId: string;
     accessToken: string;
   }): Promise<void> {
-    const state =
-      await this.whatsAppTemplateService.provisionReminderTemplate(params);
+    for (const key of TEMPLATE_KEYS) {
+      const state = await this.whatsAppTemplateService.provisionTemplate({
+        ...params,
+        key,
+      });
 
-    await this.tenantsService.setReminderTemplate({
-      tenantId: params.tenantId,
-      name:
-        state.status === ReminderTemplateStatus.NOT_CREATED ? null : state.name,
-      language:
-        state.status === ReminderTemplateStatus.NOT_CREATED
-          ? null
-          : state.language,
-      status: state.status,
-      metaStatus: state.metaStatus,
-    });
+      // `NOT_CREATED` significa que no se pudo crear: no se guarda una fila que
+      // afirme tener una plantilla que Meta no conoce.
+      if (state.status === TemplateStatus.NOT_CREATED) continue;
+
+      await this.whatsAppTemplatesRepository.save({
+        tenantId: params.tenantId,
+        templateKey: key,
+        name: state.name,
+        language: state.language,
+        status: state.status,
+        metaStatus: state.metaStatus,
+      });
+    }
   }
 
   /**
@@ -869,11 +909,6 @@ export class SettingsService {
       // Una caída informada por Meta deja de tener sentido sin conexión.
       lockedTenant.whatsappUnavailableSince = null;
       lockedTenant.whatsappUnavailableReason = null;
-      // La plantilla vive en la WABA que se está soltando.
-      lockedTenant.reminderTemplateName = null;
-      lockedTenant.reminderTemplateLanguage = null;
-      lockedTenant.reminderTemplateStatus = null;
-      lockedTenant.reminderTemplateMetaStatus = null;
 
       await tenantRepository.save(lockedTenant);
 
@@ -891,6 +926,17 @@ export class SettingsService {
         )} wabaId=${String(tenant.whatsappWabaId)} sesionesCanceladas=${cancelledSessions}`,
       );
     });
+
+    /*
+     * Las plantillas se sueltan con la conexión.
+     *
+     * Pertenecen a la WABA que se está dejando, así que conservarlas dejaría filas
+     * que afirman tener una plantilla aprobada en una WABA que ya no es de este
+     * negocio. Al reconectar, `provisionTemplates` las vuelve a crear.
+     *
+     * Fuera de la transacción por lo mismo que el resto: otra tabla, otro bloqueo.
+     */
+    await this.whatsAppTemplatesRepository.deleteByTenant(tenantId);
 
     return this.getSettings(tenantId);
   }

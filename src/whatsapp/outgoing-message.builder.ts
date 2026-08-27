@@ -180,6 +180,33 @@ export function buildTemplatePayload(input: SendTemplateInput): BuiltMessage {
     });
   });
 
+  /*
+   * El sufijo del botón de enlace, si la plantilla lo declara.
+   *
+   * Su índice es la cantidad de botones de respuesta rápida porque el de enlace va
+   * después en la plantilla aprobada, y el índice es posicional. Si algún día una
+   * plantilla los pone en otro orden, esto tiene que recibir el índice en lugar de
+   * calcularlo.
+   */
+  if (input.urlButtonSuffix) {
+    components.push({
+      type: 'button',
+      sub_type: 'url',
+      index: String(quickReplyPayloads.length),
+      parameters: [
+        {
+          type: 'text',
+          text: sanitizeTemplateParameter(
+            requireNonEmpty(
+              input.urlButtonSuffix,
+              'sufijo del botón de enlace',
+            ),
+          ),
+        },
+      ],
+    });
+  }
+
   return {
     payload: {
       type: 'template',

@@ -1,10 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import { TenantsService } from '../tenants/tenants.service';
+import { WhatsAppTemplatesRepository } from '../whatsapp/whatsapp-templates.repository';
 import {
-  REMINDER_TEMPLATE_NAME,
-  toReminderTemplateStatus,
-} from '../whatsapp/reminder-template';
+  templateDefinition,
+  TEMPLATE_KEYS,
+} from '../whatsapp/template-registry';
+import { toTemplateStatus } from '../whatsapp/template-status';
 import { getStringField, type JsonObject } from './webhook-meta.util';
 
 /**
@@ -22,7 +24,10 @@ import { getStringField, type JsonObject } from './webhook-meta.util';
 export class TemplateStatusService {
   private readonly logger = new Logger(TemplateStatusService.name);
 
-  constructor(private readonly tenantsService: TenantsService) {}
+  constructor(
+    private readonly tenantsService: TenantsService,
+    private readonly templates: WhatsAppTemplatesRepository,
+  ) {}
 
   async handle(params: {
     /** `entry[].id`, que para estos eventos es una WABA. */
@@ -32,7 +37,18 @@ export class TemplateStatusService {
     const { entryId, value } = params;
 
     const templateName = getStringField(value, 'message_template_name');
-    if (templateName !== REMINDER_TEMPLATE_NAME) {
+    /*
+     * Se resuelve de qué plantilla nuestra habla el webhook.
+     *
+     * Antes se comparaba contra la única que había. Ahora se busca la clave por
+     * nombre: una plantilla que el negocio creó por su cuenta en su WABA también
+     * dispara este webhook, y no es asunto de Polaria.
+     */
+    const key = TEMPLATE_KEYS.find(
+      (candidate) => templateDefinition(candidate).name === templateName,
+    );
+
+    if (!key) {
       this.logger.log(
         `Cambio de estado de una plantilla ajena, ignorado (name=${String(templateName)}).`,
       );
@@ -51,20 +67,23 @@ export class TemplateStatusService {
 
     // El estado nuevo viene en `event`, no en `status`.
     const metaStatus = getStringField(value, 'event');
-    const status = toReminderTemplateStatus(metaStatus);
+    const status = toTemplateStatus(metaStatus);
 
-    await this.tenantsService.setReminderTemplate({
+    const definition = templateDefinition(key);
+
+    await this.templates.save({
       tenantId: tenant.id,
-      name: REMINDER_TEMPLATE_NAME,
+      templateKey: key,
+      name: definition.name,
       language:
         getStringField(value, 'message_template_language') ??
-        tenant.reminderTemplateLanguage,
+        definition.language,
       status,
       metaStatus: metaStatus ?? null,
     });
 
     this.logger.log(
-      `Plantilla de recordatorios en ${status} (tenantId=${tenant.id}, metaStatus=${String(metaStatus)}, reason=${String(getStringField(value, 'reason'))}).`,
+      `Plantilla ${key} en ${status} (tenantId=${tenant.id}, metaStatus=${String(metaStatus)}, reason=${String(getStringField(value, 'reason'))}).`,
     );
   }
 }

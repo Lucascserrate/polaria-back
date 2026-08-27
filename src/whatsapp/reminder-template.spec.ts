@@ -1,8 +1,5 @@
 import {
-  buildReminderTemplateCreatePayload,
   canSendReminders,
-  REMINDER_TEMPLATE_BUTTONS,
-  REMINDER_TEMPLATE_VARIABLES,
   ReminderTemplateStatus,
   toReminderTemplateStatus,
 } from './reminder-template';
@@ -71,58 +68,5 @@ describe('canSendReminders', () => {
     ]) {
       expect(canSendReminders(status)).toBe(false);
     }
-  });
-});
-
-describe('buildReminderTemplateCreatePayload', () => {
-  const payload = buildReminderTemplateCreatePayload();
-
-  it('se crea como utility, no como marketing', () => {
-    // La categoría cambia el precio y las reglas: un recordatorio clasificado
-    // como marketing sería rechazado.
-    expect(payload.category).toBe('UTILITY');
-  });
-
-  it('usa mayúsculas en los componentes, como pide la creación', () => {
-    const components = payload.components as Array<{ type: string }>;
-    expect(components.map((component) => component.type)).toEqual([
-      'BODY',
-      'BUTTONS',
-    ]);
-  });
-
-  it('declara un ejemplo por cada variable del cuerpo', () => {
-    const [body] = payload.components as Array<{
-      text: string;
-      example: { body_text: string[][] };
-    }>;
-
-    const placeholders = body.text.match(/\{\{\d+\}\}/g) ?? [];
-    expect(placeholders).toHaveLength(REMINDER_TEMPLATE_VARIABLES.length);
-    // Sin un ejemplo por variable, Meta rechaza la plantilla.
-    expect(body.example.body_text[0]).toHaveLength(
-      REMINDER_TEMPLATE_VARIABLES.length,
-    );
-  });
-
-  it('numera las variables del cuerpo sin saltos', () => {
-    const [body] = payload.components as Array<{ text: string }>;
-    const expected = REMINDER_TEMPLATE_VARIABLES.map(
-      (_, index) => `{{${index + 1}}}`,
-    );
-    expect(body.text.match(/\{\{\d+\}\}/g)).toEqual(expected);
-  });
-
-  it('declara los botones de respuesta rápida en orden', () => {
-    const [, buttons] = payload.components as Array<{
-      buttons: Array<{ type: string; text: string }>;
-    }>;
-
-    expect(buttons.buttons).toEqual(
-      REMINDER_TEMPLATE_BUTTONS.map((text) => ({
-        type: 'QUICK_REPLY',
-        text,
-      })),
-    );
   });
 });

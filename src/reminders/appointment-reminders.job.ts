@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
+import { WhatsAppTemplatesRepository } from '../whatsapp/whatsapp-templates.repository';
+import { TemplateKey } from '../whatsapp/template-registry';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
 import { AppointmentRemindersRepository } from './appointment-reminders.repository';
 import {
@@ -31,6 +33,7 @@ export class AppointmentRemindersJob {
     private readonly repository: AppointmentRemindersRepository,
     private readonly remindersService: AppointmentRemindersService,
     private readonly whatsAppSenderService: WhatsAppSenderService,
+    private readonly templates: WhatsAppTemplatesRepository,
   ) {}
 
   @Cron(CronExpression.EVERY_5_MINUTES)
@@ -82,12 +85,28 @@ export class AppointmentRemindersJob {
       channel: REMINDER_CHANNEL_WHATSAPP,
     });
 
+    const templateCache = new Map<
+      string,
+      { name: string; language: string; status: string } | null
+    >();
+
     for (const reminder of due) {
       // Se revalida antes de tomar la fila: si la cita cambió, no hace falta
       // reservarla para nadie, solo corregir su estado.
+      /*
+       * El estado de la plantilla se resuelve acá y se pasa a las reglas.
+       *
+       * Vive en `whatsapp_templates`, y darle acceso a esa tabla al servicio de
+       * reglas habría convertido una función de decisión en una consulta. Una fila
+       * por negocio, cacheada en la pasada: el barrido puede traer muchos
+       * recordatorios del mismo local.
+       */
+      const template = await this.templateFor(reminder.tenantId, templateCache);
+
       const blocked = this.remindersService.validateBeforeSending({
         reminder,
         now,
+        templateStatus: template?.status ?? null,
       });
 
       if (blocked) {
@@ -107,11 +126,30 @@ export class AppointmentRemindersJob {
         continue;
       }
 
-      await this.send(reminder, now);
+      await this.send(reminder, now, template);
     }
   }
 
-  private async send(reminder: AppointmentReminder, now: Date): Promise<void> {
+  /** La plantilla de recordatorios del negocio, una consulta por pasada. */
+  private async templateFor(
+    tenantId: string,
+    cache: Map<
+      string,
+      { name: string; language: string; status: string } | null
+    >,
+  ) {
+    if (cache.has(tenantId)) return cache.get(tenantId) ?? null;
+
+    const template = await this.templates.find(tenantId, TemplateKey.REMINDER);
+    cache.set(tenantId, template ?? null);
+    return template ?? null;
+  }
+
+  private async send(
+    reminder: AppointmentReminder,
+    now: Date,
+    template: { name: string; language: string } | null,
+  ): Promise<void> {
     const { appointment, tenant } = reminder;
 
     const accessToken = readStoredCredential(tenant.whatsappAccessToken);
@@ -163,8 +201,8 @@ export class AppointmentRemindersJob {
       { accessToken, phoneNumberId },
       {
         to,
-        name: tenant.reminderTemplateName ?? '',
-        languageCode: tenant.reminderTemplateLanguage ?? 'es',
+        name: template?.name ?? '',
+        languageCode: template?.language ?? 'es',
         bodyParameters: message.bodyParameters,
         quickReplyPayloads: message.quickReplyPayloads,
       },

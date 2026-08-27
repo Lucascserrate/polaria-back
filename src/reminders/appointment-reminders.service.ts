@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Appointment } from '../appointments/entities/appointment.entity';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import { TenantsService } from '../tenants/tenants.service';
-import { canSendReminders } from '../whatsapp/reminder-template';
+import { canSendTemplate } from '../whatsapp/template-status';
 import { AppointmentRemindersRepository } from './appointment-reminders.repository';
 import type { AppointmentReminder } from './entities/appointment-reminder.entity';
 import { normalizeReminderOffsets } from './reminder-offsets';
@@ -193,6 +193,8 @@ export class AppointmentRemindersService {
   validateBeforeSending(params: {
     reminder: AppointmentReminder;
     now: Date;
+    /** Estado de la plantilla de recordatorios de este negocio. */
+    templateStatus: string | null;
   }): string | null {
     const { reminder, now } = params;
     const { appointment, tenant } = reminder;
@@ -242,7 +244,13 @@ export class AppointmentRemindersService {
       return REMINDER_SEND_REASONS.APPOINTMENT_CHANGED;
     }
 
-    if (!canSendReminders(tenant.reminderTemplateStatus)) {
+    /*
+     * El estado de la plantilla ya no está en el tenant sino en
+     * `whatsapp_templates`, así que lo resuelve el llamador y lo pasa: acá no hay
+     * acceso a esa tabla y agregárselo convertiría una función de reglas en una
+     * consulta.
+     */
+    if (!canSendTemplate(params.templateStatus)) {
       return REMINDER_SEND_REASONS.TEMPLATE_NOT_APPROVED;
     }
 

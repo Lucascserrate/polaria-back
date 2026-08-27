@@ -133,33 +133,14 @@ export class Tenant {
   @Column({ type: 'json', nullable: true })
   reminderOffsets?: number[] | null;
 
-  /**
-   * Plantilla de recordatorios aprobada en la WABA de este negocio.
+  /*
+   * Acá vivían las cuatro columnas de la plantilla de recordatorios
+   * —`reminderTemplateName`, `Language`, `Status`, `MetaStatus`—.
    *
-   * Se aprovisiona sola al conectar WhatsApp y pertenece a la WABA, así que se
-   * limpia junto con el resto de la conexión: una plantilla de la WABA anterior
-   * no se puede enviar desde la nueva.
+   * Se mudaron a `whatsapp_templates` cuando dejó de haber una sola plantilla: con
+   * dos habrían sido ocho columnas acá, y el job que relee aprobaciones y el webhook
+   * de Meta tenían "la" plantilla cableada en singular.
    */
-  @Column({ type: 'varchar', length: 512, nullable: true })
-  reminderTemplateName!: string | null;
-
-  /** Idioma con el que se aprobó. Al enviar tiene que coincidir exacto. */
-  @Column({ type: 'varchar', length: 16, nullable: true })
-  reminderTemplateLanguage!: string | null;
-
-  /** `ReminderTemplateStatus`. Solo `APPROVED` habilita el envío. */
-  @Column({ type: 'varchar', length: 32, nullable: true })
-  reminderTemplateStatus!: string | null;
-
-  /**
-   * Estado tal como lo informa Meta.
-   *
-   * Nuestro `UNAVAILABLE` agrupa rechazada, pausada, deshabilitada y borrada.
-   * Sin el valor original no hay forma de decirle al negocio cuál de las cuatro
-   * le está pasando.
-   */
-  @Column({ type: 'varchar', length: 32, nullable: true })
-  reminderTemplateMetaStatus!: string | null;
 
   /**
    * Coexistence: el número sigue usándose desde la app de WhatsApp Business

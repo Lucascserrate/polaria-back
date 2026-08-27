@@ -189,7 +189,11 @@ describe('validateBeforeSending', () => {
     const now = new Date('2026-08-27T14:03:00.000Z');
 
     expect(
-      service.validateBeforeSending({ reminder: reminder({}), now }),
+      service.validateBeforeSending({
+        reminder: reminder({}),
+        now,
+        templateStatus: 'APPROVED',
+      }),
     ).toBeNull();
   });
 
@@ -202,9 +206,13 @@ describe('validateBeforeSending', () => {
   it('no envía el aviso de una cita que ya empezó', () => {
     const now = new Date('2026-08-27T17:00:00.000Z');
 
-    expect(service.validateBeforeSending({ reminder: reminder({}), now })).toBe(
-      REMINDER_SEND_REASONS.APPOINTMENT_ALREADY_STARTED,
-    );
+    expect(
+      service.validateBeforeSending({
+        reminder: reminder({}),
+        now,
+        templateStatus: 'APPROVED',
+      }),
+    ).toBe(REMINDER_SEND_REASONS.APPOINTMENT_ALREADY_STARTED);
   });
 
   it('no envía si la cita se movió de horario', () => {
@@ -213,17 +221,25 @@ describe('validateBeforeSending', () => {
       startTime: new Date('2026-08-27T18:00:00.000Z'),
     });
 
-    expect(service.validateBeforeSending({ reminder: moved, now })).toBe(
-      REMINDER_SEND_REASONS.APPOINTMENT_CHANGED,
-    );
+    expect(
+      service.validateBeforeSending({
+        reminder: moved,
+        now,
+        templateStatus: 'APPROVED',
+      }),
+    ).toBe(REMINDER_SEND_REASONS.APPOINTMENT_CHANGED);
   });
 
   it('no envía si la cita se canceló', () => {
     const now = new Date('2026-08-27T14:03:00.000Z');
     const cancelled = reminder({ status: AppointmentStatus.CANCELLED });
 
-    expect(service.validateBeforeSending({ reminder: cancelled, now })).toBe(
-      REMINDER_REASONS.APPOINTMENT_INACTIVE,
-    );
+    expect(
+      service.validateBeforeSending({
+        reminder: cancelled,
+        now,
+        templateStatus: 'APPROVED',
+      }),
+    ).toBe(REMINDER_REASONS.APPOINTMENT_INACTIVE);
   });
 });

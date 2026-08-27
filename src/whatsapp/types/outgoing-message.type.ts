@@ -127,6 +127,17 @@ export type SendTemplateInput = {
    * en la plantilla aprobada. Cada uno vuelve intacto al tocarlo.
    */
   quickReplyPayloads?: string[];
+  /**
+   * Valor del `{{1}}` de un botón de enlace, cuando la plantilla lo declara así.
+   *
+   * Meta llama a esto "sufijo dinámico": la plantilla se aprueba con la URL
+   * terminada en `{{1}}` y al enviar se manda lo que va ahí. Es lo que permite que
+   * el botón lleve a la fecha de **esta** cita en lugar de a la agenda de hoy.
+   *
+   * Va **después** de los botones de respuesta rápida en la plantilla, así que su
+   * índice es la cantidad de esos botones. Ver `buildTemplatePayload`.
+   */
+  urlButtonSuffix?: string;
 };
 
 export type SendListInput = {
