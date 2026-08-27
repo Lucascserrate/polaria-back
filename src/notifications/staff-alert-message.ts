@@ -26,24 +26,14 @@ export function formatAlertTime(startTime: Date, timezone: string): string {
   }).format(startTime);
 }
 
-/**
- * La hora anterior, solo si decirla aporta algo.
+/*
+ * Acá vivía `formatPreviousTime`, que escribía "se movió de las 15:30 a las 17:00".
  *
- * Devuelve `null` cuando la hora del reloj no cambió —se movió de día, no de
- * hora—, porque "se movió de las 16:00 a las 16:00" es peor que no decir nada.
+ * Se fue con la plantilla parametrizada: las tres plantillas aprobadas dicen "Nueva
+ * hora: {{4}}" y no tienen hueco para la anterior. La columna `previousStartTime`
+ * sigue guardándose porque es el registro de qué cambió —sirve para soporte— pero el
+ * mensaje ya no la nombra.
  */
-export function formatPreviousTime(params: {
-  previousStartTime: Date | null;
-  startTime: Date;
-  timezone: string;
-}): string | null {
-  if (!params.previousStartTime) return null;
-
-  const previous = formatAlertTime(params.previousStartTime, params.timezone);
-  const current = formatAlertTime(params.startTime, params.timezone);
-
-  return previous === current ? null : previous;
-}
 
 /**
  * `YYYY-MM-DD` en la zona del negocio, para el enlace del botón.

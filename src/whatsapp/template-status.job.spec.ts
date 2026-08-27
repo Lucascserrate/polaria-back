@@ -4,7 +4,7 @@ import {
   type WhatsAppTemplatesRepository,
 } from './whatsapp-templates.repository';
 import type { WhatsAppTemplateService } from './whatsapp-template.service';
-import { TemplateKey } from './template-registry';
+import { TemplateKey, TEMPLATE_KEYS } from './template-registry';
 import { TemplateStatus } from './template-status';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 
@@ -59,7 +59,7 @@ const build = (params: {
       provisions.push({ tenantId: args.tenantId, key: args.key });
       return Promise.resolve({
         key: args.key,
-        name: 'polaria_staff_appointment_alert',
+        name: 'polaria_staff_appointment_new',
         language: 'es',
         status: params.provisionResult ?? TemplateStatus.PENDING,
         metaStatus: 'PENDING',
@@ -82,18 +82,18 @@ describe('aprovisionamiento de negocios ya conectados', () => {
    */
   it('crea la plantilla que le falta a un negocio conectado', async () => {
     const { job, provisions, saves } = build({
-      missing: { [TemplateKey.STAFF_ALERT]: [tenant('t-1')] },
+      missing: { [TemplateKey.STAFF_ALERT_NEW]: [tenant('t-1')] },
     });
 
     await job.run();
 
     expect(provisions).toEqual([
-      { tenantId: 't-1', key: TemplateKey.STAFF_ALERT },
+      { tenantId: 't-1', key: TemplateKey.STAFF_ALERT_NEW },
     ]);
     expect(saves).toEqual([
       expect.objectContaining({
         tenantId: 't-1',
-        templateKey: TemplateKey.STAFF_ALERT,
+        templateKey: TemplateKey.STAFF_ALERT_NEW,
         status: TemplateStatus.PENDING,
       }),
     ]);
@@ -113,8 +113,9 @@ describe('aprovisionamiento de negocios ya conectados', () => {
 
     await job.run();
 
+    // Las cuatro del registro: la de recordatorios y las tres del equipo.
     expect(queries.map((q) => q.templateKey).sort()).toEqual(
-      [TemplateKey.REMINDER, TemplateKey.STAFF_ALERT].sort(),
+      [...TEMPLATE_KEYS].sort(),
     );
   });
 
@@ -125,7 +126,7 @@ describe('aprovisionamiento de negocios ya conectados', () => {
    */
   it('guarda el fallo para poder espaciar los reintentos', async () => {
     const { job, saves } = build({
-      missing: { [TemplateKey.STAFF_ALERT]: [tenant('t-1')] },
+      missing: { [TemplateKey.STAFF_ALERT_NEW]: [tenant('t-1')] },
       provisionResult: TemplateStatus.NOT_CREATED,
     });
 
@@ -163,7 +164,7 @@ describe('aprovisionamiento de negocios ya conectados', () => {
   it('descarta al negocio cuya credencial está corrupta', async () => {
     const { job, provisions } = build({
       missing: {
-        [TemplateKey.STAFF_ALERT]: [
+        [TemplateKey.STAFF_ALERT_NEW]: [
           tenant('t-sucio', { whatsappAccessToken: 'null' }),
           tenant('t-limpio'),
         ],

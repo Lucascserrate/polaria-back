@@ -30,6 +30,14 @@ export const STAFF_NOTIFICATION_REASONS = {
   NO_WHATSAPP_CONNECTION: 'NO_WHATSAPP_CONNECTION',
   /** El proceso murió mientras hablaba con el canal. */
   SEND_INTERRUPTED: 'SEND_INTERRUPTED',
+  /**
+   * El evento guardado no corresponde a ninguna plantilla.
+   *
+   * Defensivo: cubre una fila escrita por una versión anterior o un dato tocado a
+   * mano. Sin esto, la fila se quedaría `PENDING` para siempre y el barrido la
+   * levantaría en cada pasada.
+   */
+  UNKNOWN_EVENT: 'UNKNOWN_EVENT',
 } as const;
 
 /**

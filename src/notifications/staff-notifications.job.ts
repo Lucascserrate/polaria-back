@@ -7,18 +7,18 @@ import { Service } from '../services/entities/service.entity';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
 import { WhatsAppTemplatesRepository } from '../whatsapp/whatsapp-templates.repository';
-import { TemplateKey } from '../whatsapp/template-registry';
+import { templateDefinition } from '../whatsapp/template-registry';
 import { canSendTemplate } from '../whatsapp/template-status';
 import {
   buildStaffAlertParameters,
   StaffAlertEvent,
+  TEMPLATE_KEY_BY_EVENT,
 } from '../whatsapp/staff-alert-template';
 import type { AppointmentNotification } from './entities/appointment-notification.entity';
 import {
   formatAlertDate,
   formatAlertDateKey,
   formatAlertTime,
-  formatPreviousTime,
 } from './staff-alert-message';
 import {
   resolveRecipient,
@@ -132,9 +132,22 @@ export class StaffNotificationsJob {
       return;
     }
 
+    /*
+     * Cada evento tiene su plantilla. La traducción vive en
+     * `TEMPLATE_KEY_BY_EVENT`, así que acá no hay `switch`.
+     */
+    const templateKey =
+      TEMPLATE_KEY_BY_EVENT[notification.event as StaffAlertEvent];
+
+    if (!templateKey) {
+      // Un evento que no reconocemos: fila vieja o dato corrupto. No se manda nada.
+      await this.skip(notification, STAFF_NOTIFICATION_REASONS.UNKNOWN_EVENT);
+      return;
+    }
+
     const template = await this.templates.find(
       notification.tenantId,
-      TemplateKey.STAFF_ALERT,
+      templateKey,
     );
 
     /*
@@ -146,7 +159,7 @@ export class StaffNotificationsJob {
      */
     if (!template || !canSendTemplate(template.status)) {
       this.logger.log(
-        `Aviso en espera de la plantilla (tenantId=${notification.tenantId}, status=${String(template?.status)}).`,
+        `Aviso en espera de la plantilla ${templateKey} (tenantId=${notification.tenantId}, status=${String(template?.status)}).`,
       );
       return;
     }
@@ -160,17 +173,10 @@ export class StaffNotificationsJob {
     const timezone = tenant?.timezone ?? 'America/La_Paz';
 
     const parameters = buildStaffAlertParameters({
-      event: notification.event as StaffAlertEvent,
-      professionalName: firstName(staff?.name) ?? 'colega',
       clientName: appointment?.client?.name ?? null,
       serviceName,
       date: formatAlertDate(notification.startTime, timezone),
       time: formatAlertTime(notification.startTime, timezone),
-      previousTime: formatPreviousTime({
-        previousStartTime: notification.previousStartTime,
-        startTime: notification.startTime,
-        timezone,
-      }),
     });
 
     const result = await this.sender.sendTemplate(
@@ -181,9 +187,21 @@ export class StaffNotificationsJob {
         languageCode: template.language,
         bodyParameters: parameters,
         quickReplyPayloads: [],
-        // El botón cae en el día de **esta** cita y no en hoy. Ver el sufijo
-        // dinámico en `template-registry`.
-        urlButtonSuffix: formatAlertDateKey(notification.startTime, timezone),
+        /*
+         * El sufijo solo viaja si la plantilla declara el botón.
+         *
+         * La de cancelada no lo lleva —la cita ya no existe, así que "ver mi agenda"
+         * no explicaría nada— y mandar un parámetro de botón a una plantilla sin
+         * botones hace que Meta rechace el envío.
+         */
+        ...(templateDefinition(templateKey).urlButton
+          ? {
+              urlButtonSuffix: formatAlertDateKey(
+                notification.startTime,
+                timezone,
+              ),
+            }
+          : {}),
       },
     );
 
@@ -236,16 +254,13 @@ export class StaffNotificationsJob {
   }
 }
 
-/**
- * Solo el nombre de pila para el saludo.
+/*
+ * Acá vivía `firstName`, que sacaba el nombre de pila para el saludo.
  *
- * "Hola Lucas" y no "Hola Lucas Serrate": es un mensaje entre el negocio y alguien
- * de su equipo, no una notificación formal.
+ * Se fue con las plantillas nuevas: los tres textos aprobados no saludan al
+ * profesional por su nombre —abren con el encabezado del evento y siguen con quién
+ * es el cliente—, así que el dato dejó de tener destino.
  */
-const firstName = (name?: string | null): string | null => {
-  const first = name?.trim().split(/\s+/)[0];
-  return first || null;
-};
 
 const describeError = (error: unknown): string =>
   error instanceof Error ? (error.stack ?? error.message) : String(error);
