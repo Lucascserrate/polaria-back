@@ -145,14 +145,6 @@ export class TenantsService {
    * Como `setWhatsappUnavailability`, no pasa por `UpdateTenantDto`: lo escribe
    * el aprovisionamiento o un webhook de Meta, nunca el negocio desde el panel.
    */
-  /*
-   * Acá vivían `setReminderTemplate` y `findWithPendingReminderTemplate`.
-   *
-   * Se fueron con las columnas: el estado de las plantillas vive en
-   * `whatsapp_templates` y lo maneja `WhatsAppTemplatesRepository`. Dejarlos acá
-   * habría obligado al tenant a saber de plantillas, que es justamente lo que la
-   * tabla nueva evita.
-   */
 
   /**
    * Arranca la prueba gratuita, si no arrancó antes.

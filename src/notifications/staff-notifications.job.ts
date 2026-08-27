@@ -254,13 +254,5 @@ export class StaffNotificationsJob {
   }
 }
 
-/*
- * Acá vivía `firstName`, que sacaba el nombre de pila para el saludo.
- *
- * Se fue con las plantillas nuevas: los tres textos aprobados no saludan al
- * profesional por su nombre —abren con el encabezado del evento y siguen con quién
- * es el cliente—, así que el dato dejó de tener destino.
- */
-
 const describeError = (error: unknown): string =>
   error instanceof Error ? (error.stack ?? error.message) : String(error);

@@ -133,15 +133,6 @@ export class Tenant {
   @Column({ type: 'json', nullable: true })
   reminderOffsets?: number[] | null;
 
-  /*
-   * Acá vivían las cuatro columnas de la plantilla de recordatorios
-   * —`reminderTemplateName`, `Language`, `Status`, `MetaStatus`—.
-   *
-   * Se mudaron a `whatsapp_templates` cuando dejó de haber una sola plantilla: con
-   * dos habrían sido ocho columnas acá, y el job que relee aprobaciones y el webhook
-   * de Meta tenían "la" plantilla cableada en singular.
-   */
-
   /**
    * Coexistence: el número sigue usándose desde la app de WhatsApp Business
    * en paralelo a Cloud API. Cambia lo que se puede hacer con el número

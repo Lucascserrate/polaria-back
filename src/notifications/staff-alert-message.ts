@@ -26,15 +26,6 @@ export function formatAlertTime(startTime: Date, timezone: string): string {
   }).format(startTime);
 }
 
-/*
- * Acá vivía `formatPreviousTime`, que escribía "se movió de las 15:30 a las 17:00".
- *
- * Se fue con la plantilla parametrizada: las tres plantillas aprobadas dicen "Nueva
- * hora: {{4}}" y no tienen hueco para la anterior. La columna `previousStartTime`
- * sigue guardándose porque es el registro de qué cambió —sirve para soporte— pero el
- * mensaje ya no la nombra.
- */
-
 /**
  * `YYYY-MM-DD` en la zona del negocio, para el enlace del botón.
  *
