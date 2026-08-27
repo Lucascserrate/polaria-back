@@ -28,6 +28,16 @@ export const REMINDER_SEND_REASONS = {
   TEMPLATE_NOT_APPROVED: 'TEMPLATE_NOT_APPROVED',
   NO_WHATSAPP_CONNECTION: 'NO_WHATSAPP_CONNECTION',
   APPOINTMENT_CHANGED: 'APPOINTMENT_CHANGED',
+  /**
+   * La cita ya empezó.
+   *
+   * No lo cubre `APPOINTMENT_INACTIVE`: una cita que ocurrió pero que nadie marcó
+   * como atendida sigue en `confirmed`, así que para las reglas sigue activa. Y
+   * tampoco lo cubre la revalidación del momento, que en esta etapa está apagada a
+   * propósito. Sin este control, una caída del barrido de unas horas se resuelve
+   * avisando "tu cita es hoy a las 11:00" a la una de la tarde.
+   */
+  APPOINTMENT_ALREADY_STARTED: 'APPOINTMENT_ALREADY_STARTED',
   /** El proceso murió mientras hablaba con el canal. */
   SEND_INTERRUPTED: 'SEND_INTERRUPTED',
 } as const;
@@ -108,7 +118,12 @@ export class AppointmentRemindersService {
       for (const offsetMinutes of offsets) {
         const stored =
           storedByKey.get(reminderKey(appointment.id, offsetMinutes)) ?? null;
-        const target = this.targetFor({ appointment, offsetMinutes, now });
+        const target = this.targetFor({
+          appointment,
+          offsetMinutes,
+          now,
+          asOf: 'now',
+        });
         const action = resolveReminderAction(target, stored);
 
         if (action.kind === 'NOOP') continue;
@@ -186,6 +201,18 @@ export class AppointmentRemindersService {
       return REMINDER_SEND_REASONS.APPOINTMENT_CHANGED;
     }
 
+    /*
+     * Un aviso de una cita que ya pasó no se manda.
+     *
+     * Va antes que todo lo demás porque ninguna otra comprobación lo atrapa: la
+     * cita puede seguir en `confirmed` —nadie la marcó atendida— y su horario
+     * puede coincidir exacto con el que se programó. Lo único fuera de lugar es el
+     * reloj, y eso solo se nota mirándolo.
+     */
+    if (appointment.startTime <= now) {
+      return REMINDER_SEND_REASONS.APPOINTMENT_ALREADY_STARTED;
+    }
+
     // La anticipación sale de la fila y no de la configuración actual: si el
     // negocio cambió de opinión, esta fila ya fue cancelada por la
     // reconciliación. Leer la configuración acá descartaría un envío legítimo
@@ -194,6 +221,9 @@ export class AppointmentRemindersService {
       appointment,
       offsetMinutes: reminder.offsetMinutes,
       now,
+      // Este aviso está vencido por definición, así que su momento no puede ser
+      // el motivo para no enviarlo. Lo que se revalida es todo lo demás.
+      asOf: 'scheduled',
     });
 
     // Lo que corresponde ahora tiene que seguir siendo "avisar", y en el mismo
@@ -220,16 +250,35 @@ export class AppointmentRemindersService {
   }
 
   /**
-   * El objetivo, con una salvedad: al revalidar antes de enviar, el momento ya
-   * pasó por definición, así que `LEAD_TIME_PASSED` no es motivo para no enviar.
-   * Se resuelve pidiendo el objetivo "como si" fuera el momento programado.
+   * El objetivo de un recordatorio, juzgado desde un momento explícito.
+   *
+   * `asOf` no es un detalle: las dos etapas preguntan lo mismo desde lugares
+   * distintos del tiempo, y confundirlas fue un bug real.
+   *
+   * - `'now'` — al **reconciliar**. Se juzga desde ahora, así que una
+   *   anticipación cuyo momento ya pasó devuelve `LEAD_TIME_PASSED` y la fila
+   *   queda en `SKIPPED`. Es lo que corresponde: agendar una cita para dentro de
+   *   diez horas con el aviso de 24 configurado no tiene aviso de 24, porque ese
+   *   instante ya ocurrió.
+   *
+   * - `'scheduled'` — al **revalidar** un aviso vencido, justo antes de enviarlo.
+   *   Ahí el momento ya pasó por definición —para eso está vencido— así que
+   *   juzgarlo desde ahora lo descartaría siempre. Se pregunta "como si" fuera un
+   *   instante antes de su hora programada, para que lo único que decida sean las
+   *   otras condiciones: que la cita siga activa, en su horario y con teléfono.
+   *
+   * Antes esto era un solo camino que elegía el más temprano de los dos, y por eso
+   * `LEAD_TIME_PASSED` era inalcanzable al reconciliar: cualquier anticipación
+   * pasada se programaba con un `scheduledFor` viejo, y el barrido siguiente la
+   * enviaba de inmediato.
    */
   private targetFor(params: {
     appointment: Appointment;
     offsetMinutes: number;
     now: Date;
+    asOf: 'now' | 'scheduled';
   }): ReminderTarget {
-    const { appointment, offsetMinutes, now } = params;
+    const { appointment, offsetMinutes, now, asOf } = params;
 
     const scheduledFor = new Date(
       appointment.startTime.getTime() - offsetMinutes * 60_000,
@@ -242,10 +291,7 @@ export class AppointmentRemindersService {
         clientPhone: appointment.client?.phone ?? null,
       },
       offsetMinutes,
-      // Se evalúa contra el momento programado o contra ahora, el que sea más
-      // temprano: si no, un recordatorio vencido se descartaría por "tarde" en
-      // el mismo instante en que corresponde enviarlo.
-      now: scheduledFor < now ? new Date(scheduledFor.getTime() - 1) : now,
+      now: asOf === 'scheduled' ? new Date(scheduledFor.getTime() - 1) : now,
     });
   }
 
