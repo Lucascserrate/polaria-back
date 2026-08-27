@@ -11,6 +11,7 @@ import { AppointmentService as AppointmentSegment } from '../appointments/entiti
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { TenantError } from '../tenants/enums/tenant.enum';
 import { ReportQueryDto } from './dto/report-query.dto';
+import { Staff } from '../staff/entities/staff.entity';
 import { ReportRange, resolveReportRange } from './utils/report-range.util';
 import {
   buildReportTimeline,
@@ -20,6 +21,7 @@ import {
   ReportSummary,
   ServiceRankingEntry,
   StaffRankingEntry,
+  StaffReport,
   TenantReport,
 } from './reports.types';
 
@@ -37,6 +39,14 @@ interface StatusCountRow {
   confirmed: string | null;
   completed: string | null;
   cancelled: string | null;
+}
+
+/** Lo que devuelve el agregado de estados de un profesional. */
+interface StaffCountRow {
+  completed: string | null;
+  cancelled: string | null;
+  pending: string | null;
+  clients: string | null;
 }
 
 interface StaffRankingRow {
@@ -297,6 +307,225 @@ export class ReportsService {
     range: ReportRange,
   ): Promise<ServiceRankingEntry[]> {
     const rows = await this.billedSegments(tenantId, range)
+      .innerJoin('segment.service', 'service')
+      .select('service.id', 'serviceId')
+      .addSelect('service.name', 'serviceName')
+      .addSelect('COUNT(*)', 'timesPerformed')
+      .addSelect('SUM(segment.priceAtBooking)', 'revenue')
+      .groupBy('service.id')
+      .addGroupBy('service.name')
+      .orderBy('revenue', 'DESC')
+      .getRawMany<ServiceRankingRow>();
+
+    return rows.map((row) => ({
+      serviceId: row.serviceId,
+      serviceName: row.serviceName,
+      timesPerformed: toNumber(row.timesPerformed),
+      revenue: toMoney(toNumber(row.revenue)),
+    }));
+  }
+
+  /**
+   * El reporte de un profesional sobre su propio trabajo.
+   *
+   * Reutiliza los mismos constructores de consulta que el reporte del negocio
+   * —`appointmentsInRange` y `billedSegments`— con un filtro más por `staffId`. Es
+   * lo que garantiza que los dos cuenten lo mismo de la misma forma: si la
+   * definición de "facturado" cambia, cambia para los dos a la vez.
+   *
+   * El `staffId` lo pone el controlador desde el token. Acá se recibe como
+   * parámetro obligatorio y no como filtro opcional a propósito: un parámetro que
+   * se puede omitir es un parámetro que alguien va a omitir.
+   */
+  async getStaffReport(
+    tenantId: string,
+    staffId: string,
+    query: ReportQueryDto,
+  ): Promise<StaffReport> {
+    const tenant = await this.tenantRepository.findOneBy({ id: tenantId });
+    if (!tenant) {
+      throw new NotFoundException(TenantError.NOT_FOUND);
+    }
+
+    const staff = await this.tenantRepository.manager.findOne(Staff, {
+      where: { id: staffId, tenantId },
+      withDeleted: true,
+    });
+    if (!staff) {
+      throw new NotFoundException('Miembro del equipo no encontrado');
+    }
+
+    const timezone = tenant.timezone || DEFAULT_TIMEZONE;
+    const now = new Date();
+    const range = resolveReportRange(query, timezone, now);
+
+    const [summary, timeline, serviceRanking, revenueSnapshots] =
+      await Promise.all([
+        this.getStaffSummary(tenantId, staffId, range),
+        this.getStaffTimeline(tenantId, staffId, range, timezone),
+        this.getStaffServiceRanking(tenantId, staffId, range),
+        this.getStaffRevenueSnapshots(tenantId, staffId, timezone, now),
+      ]);
+
+    return {
+      range: {
+        preset: query.preset ?? 'today',
+        from: range.from,
+        to: range.to,
+        timezone,
+      },
+      currency: tenant.currency,
+      staff: { id: staff.id, name: staff.name },
+      revenueSnapshots,
+      summary,
+      timeline,
+      serviceRanking,
+    };
+  }
+
+  /** Los segmentos facturados **de este profesional**. */
+  private billedSegmentsForStaff(
+    tenantId: string,
+    staffId: string,
+    range: ReportRange,
+  ): SelectQueryBuilder<AppointmentSegment> {
+    return this.billedSegments(tenantId, range).andWhere(
+      'segment.staffId = :staffId',
+      { staffId },
+    );
+  }
+
+  private async getStaffSummary(
+    tenantId: string,
+    staffId: string,
+    range: ReportRange,
+  ): Promise<StaffReport['summary']> {
+    const [counts, billed] = await Promise.all([
+      /*
+       * Los estados se cuentan sobre citas **distintas** en las que tenga algún
+       * segmento. Sin el `DISTINCT`, una cita en la que presta dos servicios se
+       * contaría dos veces: sus "citas completadas" crecerían con la cantidad de
+       * servicios en lugar de con la de gente que atendió.
+       */
+      this.appointmentsInRange(tenantId, range)
+        .innerJoin(
+          'appointment.services',
+          'segment',
+          'segment.staffId = :staffId',
+          { staffId },
+        )
+        .select(
+          'COUNT(DISTINCT CASE WHEN appointment.status = :completed THEN appointment.id END)',
+          'completed',
+        )
+        .addSelect(
+          'COUNT(DISTINCT CASE WHEN appointment.status = :cancelled THEN appointment.id END)',
+          'cancelled',
+        )
+        .addSelect(
+          'COUNT(DISTINCT CASE WHEN appointment.status IN (:...open) THEN appointment.id END)',
+          'pending',
+        )
+        .addSelect(
+          'COUNT(DISTINCT CASE WHEN appointment.status = :completed THEN appointment.clientId END)',
+          'clients',
+        )
+        .setParameters({
+          completed: AppointmentStatus.COMPLETED,
+          cancelled: AppointmentStatus.CANCELLED,
+          open: [...OPEN_APPOINTMENT_STATUSES],
+        })
+        .getRawOne<StaffCountRow>(),
+
+      // El grano acá sí es el segmento: cada uno es un servicio prestado.
+      this.billedSegmentsForStaff(tenantId, staffId, range)
+        .select('SUM(segment.priceAtBooking)', 'revenue')
+        .addSelect('COUNT(*)', 'services')
+        .getRawOne<{ revenue: string | null; services: string | null }>(),
+    ]);
+
+    const revenueTotal = toNumber(billed?.revenue);
+    const completedCount = toNumber(counts?.completed);
+
+    return {
+      revenueTotal: toMoney(revenueTotal),
+      completedCount,
+      cancelledCount: toNumber(counts?.cancelled),
+      pendingCount: toNumber(counts?.pending),
+      clientsServed: toNumber(counts?.clients),
+      servicesPerformed: toNumber(billed?.services),
+      averageTicket: completedCount
+        ? toMoney(revenueTotal / completedCount)
+        : 0,
+    };
+  }
+
+  /**
+   * Facturado hoy, esta semana y este mes, al margen del período elegido.
+   *
+   * Tres consultas y no una con `CASE`: los tres rangos se solapan —hoy está
+   * dentro de la semana, y la semana puede cruzar el mes— así que un solo barrido
+   * tendría que traer el mes entero y sumar en memoria tres veces. Son tres
+   * agregados que resuelven por índice.
+   */
+  private async getStaffRevenueSnapshots(
+    tenantId: string,
+    staffId: string,
+    timezone: string,
+    now: Date,
+  ): Promise<StaffReport['revenueSnapshots']> {
+    const revenueFor = async (preset: 'today' | 'week' | 'month') => {
+      const range = resolveReportRange({ preset }, timezone, now);
+      const row = await this.billedSegmentsForStaff(tenantId, staffId, range)
+        .select('SUM(segment.priceAtBooking)', 'revenue')
+        .getRawOne<{ revenue: string | null }>();
+
+      return toMoney(toNumber(row?.revenue));
+    };
+
+    const [today, week, month] = await Promise.all([
+      revenueFor('today'),
+      revenueFor('week'),
+      revenueFor('month'),
+    ]);
+
+    return { today, week, month };
+  }
+
+  private async getStaffTimeline(
+    tenantId: string,
+    staffId: string,
+    range: ReportRange,
+    timezone: string,
+  ): Promise<ReportTimeline | null> {
+    const rows = await this.billedSegmentsForStaff(tenantId, staffId, range)
+      .select('appointment.id', 'appointmentId')
+      .addSelect('appointment.startTime', 'startTime')
+      .addSelect('segment.priceAtBooking', 'price')
+      .getRawMany<{
+        appointmentId: string;
+        startTime: Date | string;
+        price: string | number;
+      }>();
+
+    return buildReportTimeline({
+      from: range.from,
+      to: range.to,
+      timezone,
+      entries: rows.map((row) => ({
+        appointmentId: row.appointmentId,
+        startTime: new Date(row.startTime),
+        price: toNumber(row.price),
+      })),
+    });
+  }
+
+  private async getStaffServiceRanking(
+    tenantId: string,
+    staffId: string,
+    range: ReportRange,
+  ): Promise<ServiceRankingEntry[]> {
+    const rows = await this.billedSegmentsForStaff(tenantId, staffId, range)
       .innerJoin('segment.service', 'service')
       .select('service.id', 'serviceId')
       .addSelect('service.name', 'serviceName')
