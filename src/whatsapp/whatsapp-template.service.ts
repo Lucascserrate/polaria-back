@@ -26,8 +26,28 @@ type MetaTemplate = {
   status?: string;
 };
 
+/**
+ * El error de Graph, completo.
+ *
+ * Antes esto capturaba solo `message`, `code` y `error_subcode`, y eso fue un
+ * problema real de diagnóstico: `message` es siempre el genérico —"Invalid
+ * parameter"— y lo que dice **qué** parámetro está mal es `error_user_msg`. Dos
+ * rechazos de plantilla se investigaron a ciegas por leer el campo equivocado.
+ *
+ * `fbtrace_id` va también porque es lo primero que pide el soporte de Meta cuando el
+ * mensaje no alcanza.
+ */
 type MetaError = {
-  error?: { message?: string; code?: number; error_subcode?: number };
+  error?: {
+    message?: string;
+    code?: number;
+    error_subcode?: number;
+    type?: string;
+    error_user_title?: string;
+    error_user_msg?: string;
+    fbtrace_id?: string;
+    error_data?: unknown;
+  };
 };
 
 /**
@@ -76,11 +96,13 @@ export class WhatsAppTemplateService {
       return this.toState(key, existing.status);
     }
 
+    const payload = buildTemplateCreatePayload(key, this.clientBaseUrl());
+
     try {
       const created = await this.graph<MetaTemplate & { id?: string }>(
         `/${wabaId}/message_templates`,
         accessToken,
-        buildTemplateCreatePayload(key, this.clientBaseUrl()),
+        payload,
       );
 
       this.logger.log(
@@ -90,8 +112,19 @@ export class WhatsAppTemplateService {
       // Meta suele devolver `PENDING`; si no informa estado, se asume revisión.
       return this.toState(key, created.status ?? 'PENDING');
     } catch (error: unknown) {
+      /*
+       * Se registra el payload junto con el error.
+       *
+       * Son las dos mitades del diagnóstico y por separado no alcanzan: el error dice
+       * qué objeta Meta y el payload dice qué le mandamos. Dos rechazos se
+       * investigaron reconstruyendo el payload a mano porque el log solo tenía una de
+       * las dos.
+       */
       this.logger.error(
         `No se pudo crear la plantilla (tenantId=${tenantId}, key=${key}): ${describeError(error)}`,
+      );
+      this.logger.error(
+        `Payload rechazado (key=${key}): ${JSON.stringify(payload)}`,
       );
       return this.toState(key, null);
     }
@@ -194,19 +227,70 @@ export class WhatsAppTemplateService {
       },
     );
 
-    const data = (await response.json()) as T & MetaError;
+    /*
+     * Se lee como texto y después se parsea, no `response.json()` directo.
+     *
+     * Un error de Graph no siempre viene en JSON —un 502 del borde devuelve HTML— y
+     * `json()` lanzaría un `SyntaxError` que sepulta el error real. Con el texto a
+     * mano, lo peor que puede pasar es que se registre crudo.
+     */
+    const rawText = await response.text();
+
+    let parsed: (T & MetaError) | null = null;
+    try {
+      parsed = JSON.parse(rawText) as T & MetaError;
+    } catch {
+      parsed = null;
+    }
 
     if (!response.ok) {
-      const details = data.error;
+      throw new Error(describeGraphError(response.status, parsed, rawText));
+    }
+
+    if (!parsed) {
       throw new Error(
-        `Graph ${response.status}: ${details?.message ?? 'sin mensaje'} (code=${String(details?.code)}, subcode=${String(details?.error_subcode)})`,
+        `Graph ${response.status}: respuesta ilegible: ${rawText.slice(0, 500)}`,
       );
     }
 
-    return data;
+    return parsed;
   }
 }
 
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * El error de Graph en una línea que sirva para arreglarlo.
+ *
+ * Lleva `error_user_msg` adelante porque es el único campo que nombra el problema
+ * concreto: `message` dice "Invalid parameter" en todos los rechazos de plantilla, y
+ * el subcode no está documentado. Si no viene ninguno de los campos conocidos, se
+ * registra el cuerpo crudo antes que perderlo.
+ */
+function describeGraphError(
+  status: number,
+  parsed: MetaError | null,
+  rawText: string,
+): string {
+  const error = parsed?.error;
+
+  if (!error) {
+    return `Graph ${status}: ${rawText.slice(0, 500) || 'sin cuerpo'}`;
+  }
+
+  const partes = [
+    error.error_user_msg && `detalle="${error.error_user_msg}"`,
+    error.error_user_title && `titulo="${error.error_user_title}"`,
+    error.message && `mensaje="${error.message}"`,
+    `code=${String(error.code)}`,
+    `subcode=${String(error.error_subcode)}`,
+    error.type && `type=${error.type}`,
+    error.fbtrace_id && `fbtrace=${error.fbtrace_id}`,
+    error.error_data !== undefined &&
+      `error_data=${JSON.stringify(error.error_data).slice(0, 300)}`,
+  ].filter(Boolean);
+
+  return `Graph ${status}: ${partes.join(' ')}`;
 }

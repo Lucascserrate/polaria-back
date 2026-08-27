@@ -202,6 +202,18 @@ export function buildTemplateCreatePayload(
     name: definition.name,
     language: definition.language,
     category: CATEGORY,
+    /*
+     * Si el clasificador de Meta no está de acuerdo con la categoría, que la cambie
+     * en lugar de rechazar la plantilla.
+     *
+     * Sin este parámetro, declarar `UTILITY` sobre algo que Meta lee como otra cosa
+     * puede terminar en un rechazo. Con él, crea la plantilla y le asigna la
+     * categoría que considera —que es lo que queremos: lo importante es tener la
+     * plantilla, no ganarle la discusión a su clasificador.
+     *
+     * Meta lo recomienda para toda creación, y no lo estábamos mandando.
+     */
+    allow_category_change: true,
     components,
   };
 }
