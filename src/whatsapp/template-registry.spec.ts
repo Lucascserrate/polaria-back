@@ -47,6 +47,22 @@ describe('buildTemplateCreatePayload', () => {
   );
 
   it.each(TEMPLATE_KEYS.map((key) => [key] as const))(
+    '%s: el cuerpo no empieza ni termina en una variable',
+    (key) => {
+      /*
+       * Meta rechaza la creación con `code=100, subcode=2388299` —"Leading or
+       * Trailing Params Not Allowed"— y el mensaje no dice qué componente está mal.
+       * Pasó de verdad: los tres avisos al profesional cerraban con la hora en
+       * `{{4}}` y ninguno llegó a aprobarse.
+       */
+      const text = bodyOf(payloadOf(key))?.text?.trim() ?? '';
+
+      expect(text.startsWith('{{')).toBe(false);
+      expect(text.endsWith('}}')).toBe(false);
+    },
+  );
+
+  it.each(TEMPLATE_KEYS.map((key) => [key] as const))(
     '%s: ningún ejemplo viene vacío',
     (key) => {
       for (const value of bodyOf(payloadOf(key))?.example?.body_text?.[0] ??

@@ -70,9 +70,11 @@ export const STAFF_ALERT_CANCELLED_TEMPLATE_NAME =
  * y otra aprobación, y reaprovisionar cada WABA. No son cadenas que se ajusten al
  * gusto.
  *
- * El encabezado con emoji es lo primero que se ve en la lista de chats de WhatsApp,
- * antes de abrir el mensaje: es lo que distingue los tres avisos de un vistazo, y
- * ahora es texto fijo de cada plantilla en lugar de una variable.
+ * **Ninguno puede empezar ni terminar en una variable.** Meta lo rechaza con
+ * `code=100, subcode=2388299` —"Leading or Trailing Params Not Allowed"—, que es
+ * exactamente lo que pasó cuando los tres cuerpos cerraban con la hora en `{{4}}`.
+ * De ahí la línea final de cada uno: además de destrabar la aprobación, dice algo
+ * que al profesional le sirve. `template-registry.spec` lo verifica.
  */
 
 export const STAFF_ALERT_NEW_TEMPLATE_BODY = [
@@ -83,6 +85,8 @@ export const STAFF_ALERT_NEW_TEMPLATE_BODY = [
   'Servicio: {{2}}',
   'Fecha: {{3}}',
   'Hora: {{4}}',
+  '',
+  'Ya la tenés en tu agenda.',
 ].join('\n');
 
 export const STAFF_ALERT_MOVED_TEMPLATE_BODY = [
@@ -93,6 +97,8 @@ export const STAFF_ALERT_MOVED_TEMPLATE_BODY = [
   'Servicio: {{2}}',
   'Fecha: {{3}}',
   'Nueva hora: {{4}}',
+  '',
+  'Tu agenda ya quedó actualizada.',
 ].join('\n');
 
 export const STAFF_ALERT_CANCELLED_TEMPLATE_BODY = [
@@ -103,6 +109,8 @@ export const STAFF_ALERT_CANCELLED_TEMPLATE_BODY = [
   'Servicio: {{2}}',
   'Fecha: {{3}}',
   'Hora: {{4}}',
+  '',
+  'Ese horario te quedó libre.',
 ].join('\n');
 
 export interface StaffAlertContent {
