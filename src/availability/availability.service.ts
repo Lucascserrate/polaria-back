@@ -373,6 +373,8 @@ export class AvailabilityService {
     staff: Array<{
       id: string;
       name: string;
+      /** Token de color, para que su columna en la agenda combine con sus citas. */
+      calendarColor: string | null;
       ranges: Array<{ from: string; to: string }>;
     }>;
   }> {
@@ -410,6 +412,7 @@ export class AvailabilityService {
         .map((staff) => ({
           id: staff.id,
           name: staff.name,
+          calendarColor: staff.calendarColor ?? null,
           ranges: rangesByStaff[staff.id].map((range) => ({
             from: formatTimeInTimeZone(range.startTime, timeZone),
             to: formatTimeInTimeZone(range.endTime, timeZone),

@@ -23,6 +23,19 @@ export interface AppointmentSegmentItem {
   /** `null` si el profesional fue borrado físicamente alguna vez. */
   staffId: string | null;
   staffName: string | null;
+  /**
+   * Token de color del profesional, para distinguir sus citas en la agenda.
+   *
+   * Viaja por **tramo** y no por cita porque el color identifica a una persona, y
+   * una cita repartida entre dos no tiene un color: tiene dos. Quien dibuja
+   * decide qué hacer con eso —en la vista por profesional cada tramo va en su
+   * columna, y en la semanal una cita compartida no se pinta de ninguno de los
+   * dos—.
+   *
+   * `null` cuando nadie eligió color. El cliente cae a uno derivado del id, así
+   * que un equipo sin colores configurados igual se distingue.
+   */
+  staffColor: string | null;
   serviceId: string;
   serviceName: string | null;
   startTime: string;
@@ -103,6 +116,7 @@ export const toAppointmentItem = (
     .map((s) => ({
       staffId: s.staffId ?? null,
       staffName: s.staff?.name ?? null,
+      staffColor: s.staff?.calendarColor ?? null,
       serviceId: s.serviceId,
       serviceName: s.service?.name ?? null,
       startTime: s.startTime.toISOString(),

@@ -10,6 +10,7 @@ const TIMEZONE = 'America/La_Paz';
 const segment = (overrides: {
   staffId?: string | null;
   staffName?: string | null;
+  staffColor?: string | null;
   serviceName?: string | null;
   start: string;
   end: string;
@@ -20,7 +21,13 @@ const segment = (overrides: {
     staff:
       overrides.staffName === null
         ? null
-        : { name: overrides.staffName ?? 'Diego' },
+        : {
+            name: overrides.staffName ?? 'Diego',
+            calendarColor:
+              overrides.staffColor === undefined
+                ? 'coral'
+                : overrides.staffColor,
+          },
     service:
       overrides.serviceName === null
         ? null
@@ -49,6 +56,67 @@ const appointment = (overrides: Partial<Appointment> = {}): Appointment =>
   }) as unknown as Appointment;
 
 describe('toAppointmentItem', () => {
+  it('lleva el color de cada profesional en su tramo', () => {
+    const item = toAppointmentItem(
+      appointment({
+        services: [
+          segment({
+            staffColor: 'coral',
+            start: '2026-08-22T13:00:00.000Z',
+            end: '2026-08-22T13:30:00.000Z',
+          }),
+          segment({
+            staffId: 'staff-2',
+            staffName: 'Carlos',
+            staffColor: 'teal',
+            start: '2026-08-22T13:30:00.000Z',
+            end: '2026-08-22T14:00:00.000Z',
+          }),
+        ],
+      } as unknown as Partial<Appointment>),
+      TIMEZONE,
+    );
+
+    // Por tramo y no por cita: una cita repartida entre dos personas no tiene un
+    // color, tiene dos.
+    expect(item.segments.map((s) => s.staffColor)).toEqual(['coral', 'teal']);
+  });
+
+  it('el color queda en null cuando el profesional no eligió ninguno', () => {
+    const item = toAppointmentItem(
+      appointment({
+        services: [
+          segment({
+            staffColor: null,
+            start: '2026-08-22T13:00:00.000Z',
+            end: '2026-08-22T13:30:00.000Z',
+          }),
+        ],
+      } as unknown as Partial<Appointment>),
+      TIMEZONE,
+    );
+
+    expect(item.segments[0].staffColor).toBeNull();
+  });
+
+  it('un tramo sin profesional tampoco tiene color', () => {
+    const item = toAppointmentItem(
+      appointment({
+        services: [
+          segment({
+            staffId: null,
+            staffName: null,
+            start: '2026-08-22T13:00:00.000Z',
+            end: '2026-08-22T13:30:00.000Z',
+          }),
+        ],
+      } as unknown as Partial<Appointment>),
+      TIMEZONE,
+    );
+
+    expect(item.segments[0].staffColor).toBeNull();
+  });
+
   it('devuelve los dos instantes de la cita', () => {
     // La agenda calcula el alto de la cita con estos dos y no con la duración,
     // que queda en 0 si algún servicio no la tiene cargada.
