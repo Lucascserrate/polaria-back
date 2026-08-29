@@ -31,9 +31,9 @@ async function bootstrap() {
       callback: (error: Error | null, allow?: boolean) => void,
     ) => {
       const isAllowed = !origin || allowedOrigins.includes(origin);
-      logger.log(
-        `CORS check origin=${origin ?? 'undefined'} allowed=${isAllowed}`,
-      );
+      if (!isAllowed) {
+        logger.warn(`CORS rechazado origin=${String(origin)}`);
+      }
       callback(null, isAllowed);
     },
     credentials: true,
