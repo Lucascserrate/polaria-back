@@ -20,6 +20,8 @@ import {
   parseMessageStatuses,
   type MessageStatusEvent,
 } from '../whatsapp/message-status';
+import { isBillingError } from '../whatsapp/billing-status';
+import { WhatsAppBillingService } from '../whatsapp/whatsapp-billing.service';
 import { AccountUpdateService } from './account-update.service';
 import { TemplateStatusService } from './template-status.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -59,6 +61,7 @@ export class WebhookService {
     private readonly inboundMessageService: InboundMessageService,
     private readonly accountUpdateService: AccountUpdateService,
     private readonly templateStatusService: TemplateStatusService,
+    private readonly whatsAppBillingService: WhatsAppBillingService,
   ) {}
 
   /**
@@ -141,6 +144,7 @@ export class WebhookService {
       const statuses = parseMessageStatuses(change);
       if (statuses.length > 0) {
         this.logStatuses(statuses);
+        await this.recordBillingFailures({ entryId, statuses });
         return;
       }
 
@@ -180,6 +184,40 @@ export class WebhookService {
       if (isFailedStatus(event)) this.logger.warn(linea);
       else this.logger.log(linea);
     }
+  }
+
+  /**
+   * Si Meta rechazó un envío por facturación, se recuerda.
+   *
+   * Es la única fuente **autoritativa** sobre el estado de la facturación: Meta
+   * diciendo textualmente que el mensaje no salió por eso. La sonda que consulta la
+   * WABA es un intento; esto es un hecho.
+   *
+   * Solo reacciona a los códigos con evidencia —ver `BILLING_ERROR_CODES`— porque
+   * marcar la facturación como rota por un error que no habla de facturación
+   * mandaría al negocio a buscar un problema que no tiene.
+   */
+  private async recordBillingFailures(params: {
+    entryId: string | null;
+    statuses: MessageStatusEvent[];
+  }): Promise<void> {
+    const { entryId, statuses } = params;
+
+    const billingError = statuses
+      .filter(isFailedStatus)
+      .map((event) => isBillingError(event.errors))
+      .find((error) => error !== null);
+
+    if (!billingError || !entryId) return;
+
+    // El `entry.id` de estos eventos es la WABA, igual que en el resto del webhook.
+    const tenant = await this.tenantsService.findByWhatsappWabaId(entryId);
+    if (!tenant) return;
+
+    await this.whatsAppBillingService.markActionRequired({
+      tenantId: tenant.id,
+      error: billingError,
+    });
   }
 
   private async handleMessageChange(params: {

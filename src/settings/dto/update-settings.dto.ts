@@ -49,6 +49,18 @@ class WhatsappConnectionDto {
 }
 
 export class UpdateSettingsDto {
+  /**
+   * Enciende o apaga los avisos automáticos por WhatsApp.
+   *
+   * Separado de `aiEnabled`, que es el interruptor del bot que **responde** a los
+   * clientes. Esto son los mensajes que Polaria **inicia**: al equipo cuando cambia
+   * una cita, y a los clientes como recordatorio. Un negocio puede querer uno sin el
+   * otro.
+   */
+  @IsOptional()
+  @IsBoolean()
+  notificationsEnabled?: boolean;
+
   @IsOptional()
   @IsString()
   polariaName?: string;

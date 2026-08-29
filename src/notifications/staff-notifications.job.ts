@@ -123,6 +123,20 @@ export class StaffNotificationsJob {
       return;
     }
 
+    /*
+     * El interruptor del negocio.
+     *
+     * Va antes que las credenciales porque es una decisión suya y no una falla: si
+     * los apagó, no corresponde avisarle que le falta algo.
+     */
+    if (!tenant?.whatsappNotificationsEnabled) {
+      await this.skip(
+        notification,
+        STAFF_NOTIFICATION_REASONS.NOTIFICATIONS_DISABLED,
+      );
+      return;
+    }
+
     const accessToken = readStoredCredential(tenant?.whatsappAccessToken);
     const phoneNumberId = readStoredCredential(tenant?.whatsappPhoneId);
 

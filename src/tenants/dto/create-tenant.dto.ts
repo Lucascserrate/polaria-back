@@ -121,6 +121,18 @@ export class CreateTenantDto {
   @IsBoolean()
   aiEnabled?: boolean;
 
+  /**
+   * Los avisos automáticos por WhatsApp.
+   *
+   * Distinto de `aiEnabled`, que es el bot que **responde** a los clientes. Esto son
+   * los mensajes que Polaria **inicia**: al equipo cuando cambia una cita, y a los
+   * clientes como recordatorio.
+   */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsBoolean()
+  whatsappNotificationsEnabled?: boolean;
+
   @ApiPropertyOptional({ type: [Number] })
   @IsOptional()
   @IsArray()

@@ -193,6 +193,7 @@ describe('validateBeforeSending', () => {
         reminder: reminder({}),
         now,
         templateStatus: 'APPROVED',
+        notificationsEnabled: true,
       }),
     ).toBeNull();
   });
@@ -211,6 +212,7 @@ describe('validateBeforeSending', () => {
         reminder: reminder({}),
         now,
         templateStatus: 'APPROVED',
+        notificationsEnabled: true,
       }),
     ).toBe(REMINDER_SEND_REASONS.APPOINTMENT_ALREADY_STARTED);
   });
@@ -226,8 +228,27 @@ describe('validateBeforeSending', () => {
         reminder: moved,
         now,
         templateStatus: 'APPROVED',
+        notificationsEnabled: true,
       }),
     ).toBe(REMINDER_SEND_REASONS.APPOINTMENT_CHANGED);
+  });
+
+  /*
+   * El interruptor del negocio gobierna los dos canales: los avisos al equipo y los
+   * recordatorios al cliente. Para el negocio es una sola decisión, así que un
+   * control que solo apagara la mitad sería una promesa incumplida.
+   */
+  it('no envía si el negocio apagó los avisos automáticos', () => {
+    const now = new Date('2026-08-27T14:03:00.000Z');
+
+    expect(
+      service.validateBeforeSending({
+        reminder: reminder({}),
+        now,
+        templateStatus: 'APPROVED',
+        notificationsEnabled: false,
+      }),
+    ).toBe(REMINDER_SEND_REASONS.NOTIFICATIONS_DISABLED);
   });
 
   it('no envía si la cita se canceló', () => {
@@ -239,6 +260,7 @@ describe('validateBeforeSending', () => {
         reminder: cancelled,
         now,
         templateStatus: 'APPROVED',
+        notificationsEnabled: true,
       }),
     ).toBe(REMINDER_REASONS.APPOINTMENT_INACTIVE);
   });

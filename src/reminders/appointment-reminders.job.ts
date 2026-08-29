@@ -107,6 +107,9 @@ export class AppointmentRemindersJob {
         reminder,
         now,
         templateStatus: template?.status ?? null,
+        notificationsEnabled: Boolean(
+          reminder.tenant?.whatsappNotificationsEnabled,
+        ),
       });
 
       if (blocked) {

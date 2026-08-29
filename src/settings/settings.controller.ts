@@ -112,6 +112,18 @@ export class SettingsController {
    * No hace ninguna llamada a Meta: el número, la WABA y el portfolio quedan
    * intactos, y el negocio puede volver a conectarlos con Embedded Signup.
    */
+  /**
+   * Vuelve a preguntarle a Meta por la facturación de la WABA.
+   *
+   * Lo toca el negocio después de configurar en el Billing Hub: sin esto, la pantalla
+   * seguiría diciendo "pendiente" hasta que fallara otro envío.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Post('whatsapp/billing/check')
+  refreshWhatsappBilling(@Actor() actor: AuthenticatedActor) {
+    return this.settingsService.refreshWhatsappBilling(actor.tenantId);
+  }
+
   @UseGuards(AuthGuard('jwt'))
   @Post('whatsapp/disconnect')
   disconnectWhatsapp(@Req() req: Request) {

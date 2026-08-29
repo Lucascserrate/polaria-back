@@ -16,6 +16,8 @@ import { WhatsAppTemplateService } from '../whatsapp/whatsapp-template.service';
 import { TEMPLATE_KEYS, TemplateKey } from '../whatsapp/template-registry';
 import { TemplateStatus } from '../whatsapp/template-status';
 import { WhatsAppTemplatesRepository } from '../whatsapp/whatsapp-templates.repository';
+import { WhatsAppBillingService } from '../whatsapp/whatsapp-billing.service';
+import { buildBillingSetupUrl } from '../whatsapp/billing-status';
 import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
 import { normalizeReminderOffsets } from '../reminders/reminder-offsets';
 import { buildReminderPreview } from '../reminders/reminder-message';
@@ -161,6 +163,24 @@ type SettingsResponse = {
     isOnBusinessApp: boolean;
     platformType: string | null;
   };
+  /**
+   * Si la WABA puede pagarle a Meta los mensajes.
+   *
+   * Aparte de `whatsappConnection` porque son preguntas distintas y se arreglan en
+   * lugares distintos: la conexión con Embedded Signup, esto en el Billing Hub de
+   * Meta. Una WABA conectada puede no poder enviar nada.
+   */
+  whatsappBilling: {
+    /** `WhatsappBillingStatus`. */
+    status: string;
+    /** Lo que dijo Meta, con sus palabras. */
+    reason: string | null;
+    checkedAt: string | null;
+    /** El flujo oficial de Meta. `null` si faltan los ids para armarlo. */
+    setupUrl: string | null;
+  };
+  /** Si el negocio activó los avisos automáticos, al equipo y a los clientes. */
+  notificationsEnabled: boolean;
 };
 
 @Injectable()
@@ -176,6 +196,7 @@ export class SettingsService {
     private readonly bookingSessionService: BookingSessionService,
     private readonly whatsAppTemplateService: WhatsAppTemplateService,
     private readonly whatsAppTemplatesRepository: WhatsAppTemplatesRepository,
+    private readonly whatsAppBillingService: WhatsAppBillingService,
   ) {}
 
   /**
@@ -295,7 +316,30 @@ export class SettingsService {
           reminderTemplate?.status ?? TemplateStatus.NOT_CREATED,
         reminderTemplateMetaStatus: reminderTemplate?.metaStatus ?? null,
       },
+      whatsappBilling: {
+        status: tenant.whatsappBillingStatus,
+        reason: tenant.whatsappBillingReason,
+        checkedAt: tenant.whatsappBillingCheckedAt?.toISOString() ?? null,
+        setupUrl: buildBillingSetupUrl({
+          businessId: tenant.whatsappBusinessId,
+          wabaId: tenant.whatsappWabaId,
+        }),
+      },
+      notificationsEnabled: tenant.whatsappNotificationsEnabled,
     };
+  }
+
+  /**
+   * El negocio dice que ya configuró la facturación en el Billing Hub.
+   *
+   * Se le cree: el estado vuelve a `UNKNOWN`, que no bloquea. No es una verificación
+   * —comprobarlo de verdad excede lo que Meta nos deja consultar— sino la forma de
+   * desbloquear sin inventar un verde. Si el problema sigue, el próximo envío fallido
+   * lo vuelve a marcar.
+   */
+  async refreshWhatsappBilling(tenantId: string): Promise<SettingsResponse> {
+    await this.whatsAppBillingService.recheck(tenantId);
+    return this.getSettings(tenantId);
   }
 
   async updateSettings(
@@ -354,6 +398,15 @@ export class SettingsService {
     ) {
       await this.tenantsService.update(tenantId, {
         aiEnabled: dto.aiEnabled,
+      });
+    }
+
+    if (
+      typeof dto.notificationsEnabled === 'boolean' &&
+      dto.notificationsEnabled !== tenant.whatsappNotificationsEnabled
+    ) {
+      await this.tenantsService.update(tenantId, {
+        whatsappNotificationsEnabled: dto.notificationsEnabled,
       });
     }
 

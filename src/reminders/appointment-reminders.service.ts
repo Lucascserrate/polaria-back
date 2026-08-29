@@ -28,6 +28,8 @@ export const REMINDER_SEND_REASONS = {
   TEMPLATE_NOT_APPROVED: 'TEMPLATE_NOT_APPROVED',
   NO_WHATSAPP_CONNECTION: 'NO_WHATSAPP_CONNECTION',
   APPOINTMENT_CHANGED: 'APPOINTMENT_CHANGED',
+  /** El negocio apagó los avisos automáticos por WhatsApp. */
+  NOTIFICATIONS_DISABLED: 'NOTIFICATIONS_DISABLED',
   /**
    * La cita ya empezó.
    *
@@ -195,6 +197,8 @@ export class AppointmentRemindersService {
     now: Date;
     /** Estado de la plantilla de recordatorios de este negocio. */
     templateStatus: string | null;
+    /** El interruptor de avisos automáticos del negocio. */
+    notificationsEnabled: boolean;
   }): string | null {
     const { reminder, now } = params;
     const { appointment, tenant } = reminder;
@@ -250,6 +254,19 @@ export class AppointmentRemindersService {
      * acceso a esa tabla y agregárselo convertiría una función de reglas en una
      * consulta.
      */
+    /*
+     * El mismo interruptor que gobierna los avisos al equipo también gobierna los
+     * recordatorios al cliente: para el negocio es una sola decisión —"que Polaria
+     * mande mensajes automáticos"— y partirla en dos controles sería pedirle que
+     * mantenga sincronizadas dos cosas que él piensa como una.
+     *
+     * La anticipación de cada recordatorio sigue configurándose aparte: eso es
+     * *cuándo* avisar, no *si* avisar.
+     */
+    if (!params.notificationsEnabled) {
+      return REMINDER_SEND_REASONS.NOTIFICATIONS_DISABLED;
+    }
+
     if (!canSendTemplate(params.templateStatus)) {
       return REMINDER_SEND_REASONS.TEMPLATE_NOT_APPROVED;
     }

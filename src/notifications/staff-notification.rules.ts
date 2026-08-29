@@ -28,6 +28,14 @@ export const STAFF_NOTIFICATION_REASONS = {
   TEMPLATE_NOT_APPROVED: 'TEMPLATE_NOT_APPROVED',
   /** El negocio no tiene WhatsApp conectado. */
   NO_WHATSAPP_CONNECTION: 'NO_WHATSAPP_CONNECTION',
+  /**
+   * El negocio tiene los avisos automáticos apagados.
+   *
+   * Terminal, no en espera: volver a encenderlos no debe disparar el atraso de
+   * mensajes de los días que estuvieron apagados. Quien los apagó no quiere
+   * recibirlos después.
+   */
+  NOTIFICATIONS_DISABLED: 'NOTIFICATIONS_DISABLED',
   /** El proceso murió mientras hablaba con el canal. */
   SEND_INTERRUPTED: 'SEND_INTERRUPTED',
   /**

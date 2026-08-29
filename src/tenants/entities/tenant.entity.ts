@@ -257,6 +257,48 @@ export class Tenant {
   @Column({ type: 'datetime', nullable: true })
   trialEndsAt?: Date | null;
 
+  /**
+   * Si Meta bloqueó los envíos del negocio por facturación.
+   *
+   * Estado aparte de la conexión a propósito: una WABA conectada, con plantillas
+   * aprobadas y número verificado, puede no entregar un solo mensaje de plantilla
+   * porque le falta configurar la moneda. Ver `WhatsappBillingStatus`, que tiene solo
+   * dos valores: lo escribe Meta al rechazar un envío, y no una sonda nuestra.
+   *
+   * Meta le cobra directamente al negocio. Polaria no cobra por mensaje ni lleva
+   * saldo: solo necesita saber si puede enviar.
+   */
+  @Column({ type: 'varchar', length: 16, default: 'UNKNOWN' })
+  whatsappBillingStatus!: string;
+
+  /** Lo que dijo Meta, con sus palabras. Es lo que se le muestra al negocio. */
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  whatsappBillingReason!: string | null;
+
+  /**
+   * La moneda que Meta declara para la WABA. **Diagnóstico, no estado.**
+   *
+   * No se muestra ni condiciona nada: se guarda para poder responder con datos una
+   * pregunta que hoy no sabemos contestar —si Meta devuelve una moneda por defecto en
+   * cuentas sin facturación configurada—. De eso depende que esta consulta sirva
+   * alguna vez para algo más que registrar.
+   */
+  @Column({ type: 'varchar', length: 8, nullable: true })
+  whatsappBillingCurrency!: string | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  whatsappBillingCheckedAt!: Date | null;
+
+  /**
+   * Si el negocio activó los avisos automáticos: al equipo y a los clientes.
+   *
+   * Nace apagado y se enciende desde el panel, después de configurar la facturación.
+   * No se deriva de la conexión: conectar WhatsApp es habilitar el canal, activar los
+   * avisos es decidir usarlo, y son dos decisiones del negocio en momentos distintos.
+   */
+  @Column({ default: false })
+  whatsappNotificationsEnabled!: boolean;
+
   @Column({ default: true })
   aiEnabled!: boolean;
 

@@ -9,6 +9,7 @@ import { TemplateStatusJob } from './template-status.job';
 import { WhatsAppSenderService } from './whatsapp-sender.service';
 import { WhatsAppTemplateService } from './whatsapp-template.service';
 import { WhatsAppTemplatesRepository } from './whatsapp-templates.repository';
+import { WhatsAppBillingService } from './whatsapp-billing.service';
 
 /**
  * Capa de transporte de WhatsApp: parseo de mensajes entrantes y envío de texto,
@@ -37,6 +38,7 @@ import { WhatsAppTemplatesRepository } from './whatsapp-templates.repository';
     WhatsAppSenderService,
     WhatsAppTemplateService,
     WhatsAppTemplatesRepository,
+    WhatsAppBillingService,
     BookingPromptRenderer,
     TemplateStatusJob,
   ],
@@ -44,6 +46,7 @@ import { WhatsAppTemplatesRepository } from './whatsapp-templates.repository';
     WhatsAppSenderService,
     WhatsAppTemplateService,
     WhatsAppTemplatesRepository,
+    WhatsAppBillingService,
     BookingPromptRenderer,
   ],
 })
