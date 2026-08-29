@@ -14,6 +14,12 @@ import {
   normalizePhoneNumber,
   type JsonObject,
 } from './webhook-meta.util';
+import {
+  describeMessageStatus,
+  isFailedStatus,
+  parseMessageStatuses,
+  type MessageStatusEvent,
+} from '../whatsapp/message-status';
 import { AccountUpdateService } from './account-update.service';
 import { TemplateStatusService } from './template-status.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -117,6 +123,27 @@ export class WebhookService {
         return;
       }
 
+      /*
+       * Los estados de los mensajes que enviamos llegan por acá.
+       *
+       * Vienen en el mismo `field: "messages"` que los mensajes entrantes, pero en
+       * `value.statuses` en lugar de `value.messages`. Se procesaban en silencio
+       * absoluto: el parser de entrantes devuelve `null` cuando no hay `messages`
+       * —lo dice en su propio docstring— y `handleMessageChange` cortaba sin
+       * registrar nada.
+       *
+       * Eso dejaba "Graph aceptó el envío" como el último dato disponible sobre un
+       * mensaje, que es justamente el que no responde si llegó.
+       *
+       * Un webhook trae estados **o** mensajes, no las dos cosas, así que si hubo
+       * estados no hay entrante que procesar.
+       */
+      const statuses = parseMessageStatuses(change);
+      if (statuses.length > 0) {
+        this.logStatuses(statuses);
+        return;
+      }
+
       await this.handleMessageChange({ data, entry, change });
     } catch (error: unknown) {
       // Un cambio que falla no puede llevarse puestos a los demás del mismo POST.
@@ -136,6 +163,25 @@ export class WebhookService {
    * por sus propias pruebas con cuerpos completos de Meta, y tocarlo para
    * soportar el reparto habría mezclado dos cambios en uno.
    */
+  /**
+   * Registra qué pasó con cada mensaje que enviamos.
+   *
+   * Solo registra: no escribe en la base ni toca ningún flujo. El `wamid` es lo que
+   * permite emparejar esta línea con el `send OK` del envío y, cuando es un aviso a
+   * un profesional, con su `notificationId`.
+   *
+   * Un `failed` va en `warn` porque significa que el mensaje **no va a llegar**, y
+   * hasta ahora eso era invisible: el envío ya había informado éxito.
+   */
+  private logStatuses(statuses: MessageStatusEvent[]): void {
+    for (const event of statuses) {
+      const linea = `WhatsApp message status ${describeMessageStatus(event)}`;
+
+      if (isFailedStatus(event)) this.logger.warn(linea);
+      else this.logger.log(linea);
+    }
+  }
+
   private async handleMessageChange(params: {
     data: JsonObject;
     entry: JsonObject;
