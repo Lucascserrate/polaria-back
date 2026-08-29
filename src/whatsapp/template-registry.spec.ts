@@ -2,6 +2,7 @@ import {
   buildTemplateCreatePayload,
   TEMPLATE_KEYS,
   TemplateKey,
+  templateHasUrlButton,
 } from './template-registry';
 
 const BASE = 'https://app.polariahq.com';
@@ -138,5 +139,45 @@ describe('buildTemplateCreatePayload', () => {
         ),
       ).toEqual(['BODY']);
     });
+  });
+
+  /*
+   * Crear y enviar tienen que coincidir en si la plantilla lleva botón.
+   *
+   * Discreparon una vez: la creación omite el botón sin `CLIENT_BASE_URL` —no hay
+   * con qué armar el enlace— pero el envío lo decidía mirando solo el registro.
+   * Quedaba una plantilla aprobada sin botón recibiendo un parámetro de botón, y
+   * Meta rechazaba cada mensaje.
+   *
+   * Este test recorre las dos entradas posibles: con base y sin base.
+   */
+  describe('crear y enviar coinciden en el botón', () => {
+    it.each(TEMPLATE_KEYS.map((key) => [key] as const))(
+      '%s: con la base configurada',
+      (key) => {
+        const tieneEnElPayload = buttonsOf(payloadOf(key)).some(
+          (b) => b.type === 'URL',
+        );
+
+        expect(tieneEnElPayload).toBe(templateHasUrlButton(key, BASE));
+      },
+    );
+
+    it.each(TEMPLATE_KEYS.map((key) => [key] as const))(
+      '%s: sin base configurada',
+      (key) => {
+        const payload = buildTemplateCreatePayload(
+          key,
+          undefined,
+        ) as unknown as Payload;
+        const tieneEnElPayload = (
+          payload.components.find((c) => c.type === 'BUTTONS')?.buttons ?? []
+        ).some((b) => b.type === 'URL');
+
+        expect(tieneEnElPayload).toBe(templateHasUrlButton(key, undefined));
+        // Sin base, ninguna lleva enlace: no hay con qué armarlo.
+        expect(templateHasUrlButton(key, undefined)).toBe(false);
+      },
+    );
   });
 });

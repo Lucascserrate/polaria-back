@@ -47,7 +47,10 @@ export class StaffNotificationsService {
     appointmentId: string;
     segments: SegmentInput[];
   }): Promise<void> {
-    await this.enqueue(params, planCreated(toNotifiable(params.segments)));
+    await this.enqueue(
+      { ...params, operacion: 'creada', tramos: params.segments.length },
+      planCreated(toNotifiable(params.segments)),
+    );
   }
 
   /**
@@ -63,7 +66,11 @@ export class StaffNotificationsService {
     after: SegmentInput[];
   }): Promise<void> {
     await this.enqueue(
-      params,
+      {
+        ...params,
+        operacion: 'editada',
+        tramos: params.after.length,
+      },
       planEdited({
         before: toNotifiable(params.before),
         after: toNotifiable(params.after),
@@ -77,7 +84,10 @@ export class StaffNotificationsService {
     appointmentId: string;
     segments: SegmentInput[];
   }): Promise<void> {
-    await this.enqueue(params, planCancelled(toNotifiable(params.segments)));
+    await this.enqueue(
+      { ...params, operacion: 'cancelada', tramos: params.segments.length },
+      planCancelled(toNotifiable(params.segments)),
+    );
   }
 
   /**
@@ -151,10 +161,33 @@ export class StaffNotificationsService {
    * ausencia del mensaje sería un silencio.
    */
   private async enqueue(
-    params: { tenantId: string; appointmentId: string },
+    params: {
+      tenantId: string;
+      appointmentId: string;
+      /** Qué le pasó a la cita. Solo para el log. */
+      operacion: string;
+      /** Cuántos tramos entraron. Solo para el log. */
+      tramos: number;
+    },
     planned: PlannedNotification[],
   ): Promise<void> {
-    if (planned.length === 0) return;
+    /*
+     * Que no haya nada que avisar **también se registra**.
+     *
+     * Es el punto ciego que costó una sesión entera de depuración: sin esta línea,
+     * "el disparador corrió y decidió que no le tocaba a nadie" y "el disparador
+     * nunca corrió" se ven exactamente igual desde el log —silencio— y son dos
+     * problemas opuestos.
+     *
+     * Pasa legítimamente en una edición que no movió el tramo de nadie, y también
+     * cuando la cita no tiene profesional asignado.
+     */
+    if (planned.length === 0) {
+      this.logger.log(
+        `Sin avisos que encolar (appointmentId=${params.appointmentId}, operacion=${params.operacion}, tramos=${params.tramos}).`,
+      );
+      return;
+    }
 
     try {
       await this.repository.enqueue(
@@ -175,8 +208,15 @@ export class StaffNotificationsService {
         })),
       );
 
+      /*
+       * Se nombra a quién, no solo cuántos.
+       *
+       * Con dos profesionales en una cita, saber que se encolaron dos avisos no
+       * alcanza para seguirlos: los `staffId` son lo que permite emparejar esta línea
+       * con la de envío o la de salteado que viene después.
+       */
       this.logger.log(
-        `Avisos encolados (appointmentId=${params.appointmentId}, cantidad=${planned.length}, eventos=${describeEvents(planned)}).`,
+        `Avisos encolados (appointmentId=${params.appointmentId}, operacion=${params.operacion}, cantidad=${planned.length}, eventos=${describeEvents(planned)}, staff=${planned.map((n) => n.staffId).join(',')}).`,
       );
     } catch (error: unknown) {
       this.logger.error(

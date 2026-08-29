@@ -136,6 +136,22 @@ export const templateDefinition = (key: TemplateKey): TemplateDefinition =>
   DEFINITIONS[key];
 
 /**
+ * Si la plantilla se crea **con** botón de enlace.
+ *
+ * Existe para que crear y enviar no puedan discrepar, que es un bug que ya ocurrió:
+ * la creación omite el botón cuando falta `CLIENT_BASE_URL` —no se puede armar el
+ * enlace— pero el envío lo decidía mirando solo el registro. Resultado: una plantilla
+ * aprobada sin botón a la que se le mandaba un parámetro de botón, y Meta rechazando
+ * cada mensaje.
+ *
+ * Las dos decisiones pasan ahora por acá, con la misma entrada.
+ */
+export const templateHasUrlButton = (
+  key: TemplateKey,
+  clientBaseUrl?: string,
+): boolean => Boolean(DEFINITIONS[key].urlButton && clientBaseUrl);
+
+/**
  * Cuerpo del `POST /{waba-id}/message_templates`.
  *
  * Ojo con el uso de mayúsculas: al **crear** una plantilla los componentes van en
@@ -165,7 +181,16 @@ export function buildTemplateCreatePayload(
     (text) => ({ type: 'QUICK_REPLY', text }),
   );
 
-  if (definition.urlButton && clientBaseUrl) {
+  /*
+   * La condición pasa por `templateHasUrlButton` para que crear y enviar no puedan
+   * discrepar. Los dos chequeos extra son para que TypeScript estreche los tipos:
+   * la función devuelve un booleano y no arrastra el estrechamiento.
+   */
+  if (
+    templateHasUrlButton(key, clientBaseUrl) &&
+    definition.urlButton &&
+    clientBaseUrl
+  ) {
     const { text, path, dynamicSuffix } = definition.urlButton;
     const base = `${clientBaseUrl.replace(/\/$/, '')}${path}`;
 

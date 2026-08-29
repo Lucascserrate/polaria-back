@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -7,7 +8,7 @@ import { Service } from '../services/entities/service.entity';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
 import { WhatsAppTemplatesRepository } from '../whatsapp/whatsapp-templates.repository';
-import { templateDefinition } from '../whatsapp/template-registry';
+import { templateHasUrlButton } from '../whatsapp/template-registry';
 import { canSendTemplate } from '../whatsapp/template-status';
 import {
   buildStaffAlertParameters,
@@ -64,6 +65,7 @@ export class StaffNotificationsJob {
     private readonly sender: WhatsAppSenderService,
     @InjectRepository(Service)
     private readonly services: Repository<Service>,
+    private readonly configService: ConfigService,
   ) {}
 
   @Cron(CronExpression.EVERY_MINUTE)
@@ -194,7 +196,14 @@ export class StaffNotificationsJob {
          * no explicaría nada— y mandar un parámetro de botón a una plantilla sin
          * botones hace que Meta rechace el envío.
          */
-        ...(templateDefinition(templateKey).urlButton
+        /*
+         * El sufijo se manda solo si la plantilla se **creó** con botón.
+         *
+         * Se pregunta con la misma entrada que usó la creación —`CLIENT_BASE_URL`—
+         * porque sin ella el botón se omite al crear, y mandarle un parámetro de
+         * botón a una plantilla que no lo tiene hace que Meta rechace el envío.
+         */
+        ...(templateHasUrlButton(templateKey, this.clientBaseUrl())
           ? {
               urlButtonSuffix: formatAlertDateKey(
                 notification.startTime,
@@ -232,8 +241,15 @@ export class StaffNotificationsJob {
     reason: string,
   ): Promise<void> {
     await this.repository.markSkipped(notification.id, reason);
-    this.logger.log(
-      `Aviso no corresponde (notificationId=${notification.id}, staffId=${notification.staffId}, motivo=${reason}).`,
+
+    /*
+     * En `warn` y no en `log`: los tres motivos que llegan acá —sin teléfono, no
+     * atiende clientes, sin conexión— son configuraciones que alguien tiene que
+     * arreglar, no eventos normales. Mezclados con el resto del flujo se pierden, y
+     * desde afuera "no llegó el aviso" se ve idéntico a que el sistema esté roto.
+     */
+    this.logger.warn(
+      `Aviso NO enviado (notificationId=${notification.id}, staffId=${notification.staffId}, event=${notification.event}, motivo=${reason}).`,
     );
   }
 
@@ -244,6 +260,11 @@ export class StaffNotificationsJob {
    * decir cómo se llama **hoy**: entre encolar y enviar pasan segundos, pero un
    * aviso que espera la aprobación de la plantilla puede esperar horas.
    */
+  /** La misma base que usó el aprovisionamiento. Ver `templateHasUrlButton`. */
+  private clientBaseUrl(): string | undefined {
+    return this.configService.get<string>('CLIENT_BASE_URL') ?? undefined;
+  }
+
   private async serviceName(serviceId: string): Promise<string | null> {
     const service = await this.services.findOne({
       where: { id: serviceId },
