@@ -26,6 +26,7 @@ import { RemindersModule } from './reminders/reminders.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { FlowsModule } from './flows/flows.module';
 import { ReportsModule } from './reports/reports.module';
+import { PublicBookingModule } from './public-booking/public-booking.module';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { ReportsModule } from './reports/reports.module';
     OnboardingModule,
     FlowsModule,
     ReportsModule,
+    PublicBookingModule,
   ],
 })
 export class AppModule {}

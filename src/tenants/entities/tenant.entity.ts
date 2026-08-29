@@ -35,6 +35,7 @@ const decimalTransformer = {
 
 @Index(['googleId'], { unique: true })
 @Index(['whatsappPhoneNumber'], { unique: true })
+@Index(['slug'], { unique: true })
 @Entity('tenants')
 export class Tenant {
   @PrimaryGeneratedColumn('uuid')
@@ -43,8 +44,38 @@ export class Tenant {
   @Column()
   name!: string;
 
+  /**
+   * Identificador del negocio en su página pública (`polariahq.com/royal-barber`).
+   *
+   * Único porque es una dirección: dos negocios con el mismo slug serían dos
+   * negocios en la misma URL. Nulable porque un negocio recién registrado
+   * todavía no tiene nombre propio —Google informa el de la persona— y un slug
+   * derivado de ahí sería peor que ninguno.
+   *
+   * Se asigna una sola vez, cuando el negocio guarda su nombre real, y no
+   * vuelve a cambiar aunque después se renombre: el slug es un enlace que ya
+   * está pegado en un QR, en una biografía de Instagram y en las conversaciones
+   * de los clientes. Ver `TenantsService.ensureSlug`.
+   */
+  @Column({ type: 'varchar', length: 60, nullable: true })
+  slug!: string | null;
+
   @Column({ nullable: true })
   businessType?: string;
+
+  /**
+   * Dirección del local en texto, tal como la diría alguien que da indicaciones.
+   *
+   * Convive con `latitude`/`longitude` y no las reemplaza: son dos cosas
+   * distintas. Las coordenadas sirven para mandar la ubicación por WhatsApp y
+   * para abrir un mapa; esto es lo que se lee en la página pública, donde una
+   * coordenada no le dice nada a nadie.
+   *
+   * `NULL` es normal: no todos los negocios reciben en un local con calle y
+   * número, y la página tiene que verse bien sin esto.
+   */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  address!: string | null;
 
   /**
    * Número visible del negocio, tal como lo devuelve Meta.

@@ -367,4 +367,48 @@ describe('datesWithCoverage', () => {
       }),
     ).toEqual([]);
   });
+
+  describe('notBefore', () => {
+    it('descarta el día cuya jornada ya terminó', () => {
+      // Lunes 20:00, con el local cerrado desde las 19:00. Ofrecer "hoy" lleva a
+      // un paso de horarios vacío: el día existe, pero ya no se llega.
+      expect(
+        datesWithCoverage({
+          dates: ['2026-03-16', '2026-03-17'],
+          timeZone: TIME_ZONE,
+          businessHours: OPEN_MONDAY_TO_SATURDAY,
+          staff: withoutOwnSchedule,
+          schedulesByStaff: {},
+          notBefore: new Date('2026-03-16T20:00:00-04:00'),
+        }),
+      ).toEqual(['2026-03-17']);
+    });
+
+    it('conserva el día al que todavía le queda jornada', () => {
+      expect(
+        datesWithCoverage({
+          dates: ['2026-03-16'],
+          timeZone: TIME_ZONE,
+          businessHours: OPEN_MONDAY_TO_SATURDAY,
+          staff: withoutOwnSchedule,
+          schedulesByStaff: {},
+          notBefore: new Date('2026-03-16T18:59:00-04:00'),
+        }),
+      ).toEqual(['2026-03-16']);
+    });
+
+    it('omitirlo deja el comportamiento anterior', () => {
+      // Las consultas que no tienen un "ahora" —o que miran el pasado a
+      // propósito— siguen viendo todas las fechas con jornada.
+      expect(
+        datesWithCoverage({
+          dates: ['2026-03-16'],
+          timeZone: TIME_ZONE,
+          businessHours: OPEN_MONDAY_TO_SATURDAY,
+          staff: withoutOwnSchedule,
+          schedulesByStaff: {},
+        }),
+      ).toEqual(['2026-03-16']);
+    });
+  });
 });

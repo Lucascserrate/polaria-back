@@ -21,6 +21,7 @@ import { normalizeReminderOffsets } from '../reminders/reminder-offsets';
 import { buildReminderPreview } from '../reminders/reminder-message';
 import { REMINDER_TEMPLATE_BUTTONS } from '../whatsapp/reminder-template';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
+import { buildPublicBookingUrl } from '../tenants/public-booking-url';
 import { DataSource } from 'typeorm';
 import axios, { AxiosError } from 'axios';
 
@@ -76,6 +77,15 @@ export type BusinessContextResponse = {
 
 type SettingsResponse = {
   polariaName: string;
+  /**
+   * Identificador del negocio en su página pública. `null` hasta que guarda su
+   * nombre por primera vez. No se edita desde el panel: ver `ensureSlug`.
+   */
+  slug: string | null;
+  /** El enlace ya armado, que es lo que el negocio comparte. */
+  publicBookingUrl: string | null;
+  /** Dirección del local en texto. Ver la columna `address` del tenant. */
+  address: string | null;
   /** Ver `BUSINESS_TYPES`. `null` mientras la configuración inicial no lo cargó. */
   businessType: string | null;
   timezone: string;
@@ -229,6 +239,12 @@ export class SettingsService {
 
     return {
       polariaName: tenant.name,
+      slug: tenant.slug,
+      publicBookingUrl: buildPublicBookingUrl(
+        tenant.slug,
+        this.configService.get<string>('PUBLIC_SITE_BASE_URL'),
+      ),
+      address: tenant.address,
       businessType: tenant.businessType ?? null,
       timezone: tenant.timezone,
       currency: tenant.currency,
@@ -301,7 +317,22 @@ export class SettingsService {
       });
     }
 
-    if (dto.businessType || dto.timezone || dto.location !== undefined) {
+    /*
+     * La dirección pública se asigna acá, con el nombre que el negocio acaba de
+     * guardar, y no al registrarse: ahí el nombre lo pone Google y suele ser el
+     * de la persona. `ensureSlug` no toca el de un negocio que ya tiene uno, así
+     * que renombrarse no rompe los enlaces que ya circulan.
+     */
+    if (dto.polariaName) {
+      await this.tenantsService.ensureSlug(tenantId, dto.polariaName);
+    }
+
+    if (
+      dto.businessType ||
+      dto.timezone ||
+      dto.location !== undefined ||
+      dto.address !== undefined
+    ) {
       await this.tenantsService.update(tenantId, {
         businessType: dto.businessType ?? tenant.businessType ?? undefined,
         timezone: dto.timezone ?? tenant.timezone,
@@ -310,6 +341,10 @@ export class SettingsService {
           dto.location === null ? null : (dto.location?.latitude ?? undefined),
         longitude:
           dto.location === null ? null : (dto.location?.longitude ?? undefined),
+        // Misma regla para la dirección, y la cadena vacía se guarda como
+        // `NULL`: "sin dirección" es un estado, no un texto en blanco.
+        address:
+          dto.address === undefined ? undefined : dto.address?.trim() || null,
       });
     }
 

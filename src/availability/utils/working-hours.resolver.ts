@@ -124,6 +124,9 @@ export const resolveWorkingRangesByStaff = (input: {
  * apareciendo. Descartarlo obligaría a calcular la disponibilidad real de cada
  * fecha, que son varias consultas por día; esto resuelve el caso frecuente con
  * lo que ya está cargado en memoria.
+ *
+ * Con `notBefore` cubre además un tercer motivo, que es de reloj y no de
+ * calendario: el día que ya terminó.
  */
 export const datesWithCoverage = (input: {
   dates: string[];
@@ -131,6 +134,19 @@ export const datesWithCoverage = (input: {
   businessHours: WeeklyTimeRange[];
   staff: Array<{ id: string; usesCustomSchedule: boolean }>;
   schedulesByStaff: Record<string, WeeklyTimeRange[]>;
+  /**
+   * Instante antes del cual una jornada ya no sirve.
+   *
+   * Sin esto, un negocio abierto de 09:00 a 22:00 consultado a las 21:50
+   * ofrecía "hoy" como día con atención, y el paso siguiente contestaba que no
+   * quedan horarios. Un día cuya jornada terminó no es un día con cobertura: la
+   * jornada existe, pero ya no se puede llegar a ella.
+   *
+   * Es el mismo piso que aplica el armado de horarios (`minStartTime`), sólo
+   * que preguntado un nivel más arriba. Omitirlo mantiene el comportamiento
+   * anterior, que es lo que necesita cualquier consulta sobre el pasado.
+   */
+  notBefore?: Date;
 }): string[] =>
   input.dates.filter((date) => {
     const rangesByStaff = resolveWorkingRangesByStaff({
@@ -141,8 +157,15 @@ export const datesWithCoverage = (input: {
       schedulesByStaff: input.schedulesByStaff,
     });
 
-    return input.staff.some(
-      (member) => (rangesByStaff[member.id] ?? []).length > 0,
+    const { notBefore } = input;
+
+    return input.staff.some((member) =>
+      (rangesByStaff[member.id] ?? []).some(
+        // Alcanza con que a la franja le quede algo por delante: si entra el
+        // servicio completo lo decide el armado de horarios, que es quien
+        // conoce su duración.
+        (range) => !notBefore || range.endTime > notBefore,
+      ),
     );
   });
 

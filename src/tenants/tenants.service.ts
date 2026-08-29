@@ -11,6 +11,7 @@ import {
   trialEndsAt,
 } from '../subscriptions/subscription.rules';
 import { DEFAULT_REMINDER_OFFSETS } from '../reminders/reminder-offsets';
+import { buildUniqueSlug } from './slug.util';
 
 /**
  * Zona horaria con la que nace un negocio creado desde el registro.
@@ -119,6 +120,62 @@ export class TenantsService {
 
   findByEmail(email: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ email });
+  }
+
+  /** El negocio detrás de `polariahq.com/[slug]`. */
+  findBySlug(slug: string): Promise<Tenant | null> {
+    return this.tenantRepository.findOneBy({ slug: slug.toLowerCase() });
+  }
+
+  /**
+   * Le da al negocio su dirección pública, si todavía no tiene una.
+   *
+   * Se llama cuando el negocio guarda su nombre —la configuración inicial es la
+   * primera vez— y no al registrarse: ahí el nombre lo pone Google y suele ser
+   * el de la persona, así que "lucas-serrate" quedaría como la URL de una
+   * barbería para siempre.
+   *
+   * Y **sólo si todavía no tiene**: renombrarse no cambia el slug. Un enlace ya
+   * está pegado en un QR sobre el mostrador, en la biografía de Instagram y en
+   * las conversaciones de los clientes; que cambiar el nombre en la
+   * configuración rompiera todo eso en silencio sería una trampa. El día que un
+   * negocio quiera cambiarlo va a ser una decisión suya y explícita, con el
+   * aviso correspondiente.
+   *
+   * Devuelve el slug vigente, tanto el recién asignado como el que ya estaba.
+   */
+  async ensureSlug(tenantId: string, name: string): Promise<string | null> {
+    const tenant = await this.findOne(tenantId);
+    if (!tenant) return null;
+    if (tenant.slug) return tenant.slug;
+
+    /*
+     * Se leen todos los slugs para desempatar. Son una fila por negocio y una
+     * columna corta: mientras la cartera entre en memoria —y falta muchísimo—,
+     * esto es más simple y más obvio que reintentar contra el índice único.
+     */
+    const rows = await this.tenantRepository.find({ select: { slug: true } });
+    const taken = rows
+      .map((row) => row.slug)
+      .filter((slug): slug is string => Boolean(slug));
+
+    const slug = buildUniqueSlug(name, taken);
+
+    try {
+      await this.tenantRepository.update(tenantId, { slug });
+      return slug;
+    } catch (error: unknown) {
+      // Dos negocios guardando el mismo nombre a la vez: el índice único deja
+      // pasar uno. El que perdió se queda sin slug esta vez y lo consigue en el
+      // próximo guardado, que es preferible a fallar el guardado entero por algo
+      // que el negocio no pidió.
+      if (!isDuplicateEntryError(error)) throw error;
+
+      this.logger.warn(
+        `Slug tomado por otro negocio en paralelo (tenantId=${tenantId}, slug=${slug}).`,
+      );
+      return null;
+    }
   }
 
   /**

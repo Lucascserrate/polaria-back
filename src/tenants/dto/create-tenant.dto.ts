@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   Length,
+  MaxLength,
 } from 'class-validator';
 
 export class CreateTenantDto {
@@ -19,6 +20,17 @@ export class CreateTenantDto {
   @IsOptional()
   @IsString()
   businessType?: string;
+
+  /**
+   * Dirección del local en texto, para la página pública de reservas. `null` la
+   * borra. No confundir con las coordenadas de abajo: aquélla ubica en un mapa,
+   * ésta es la que se lee.
+   */
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  address?: string | null;
 
   /**
    * Coordenadas del local. Nulables por separado para que un `null` explícito

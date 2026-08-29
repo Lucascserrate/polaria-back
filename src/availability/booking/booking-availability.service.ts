@@ -231,7 +231,9 @@ export class BookingAvailabilityService {
    * eso se carga una vez y se resuelve en memoria.
    *
    * No mira la agenda, así que un día abierto pero con todo tomado sigue
-   * apareciendo. Ese caso ya tiene salida propia en el paso de horarios.
+   * apareciendo. Ese caso ya tiene salida propia en el paso de horarios. Lo que
+   * sí descarta es el día cuya jornada ya terminó —hoy, después de cerrar—,
+   * porque ahí no hay nada que la agenda pueda cambiar.
    */
   async getServiceableDates(params: {
     tenantId: string;
@@ -270,6 +272,13 @@ export class BookingAvailabilityService {
       businessHours,
       staff: staffList,
       schedulesByStaff,
+      /*
+       * El mismo piso que usa el armado de horarios. Sin él, un negocio
+       * consultado diez minutos antes de cerrar ofrecía "hoy" como día con
+       * atención y el paso siguiente contestaba que no quedan horarios: el
+       * primer contacto con la reserva era un callejón sin salida.
+       */
+      notBefore: this.calculateMinStartTime(timeZone),
     });
   }
 

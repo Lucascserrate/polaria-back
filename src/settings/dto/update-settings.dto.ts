@@ -7,6 +7,7 @@ import {
   IsLongitude,
   IsOptional,
   IsString,
+  MaxLength,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -88,6 +89,18 @@ export class UpdateSettingsDto {
   @ValidateNested()
   @Type(() => LocationDto)
   location?: LocationDto | null;
+
+  /**
+   * Dirección del local en texto, para la página pública de reservas.
+   *
+   * `null` la borra; ausente la deja como está. La cadena vacía se guarda como
+   * `null`, así que no hay forma de dejar una dirección en blanco que la página
+   * tenga que salir a distinguir de "sin dirección".
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  address?: string | null;
 
   /**
    * Con cuánta anticipación avisar cada cita, en minutos.
