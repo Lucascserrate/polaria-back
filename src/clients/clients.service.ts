@@ -72,6 +72,14 @@ export interface ClientSummary {
   lastAppointmentAt: string | null;
   /** La próxima que todavía ocupa agenda, o `null`. */
   nextAppointmentAt: string | null;
+  /**
+   * Cuántas citas próximas ocupan agenda.
+   *
+   * Es lo que necesita el diálogo de eliminación para avisar **antes** de
+   * intentar el borrado: "tiene 2 citas próximas" le dice al negocio qué
+   * resolver, y descubrirlo por un 409 después de apretar Eliminar, no.
+   */
+  futureAppointments: number;
 }
 
 /** Una página de la lista de clientes del panel. */
@@ -194,6 +202,10 @@ export class ClientsService {
         `MIN(CASE WHEN appointment.status IN (:...activeStatuses) AND appointment.startTime >= :now THEN appointment.startTime END)`,
         'nextAt',
       )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status IN (:...activeStatuses) AND appointment.startTime >= :now THEN 1 ELSE 0 END)`,
+        'future',
+      )
       .where('appointment.tenantId = :tenantId', { tenantId })
       .andWhere('appointment.clientId = :clientId', { clientId: id })
       .setParameters({
@@ -208,6 +220,7 @@ export class ClientsService {
         cancelled: string | null;
         lastAt: Date | null;
         nextAt: Date | null;
+        future: string | null;
       }>();
 
     return {
@@ -216,6 +229,7 @@ export class ClientsService {
       cancelledAppointments: Number(row?.cancelled ?? 0),
       lastAppointmentAt: row?.lastAt ? row.lastAt.toISOString() : null,
       nextAppointmentAt: row?.nextAt ? row.nextAt.toISOString() : null,
+      futureAppointments: Number(row?.future ?? 0),
     };
   }
 
