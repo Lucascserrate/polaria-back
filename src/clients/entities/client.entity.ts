@@ -68,10 +68,13 @@ export class Client {
   tenant!: Tenant;
 
   /**
-   * Obligatorio para los clientes de WhatsApp, opcional para los que el negocio
-   * carga desde el panel. Nunca cadena vacía: dos vacías chocarían en el índice
-   * único, así que nunca se escribe: quien no tiene teléfono se da de alta por
-   * `createUnidentified`, que lo deja en `NULL`.
+   * La identidad del cliente dentro del negocio. Ningún camino lo deja vacío hoy:
+   * los tres canales pasan por `resolveByPhone`, que exige un teléfono utilizable.
+   *
+   * La columna sigue admitiendo `NULL` por los clientes que quedaron de cuando la
+   * agenda los creaba escribiendo sólo un nombre. Se los reconoce en la lista por
+   * el aviso "Sin teléfono", y se arreglan editándolos: mientras no tengan uno, no
+   * hay forma de saber que son la misma persona que escribe por WhatsApp.
    */
   @Column({ type: 'varchar', nullable: true })
   phone?: string | null;

@@ -316,19 +316,3 @@ describe('ClientsService.resolveByPhone', () => {
     ).rejects.toThrow(BadRequestException);
   });
 });
-
-describe('ClientsService.createUnidentified', () => {
-  it('crea uno nuevo cada vez, porque no hay nada que reconocer', async () => {
-    // Es el costo de no pedir el teléfono en la agenda, y la razón de cerrar ese
-    // camino: dos "Ana" escritas a mano son dos clientes con historiales
-    // separados.
-    const { service, rows } = setup();
-
-    const una = await service.createUnidentified('tenant-1', 'Ana');
-    const otra = await service.createUnidentified('tenant-1', 'Ana');
-
-    expect(otra.id).not.toBe(una.id);
-    expect(una.phone).toBeNull();
-    expect(rows).toHaveLength(2);
-  });
-});

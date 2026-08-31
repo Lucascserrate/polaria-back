@@ -408,34 +408,6 @@ export class ClientsService {
   }
 
   /**
-   * Da de alta a alguien de quien no se tiene el teléfono.
-   *
-   * Es el cliente que el panel crea al reservar escribiendo sólo un nombre. Sin
-   * teléfono no hay forma de reconocerlo: queda con `phone` en `NULL`, fuera del
-   * índice único, y el día que esa misma persona reserve por WhatsApp va a
-   * entrar como un cliente nuevo.
-   *
-   * Existe aparte de `resolveByPhone`, y no como un parámetro opcional suyo,
-   * para que se vea que es la excepción y no una variante: acá no se resuelve
-   * nada, se crea siempre. Desaparece cuando el panel pida el teléfono al elegir
-   * el cliente de una reserva.
-   */
-  createUnidentified(tenantId: string, name: string): Promise<Client> {
-    this.logger.warn(
-      `Cliente creado sin teléfono desde el panel (tenantId=${tenantId}). No se va a poder reconocer en otros canales.`,
-    );
-
-    return this.clientRepository.save(
-      this.clientRepository.create({
-        tenantId,
-        phone: null,
-        name: name.trim() || undefined,
-        createdVia: ClientSource.PANEL,
-      }),
-    );
-  }
-
-  /**
    * Devuelve al ruedo a un cliente dado de baja que volvió a reservar.
    *
    * Se lo reactiva y no se crea otro porque su historial sigue ahí y es suyo. La
