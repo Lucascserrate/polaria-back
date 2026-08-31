@@ -16,7 +16,6 @@ import { isDuplicateEntryError } from '../database/duplicate-entry.util';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { Client, ClientSource } from './entities/client.entity';
-import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { resolveClientPhone, type ClientPhoneInput } from './client-phone.util';
 import {
@@ -65,11 +64,6 @@ export class ClientsService {
     @InjectRepository(Tenant)
     private tenantRepository: Repository<Tenant>,
   ) {}
-
-  create(createClientDto: CreateClientDto): Promise<Client> {
-    const client = this.clientRepository.create(createClientDto);
-    return this.clientRepository.save(client);
-  }
 
   /**
    * Una página de la lista de clientes, con el buscador ya aplicado.

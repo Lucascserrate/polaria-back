@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 /**
  * El cliente de una reserva creada desde el panel.
@@ -11,11 +11,6 @@ import { IsOptional, IsString, IsUUID } from 'class-validator';
  * cuando la agenda pase a elegir el cliente de una lista.
  */
 export class FindOrCreateClientDto {
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsUUID()
-  tenantId?: string;
-
   @ApiProperty()
   @IsString()
   name!: string;

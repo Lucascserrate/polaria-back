@@ -1,11 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsEmail,
-  IsISO8601,
-  IsOptional,
-  IsString,
-  IsUUID,
-} from 'class-validator';
+import { IsEmail, IsISO8601, IsOptional, IsString } from 'class-validator';
 
 /**
  * El alta de un cliente desde el panel.
@@ -16,12 +10,12 @@ import {
  * más, y aceptarlo acá sería sembrar duplicados de a uno.
  *
  * Llega tal como lo escribió el negocio; normalizarlo es trabajo del servidor.
+ *
+ * No lleva `tenantId`: sale del token. Declararlo acá lo volvía obligatorio en
+ * el cuerpo —con `forbidNonWhitelisted`, omitirlo era un 400— para un dato que
+ * el controlador ni siquiera lee.
  */
 export class CreateClientDto {
-  @ApiProperty()
-  @IsUUID()
-  tenantId!: string;
-
   @ApiProperty({
     description: 'Como lo escribió el negocio. Se normaliza acá.',
   })

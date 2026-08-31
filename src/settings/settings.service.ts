@@ -10,6 +10,7 @@ import { ConfigService } from '@nestjs/config';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { BookingSessionService } from '../booking-flow/booking-session.service';
 import { WhatsAppTemplateService } from '../whatsapp/whatsapp-template.service';
@@ -91,6 +92,15 @@ type SettingsResponse = {
   /** Ver `BUSINESS_TYPES`. `null` mientras la configuración inicial no lo cargó. */
   businessType: string | null;
   timezone: string;
+  /**
+   * Prefijo telefónico del país, sin `+`. Derivado de la zona horaria.
+   *
+   * Viaja para que el panel pueda prellenarlo al cargar un cliente, sin repetir
+   * del lado del navegador el mapa de `dialCodeForTimeZone`. Una segunda copia
+   * de esa tabla se desactualizaría sola, y el resultado sería un teléfono
+   * guardado con el país equivocado.
+   */
+  dialCode: string;
   /**
    * Moneda del negocio, en ISO 4217.
    *
@@ -268,6 +278,7 @@ export class SettingsService {
       address: tenant.address,
       businessType: tenant.businessType ?? null,
       timezone: tenant.timezone,
+      dialCode: dialCodeForTimeZone(tenant.timezone),
       currency: tenant.currency,
       location: toLocation(tenant.latitude, tenant.longitude),
       businessHours,
