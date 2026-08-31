@@ -2,7 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 
 import { ClientsService } from './clients.service';
-import type { Client } from './entities/client.entity';
+import { ClientSource, type Client } from './entities/client.entity';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 
 /** El error que devuelve MySQL cuando choca el índice `(tenantId, phone)`. */
@@ -20,16 +20,36 @@ const setup = (options: { timezone?: string | null } = {}) => {
   const rows: Client[] = [];
   let nextId = 1;
 
+  const match = ({ tenantId, phone, id }: Partial<Client>) =>
+    rows.find(
+      (row) =>
+        (id === undefined || row.id === id) &&
+        (tenantId === undefined || row.tenantId === tenantId) &&
+        (phone === undefined || (row.phone ?? null) === phone),
+    ) ?? null;
+
   const clientRepository = {
-    findOneBy: jest.fn(({ tenantId, phone }: Partial<Client>) =>
-      Promise.resolve(
-        rows.find(
-          (row) => row.tenantId === tenantId && (row.phone ?? null) === phone,
-        ) ?? null,
-      ),
+    /** El resolver la usa con `withDeleted`, así que ve también a los de baja. */
+    findOne: jest.fn(({ where }: { where: Partial<Client> }) =>
+      Promise.resolve(match(where)),
     ),
+    /** Sin `withDeleted`: los dados de baja no aparecen, como en TypeORM. */
+    findOneBy: jest.fn((where: Partial<Client>) => {
+      const found = match(where);
+      return Promise.resolve(found && !found.deletedAt ? found : null);
+    }),
+    restore: jest.fn((id: string) => {
+      const found = rows.find((row) => row.id === id);
+      if (found) found.deletedAt = null;
+      return Promise.resolve({ affected: found ? 1 : 0 });
+    }),
     create: jest.fn((data: Partial<Client>) => ({ ...data }) as Client),
     save: jest.fn((client: Client) => {
+      /*
+       * El índice único no distingue entre vivos y dados de baja: la fila
+       * borrada lógicamente sigue ocupando su `(tenantId, phone)`. Es la razón
+       * por la que el resolver tiene que buscar con `withDeleted`.
+       */
       if (
         client.phone &&
         rows.some(
@@ -71,12 +91,14 @@ describe('ClientsService.resolveByPhone', () => {
     const porWhatsApp = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
       name: 'Usuario 3456',
     });
 
     const porLaWeb = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
+      source: ClientSource.WEB,
       name: 'Ana Quispe',
     });
 
@@ -92,12 +114,14 @@ describe('ClientsService.resolveByPhone', () => {
     await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
+      source: ClientSource.WEB,
       name: 'Ana Quispe',
     });
 
     const otra = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
       name: 'anita',
     });
 
@@ -115,6 +139,7 @@ describe('ClientsService.resolveByPhone', () => {
     const client = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'whatsapp', value: '573001234567' },
+      source: ClientSource.WHATSAPP,
       name: 'Camilo',
     });
 
@@ -127,11 +152,13 @@ describe('ClientsService.resolveByPhone', () => {
     const una = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
+      source: ClientSource.WEB,
       name: 'Ana',
     });
     const otra = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70999888' },
+      source: ClientSource.WEB,
       name: 'Ana',
     });
 
@@ -145,11 +172,13 @@ describe('ClientsService.resolveByPhone', () => {
     const enUno = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
       name: 'Ana',
     });
     const enOtro = await service.resolveByPhone({
       tenantId: 'tenant-2',
       phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
       name: 'Ana',
     });
 
@@ -164,6 +193,7 @@ describe('ClientsService.resolveByPhone', () => {
     const client = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '1123456789' },
+      source: ClientSource.WEB,
       name: 'Ana',
     });
 
@@ -182,21 +212,52 @@ describe('ClientsService.resolveByPhone', () => {
     const ganador = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
       name: 'Ana',
     });
 
     // El segundo webhook no vio nada al buscar, y recién al escribir choca.
-    clientRepository.findOneBy.mockImplementationOnce(() =>
+    clientRepository.findOne.mockImplementationOnce(() =>
       Promise.resolve(null),
     );
 
     const perdedor = await service.resolveByPhone({
       tenantId: 'tenant-1',
       phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
       name: 'Ana',
     });
 
     expect(perdedor.id).toBe(ganador.id);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('reactiva al cliente dado de baja que vuelve a reservar', async () => {
+    /*
+     * Su historial sigue siendo suyo, así que se lo devuelve al ruedo en vez de
+     * crearle una ficha nueva. Y no es sólo una preferencia: la fila dada de
+     * baja sigue ocupando su lugar en el índice único, así que insertar otra con
+     * el mismo teléfono fallaría y la reserva se caería sin motivo visible.
+     */
+    const { service, rows } = setup();
+
+    const original = await service.resolveByPhone({
+      tenantId: 'tenant-1',
+      phone: { kind: 'typed', value: '70123456' },
+      source: ClientSource.PANEL,
+      name: 'Ana Quispe',
+    });
+    rows[0].deletedAt = new Date();
+
+    const devuelto = await service.resolveByPhone({
+      tenantId: 'tenant-1',
+      phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
+      name: 'Ana',
+    });
+
+    expect(devuelto.id).toBe(original.id);
+    expect(devuelto.deletedAt).toBeNull();
     expect(rows).toHaveLength(1);
   });
 
@@ -208,6 +269,7 @@ describe('ClientsService.resolveByPhone', () => {
       service.resolveByPhone({
         tenantId: 'tenant-1',
         phone: { kind: 'typed', value: 'no tengo' },
+        source: ClientSource.WEB,
         name: 'Ana',
       }),
     ).rejects.toThrow(BadRequestException);

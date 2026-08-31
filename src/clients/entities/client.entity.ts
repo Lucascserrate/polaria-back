@@ -6,12 +6,30 @@ import {
   OneToMany,
   CreateDateColumn,
   UpdateDateColumn,
+  DeleteDateColumn,
   Index,
   JoinColumn,
 } from 'typeorm';
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Conversation } from '../../conversations/entities/conversation.entity';
 import { Message } from '../../messages/entities/message.entity';
+
+/**
+ * Por qué puerta entró el cliente.
+ *
+ * Se guarda en el momento del alta porque después no se puede reconstruir: un
+ * cliente con teléfono y sin conversación pudo llegar por la página pública o
+ * haberlo cargado el negocio a mano, y nada en la base distingue los dos casos.
+ * Es el dato que responde "¿cuántos clientes me trajo el WhatsApp?", que es una
+ * pregunta que el negocio hace y hoy no tiene con qué contestar.
+ */
+export enum ClientSource {
+  WHATSAPP = 'whatsapp',
+  /** La página pública de reservas del negocio. */
+  WEB = 'web',
+  /** Lo cargó el negocio desde el panel. */
+  PANEL = 'panel',
+}
 
 /**
  * Índice propio para la foreign key a `tenants`.
@@ -61,6 +79,28 @@ export class Client {
   @Column({ nullable: true })
   name?: string;
 
+  @Column({ type: 'varchar', nullable: true })
+  email?: string | null;
+
+  /**
+   * Sólo el día, sin hora ni zona: un cumpleaños no es un instante.
+   *
+   * Es `date` de SQL y por eso el driver lo entrega como `'YYYY-MM-DD'` y no
+   * como `Date`. Guardarlo con hora lo correría un día para cualquier negocio al
+   * oeste de UTC cada vez que se leyera, que es el error clásico de esta columna.
+   */
+  @Column({ type: 'date', nullable: true })
+  birthDate?: string | null;
+
+  /**
+   * `NULL` en los clientes anteriores a que se registrara el canal.
+   *
+   * Se prefiere el `NULL` a inventarles una puerta de entrada: un valor supuesto
+   * haría mentir a la única métrica que esta columna existe para responder.
+   */
+  @Column({ type: 'enum', enum: ClientSource, nullable: true })
+  createdVia?: ClientSource | null;
+
   @Column({ nullable: true })
   notes?: string;
 
@@ -75,4 +115,20 @@ export class Client {
 
   @UpdateDateColumn()
   updatedAt!: Date;
+
+  /**
+   * Baja lógica del cliente que tiene historial.
+   *
+   * Es el único estado de baja que tiene un cliente, a diferencia de `Staff`, que
+   * además usa `isActive` para el profesional que sigue en el equipo pero no se
+   * ofrece en la agenda. Un cliente no se ofrece en ningún lado, así que ese
+   * estado intermedio no existe y un segundo flag sólo podría desincronizarse.
+   *
+   * No sobrevive a una reserva nueva: si la persona vuelve a escribir,
+   * `resolveByPhone` la restaura en lugar de duplicarla. La fila dada de baja
+   * sigue ocupando su lugar en el índice único `(tenantId, phone)`, así que
+   * insertar una segunda con el mismo teléfono fallaría de todos modos.
+   */
+  @DeleteDateColumn()
+  deletedAt?: Date | null;
 }

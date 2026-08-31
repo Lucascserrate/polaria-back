@@ -13,6 +13,7 @@ import { currentDateInTimeZone } from '../availability/utils/availability.helper
 import { resolveBusinessStatus } from '../business_hours/business-status';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { ClientsService } from '../clients/clients.service';
+import { ClientSource } from '../clients/entities/client.entity';
 import { ServicesService } from '../services/services.service';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { TenantsService } from '../tenants/tenants.service';
@@ -233,6 +234,7 @@ export class PublicBookingService {
         dialCode: dialCodeForTimeZone(tenant.timezone),
       },
       name: input.customerName.trim(),
+      source: ClientSource.WEB,
     });
 
     try {

@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { ClientsService } from '../../clients/clients.service';
 import { ConversationsService } from '../../conversations/conversations.service';
 import { ConversationState } from '../../conversations/entities/conversation.entity';
-import type { Client } from '../../clients/entities/client.entity';
+import {
+  ClientSource,
+  type Client,
+} from '../../clients/entities/client.entity';
 import type { Conversation } from '../../conversations/entities/conversation.entity';
 import { buildTempName } from '../utils/assistant-utils';
 
@@ -36,6 +39,7 @@ export class AssistantSessionService {
     const client = await this.clientsService.resolveByPhone({
       tenantId,
       phone: { kind: 'whatsapp', value: phone },
+      source: ClientSource.WHATSAPP,
       /*
        * Sin nombre de perfil se guarda uno provisorio en vez de dejarlo vacío:
        * el negocio ve la cita en la agenda antes de saber cómo se llama quien la

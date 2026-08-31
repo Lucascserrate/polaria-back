@@ -6,19 +6,27 @@ import {
   Patch,
   Param,
   Delete,
+  Query,
   UseGuards,
-  Req,
-  UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
+import { Actor, type AuthenticatedActor } from '../auth/actor';
 import { ClientsService } from './clients.service';
+import { ClientSource } from './entities/client.entity';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { FindOrCreateClientDto } from './dto/find-or-create-client.dto';
-import type { Request } from 'express';
+import { ListClientsQueryDto } from './dto/list-clients-query.dto';
 
+/**
+ * La ficha de clientes del negocio.
+ *
+ * El `tenantId` sale siempre del token y nunca del cuerpo ni de la query: es lo
+ * único que separa a los clientes de un negocio de los de otro, y un negocio que
+ * pudiera elegirlo podría leer y borrar la cartera del vecino.
+ */
 @ApiTags('clients')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @AdminOnly()
@@ -26,15 +34,22 @@ import type { Request } from 'express';
 export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
-  @UseGuards(AuthGuard('jwt'))
   @Post()
-  create(@Req() req: Request, @Body() createClientDto: CreateClientDto) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
-    createClientDto.tenantId = tenantId;
-    return this.clientsService.create(createClientDto);
+  create(
+    @Actor() actor: AuthenticatedActor,
+    @Body() createClientDto: CreateClientDto,
+  ) {
+    /*
+     * El alta a mano también pasa por el resolver. Si el número ya es de un
+     * cliente del negocio, se devuelve ése en vez de fallar: para quien lo está
+     * cargando, "ya existe" y "acá está" son la misma respuesta útil.
+     */
+    return this.clientsService.resolveByPhone({
+      tenantId: actor.tenantId,
+      phone: { kind: 'typed', value: createClientDto.phone },
+      name: createClientDto.name,
+      source: ClientSource.PANEL,
+    });
   }
 
   /**
@@ -45,88 +60,55 @@ export class ClientsController {
    * no hay nada que reconocer y se crea uno nuevo cada vez; es el camino que
    * queda por cerrar del lado de la agenda.
    */
-  @UseGuards(AuthGuard('jwt'))
   @Post('find-or-create')
   findOrCreate(
-    @Req() req: Request,
+    @Actor() actor: AuthenticatedActor,
     @Body() findOrCreateDto: FindOrCreateClientDto,
   ) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
-
     const typedPhone = findOrCreateDto.phone?.trim();
     if (!typedPhone) {
       return this.clientsService.createUnidentified(
-        tenantId,
+        actor.tenantId,
         findOrCreateDto.name,
       );
     }
 
     return this.clientsService.resolveByPhone({
-      tenantId,
+      tenantId: actor.tenantId,
       phone: { kind: 'typed', value: typedPhone },
       name: findOrCreateDto.name,
+      source: ClientSource.PANEL,
     });
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Get()
-  findAll(@Req() req: Request) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
-    return this.clientsService.findByTenant(tenantId);
+  findAll(
+    @Actor() actor: AuthenticatedActor,
+    @Query() query: ListClientsQueryDto,
+  ) {
+    return this.clientsService.findPageByTenant(actor.tenantId, query);
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Get(':id')
-  findOne(@Req() req: Request, @Param('id') id: string) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
-    return this.clientsService.findOne(id).then((client) => {
-      if (!client || client.tenantId !== tenantId) {
-        return null;
-      }
-      return client;
-    });
+  findOne(@Actor() actor: AuthenticatedActor, @Param('id') id: string) {
+    return this.clientsService.findOneByTenant(id, actor.tenantId);
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Patch(':id')
   update(
-    @Req() req: Request,
+    @Actor() actor: AuthenticatedActor,
     @Param('id') id: string,
     @Body() updateClientDto: UpdateClientDto,
   ) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
-    return this.clientsService.findOne(id).then((client) => {
-      if (!client || client.tenantId !== tenantId) {
-        throw new UnauthorizedException('Missing tenant id');
-      }
-      return this.clientsService.update(id, updateClientDto);
-    });
+    return this.clientsService.updateByTenant(
+      id,
+      actor.tenantId,
+      updateClientDto,
+    );
   }
 
-  @UseGuards(AuthGuard('jwt'))
   @Delete(':id')
-  remove(@Req() req: Request, @Param('id') id: string) {
-    const tenantId = (req.user as { sub?: string }).sub;
-    if (!tenantId) {
-      throw new UnauthorizedException('Missing tenant id');
-    }
-    return this.clientsService.findOne(id).then((client) => {
-      if (!client || client.tenantId !== tenantId) {
-        throw new UnauthorizedException('Missing tenant id');
-      }
-      return this.clientsService.remove(id);
-    });
+  remove(@Actor() actor: AuthenticatedActor, @Param('id') id: string) {
+    return this.clientsService.removeByTenant(id, actor.tenantId);
   }
 }
