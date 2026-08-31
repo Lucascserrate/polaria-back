@@ -1,8 +1,10 @@
 import {
   BILLING_ERROR_CODES,
+  blocksNotifications,
   buildBillingSetupUrl,
   isBillingError,
   normalizeBillingCurrency,
+  readHealthVerdict,
   WhatsappBillingStatus,
 } from './billing-status';
 
@@ -58,14 +60,120 @@ describe('isBillingError', () => {
 describe('WhatsappBillingStatus', () => {
   /*
    * Hubo un `READY` y se quitó: lo ponía una sonda que solo lee la moneda, que es una
-   * de las causas del `131042` y no la única. Este test está para que reponerlo sea
-   * una decisión discutida y no un agregado al pasar.
+   * de las causas del `131042` y no la única. Este test está para que reponer un
+   * estado que afirme "puede enviar" sea una decisión discutida y no un agregado al
+   * pasar — hoy eso no lo sabemos, solo lo sabe Meta al enviar.
    */
-  it('no existe un estado que afirme que el negocio puede enviar', () => {
+  it('ningún estado afirma que el negocio puede enviar', () => {
     expect(Object.values(WhatsappBillingStatus)).toEqual([
+      'PENDING_SETUP',
       'UNKNOWN',
       'ACTION_REQUIRED',
     ]);
+  });
+
+  /*
+   * Bloquean los dos por los que Meta tiene algo que decir: el paso que exige a todo
+   * cliente de un Tech Provider, y el rechazo concreto. `UNKNOWN` es nuestra
+   * ignorancia, y trabar a un negocio por eso sería trabajar en contra suyo.
+   */
+  it('solo bloquea lo que viene de Meta, no nuestra ignorancia', () => {
+    expect(blocksNotifications('PENDING_SETUP')).toBe(true);
+    expect(blocksNotifications('ACTION_REQUIRED')).toBe(true);
+    expect(blocksNotifications('UNKNOWN')).toBe(false);
+  });
+});
+
+describe('readHealthVerdict', () => {
+  /*
+   * `health_status` es la pregunta correcta y llegamos tarde a ella: contesta
+   * literalmente `can_send_message`, mientras que la sonda anterior miraba `currency`,
+   * que cubre una sola de las causas de bloqueo.
+   */
+  it('bloquea cuando Meta dice BLOCKED, con su explicación y su solución', () => {
+    expect(
+      readHealthVerdict({
+        can_send_message: 'BLOCKED',
+        entities: [
+          {
+            entity_type: 'WABA',
+            id: '1',
+            can_send_message: 'BLOCKED',
+            errors: [
+              {
+                error_code: 131042,
+                error_description: 'Business eligibility payment issue.',
+                possible_solution: 'Add a payment method to your account.',
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({
+      blocked: true,
+      reason:
+        'Business eligibility payment issue. Add a payment method to your account.',
+    });
+  });
+
+  /*
+   * `AVAILABLE` **no** desbloquea, y por eso este test comprueba `blocked: false` y no
+   * un permiso: Meta no documenta que el problema de facturación se refleje acá, así
+   * que tomarlo como confirmación repetiría el falso verde que ya tuvimos.
+   */
+  it('sin un BLOCKED explícito no hay bloqueo, pero tampoco permiso', () => {
+    expect(readHealthVerdict({ can_send_message: 'AVAILABLE' })).toEqual({
+      blocked: false,
+      reason: null,
+    });
+    expect(readHealthVerdict(null)).toEqual({ blocked: false, reason: null });
+    expect(readHealthVerdict({})).toEqual({ blocked: false, reason: null });
+  });
+
+  /* `LIMITED` es "puede enviar con restricciones": no es un bloqueo. */
+  it('LIMITED no bloquea', () => {
+    expect(
+      readHealthVerdict({
+        can_send_message: 'LIMITED',
+        entities: [
+          { entity_type: 'PHONE_NUMBER', id: '1', can_send_message: 'LIMITED' },
+        ],
+      }).blocked,
+    ).toBe(false);
+  });
+
+  /*
+   * El bloqueo puede venir en una entidad aunque el resumen de arriba no lo diga, y al
+   * revés. Se mira lo que haya: perderse un `BLOCKED` es dejar al negocio enviando
+   * mensajes que no van a salir.
+   */
+  it('encuentra el bloqueo aunque solo lo declare una entidad', () => {
+    expect(
+      readHealthVerdict({
+        can_send_message: 'AVAILABLE',
+        entities: [
+          { entity_type: 'APP', id: '1', can_send_message: 'AVAILABLE' },
+          {
+            entity_type: 'BUSINESS',
+            id: '2',
+            can_send_message: 'BLOCKED',
+            errors: [{ error_code: 1, error_description: 'Not verified' }],
+          },
+        ],
+      }),
+    ).toEqual({ blocked: true, reason: 'Not verified' });
+  });
+
+  /* Un bloqueo sin texto sigue siendo un bloqueo: la UI dirá lo que pueda. */
+  it('bloquea aunque Meta no explique por qué', () => {
+    expect(
+      readHealthVerdict({
+        can_send_message: 'BLOCKED',
+        entities: [
+          { entity_type: 'WABA', id: '1', can_send_message: 'BLOCKED' },
+        ],
+      }),
+    ).toEqual({ blocked: true, reason: null });
   });
 });
 

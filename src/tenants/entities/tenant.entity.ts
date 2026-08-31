@@ -263,12 +263,14 @@ export class Tenant {
    * Estado aparte de la conexión a propósito: una WABA conectada, con plantillas
    * aprobadas y número verificado, puede no entregar un solo mensaje de plantilla
    * porque le falta configurar la moneda. Ver `WhatsappBillingStatus`, que tiene solo
-   * dos valores: lo escribe Meta al rechazar un envío, y no una sonda nuestra.
+   * tres valores y ninguno lo escribe una sonda nuestra: nace pendiente porque Meta
+   * exige el método de pago a todo cliente de un Tech Provider, sale de ahí cuando el
+   * negocio dice haberlo hecho, y vuelve a bloquear si Meta rechaza un envío.
    *
    * Meta le cobra directamente al negocio. Polaria no cobra por mensaje ni lleva
    * saldo: solo necesita saber si puede enviar.
    */
-  @Column({ type: 'varchar', length: 16, default: 'UNKNOWN' })
+  @Column({ type: 'varchar', length: 16, default: 'PENDING_SETUP' })
   whatsappBillingStatus!: string;
 
   /** Lo que dijo Meta, con sus palabras. Es lo que se le muestra al negocio. */

@@ -15,30 +15,53 @@
 import { readStoredCredential } from './utils/stored-credential.util';
 
 /**
- * Lo único que podemos afirmar sobre la facturación de una WABA.
+ * Lo que sabemos sobre la facturación de una WABA.
  *
- * Son dos estados y no tres a propósito. Hubo un `READY` y se quitó: lo ponía una
- * sonda que solo sabe leer la moneda configurada, que es **una** de las causas por
- * las que Meta bloquea los envíos —también están el método de pago ausente, el
- * rechazado y el portafolio sin verificar—. Un verde apoyado en esa sonda le
- * prometía al negocio algo que no habíamos comprobado, y encima borraba el
- * diagnóstico real de Meta al hacerlo.
+ * Ninguno de los tres lo escribe una sonda nuestra. Hubo un `READY` que sí, y se
+ * quitó: lo ponía una consulta que solo lee la moneda configurada —una de las causas
+ * por las que Meta bloquea los envíos, no la única—, así que prometía algo que nunca
+ * comprobamos y encima borraba el diagnóstico real de Meta al hacerlo.
  *
- * La única confirmación de que un negocio puede enviar es que un envío no falle.
- * Mientras tanto, o Meta nos dijo que hay un problema, o no sabemos.
+ * Lo que reemplaza a ese verde no es una comprobación nuestra sino un hecho
+ * documentado: Meta exige que todo cliente de un Tech Provider agregue su propio
+ * método de pago **después** del onboarding, y sin él los envíos de plantilla fallan.
+ * Es decir que el paso está pendiente para todos hasta que alguien lo haga, y eso lo
+ * sabemos sin preguntarle nada a nadie.
+ *
+ * La confirmación de que un negocio puede enviar sigue siendo un envío que no falle.
  */
 export enum WhatsappBillingStatus {
   /**
-   * No sabemos, y **no bloquea nada**.
+   * El negocio todavía no dijo haber agregado el método de pago en Meta. **Bloquea.**
    *
-   * Es el estado inicial, y también al que se vuelve cuando el negocio dice que ya
-   * configuró: es honesto —no lo comprobamos— y deja pasar, que es lo que
-   * corresponde cuando la duda es nuestra y no de Meta.
+   * Es el estado inicial, y no una sospecha: Meta lo pide para todos. Bloquear acá es
+   * lo que evita que el negocio active las notificaciones, se olvide del asunto y se
+   * entere recién cuando un mensaje no llegue.
+   */
+  PENDING_SETUP = 'PENDING_SETUP',
+  /**
+   * El negocio dice que lo configuró. **No bloquea.**
+   *
+   * Se llama así y no `READY` a propósito: no lo verificamos, le creímos. Si no era
+   * cierto, el próximo envío fallido lo corrige.
    */
   UNKNOWN = 'UNKNOWN',
-  /** Meta rechazó un envío por facturación. Ver `BILLING_ERROR_CODES`. */
+  /** Meta rechazó un envío por facturación. **Bloquea.** Ver `BILLING_ERROR_CODES`. */
   ACTION_REQUIRED = 'ACTION_REQUIRED',
 }
+
+/**
+ * Si este estado impide activar las notificaciones.
+ *
+ * Los dos que bloquean lo hacen por razones distintas —uno porque falta un paso que
+ * Meta exige, el otro porque Meta ya rechazó— y de las dos se sale igual: el negocio
+ * confirma que lo resolvió.
+ */
+export const blocksNotifications = (status: string): boolean =>
+  // `String(...)` porque el estado viaja como `varchar` desde la BD: sin esto,
+  // comparar la columna con el enum es un error de tipos y no una comparación.
+  status === String(WhatsappBillingStatus.PENDING_SETUP) ||
+  status === String(WhatsappBillingStatus.ACTION_REQUIRED);
 
 /**
  * Los códigos de Meta que significan **con certeza** un problema de facturación.
@@ -118,10 +141,80 @@ export const buildBillingSetupUrl = (params: {
  *
  * **No es un veredicto.** Antes esto devolvía un estado, y ahí estaba el error: tener
  * moneda configurada no dice nada del método de pago, ni de si fue rechazado, ni de
- * la verificación del portafolio. Se guarda como dato de diagnóstico —para poder
- * responder algún día si Meta devuelve una moneda por defecto en cuentas sin
- * facturar, que hoy no sabemos— y nada más.
+ * la verificación del portafolio. Se guarda como dato de diagnóstico y nada más; la
+ * pregunta de si el negocio puede enviar la contesta `health_status`.
  */
 export const normalizeBillingCurrency = (
   currency: string | null | undefined,
 ): string | null => currency?.trim() || null;
+
+/** Lo que Meta devuelve en `health_status` de la WABA. */
+export interface WabaHealthStatus {
+  can_send_message?: string;
+  entities?: {
+    entity_type?: string;
+    id?: string;
+    can_send_message?: string;
+    errors?: {
+      error_code?: number;
+      error_description?: string;
+      possible_solution?: string;
+    }[];
+  }[];
+}
+
+/** El veredicto de Meta sobre si esta WABA puede enviar. */
+export interface HealthVerdict {
+  /** `true` solo si Meta dijo `BLOCKED`. La duda no cuenta como bloqueo. */
+  blocked: boolean;
+  /** La explicación de Meta, con su solución sugerida si la trajo. */
+  reason: string | null;
+}
+
+/**
+ * Lee el veredicto de Meta sobre si la WABA puede enviar mensajes.
+ *
+ * `health_status` es la pregunta correcta, y llegamos tarde a ella: la sonda anterior
+ * miraba `currency`, que solo cubre una de las causas por las que Meta bloquea. Este
+ * campo contesta literalmente `can_send_message`, y cuando dice `BLOCKED` trae el
+ * código, la descripción y la solución sugerida.
+ *
+ * **Solo `BLOCKED` es concluyente.** `AVAILABLE` no se toma como permiso: la
+ * documentación de Meta no dice que el problema de facturación aparezca acá, así que
+ * un verde de este campo podría no estar mirando lo que nos interesa. Se usa entonces
+ * en una sola dirección —para bloquear, nunca para desbloquear—, que es la dirección
+ * en la que equivocarse no le rompe nada a nadie.
+ *
+ * `LIMITED` tampoco bloquea: significa que puede enviar con restricciones.
+ */
+export const readHealthVerdict = (
+  health: WabaHealthStatus | null | undefined,
+): HealthVerdict => {
+  if (!health) return { blocked: false, reason: null };
+
+  const blockedEntities = (health.entities ?? []).filter(
+    (entity) => entity.can_send_message === 'BLOCKED',
+  );
+
+  if (health.can_send_message !== 'BLOCKED' && blockedEntities.length === 0) {
+    return { blocked: false, reason: null };
+  }
+
+  const error = blockedEntities
+    .flatMap((entity) => entity.errors ?? [])
+    .find((candidate) => candidate.error_description);
+
+  /*
+   * El texto se arma con la descripción y la solución de Meta, en ese orden, porque
+   * es lo que el negocio necesita leer: qué pasa y qué hacer. Escribirlo nosotros
+   * sería traducir un mensaje que Meta ya redactó para este caso exacto.
+   */
+  const reason = error
+    ? [error.error_description, error.possible_solution]
+        .filter(Boolean)
+        .join(' ')
+        .trim()
+    : null;
+
+  return { blocked: true, reason: reason || null };
+};
