@@ -13,6 +13,7 @@ import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 import { Actor, type AuthenticatedActor } from '../auth/actor';
+import { AppointmentsService } from '../appointments/appointments.service';
 import { ClientsService } from './clients.service';
 import { ClientSource } from './entities/client.entity';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -32,7 +33,10 @@ import { ListClientsQueryDto } from './dto/list-clients-query.dto';
 @AdminOnly()
 @Controller('clients')
 export class ClientsController {
-  constructor(private readonly clientsService: ClientsService) {}
+  constructor(
+    private readonly clientsService: ClientsService,
+    private readonly appointmentsService: AppointmentsService,
+  ) {}
 
   @Post()
   create(
@@ -49,6 +53,11 @@ export class ClientsController {
       phone: { kind: 'typed', value: createClientDto.phone },
       name: createClientDto.name,
       source: ClientSource.PANEL,
+      profile: {
+        email: createClientDto.email,
+        birthDate: createClientDto.birthDate,
+        notes: createClientDto.notes,
+      },
     });
   }
 
@@ -92,6 +101,36 @@ export class ClientsController {
   @Get(':id')
   findOne(@Actor() actor: AuthenticatedActor, @Param('id') id: string) {
     return this.clientsService.findOneByTenant(id, actor.tenantId);
+  }
+
+  @Get(':id/summary')
+  summary(@Actor() actor: AuthenticatedActor, @Param('id') id: string) {
+    return this.clientsService.getSummary(id, actor.tenantId);
+  }
+
+  /**
+   * El historial de citas del cliente.
+   *
+   * Cuelga de `/clients` porque es como se lee —"las citas de esta persona"— pero
+   * lo resuelve `AppointmentsService`, que ya tiene los joins y el mapeo. Duplicar
+   * esa consulta acá haría que la ficha y la agenda muestren cosas distintas en
+   * cuanto una de las dos agregue un dato.
+   */
+  @Get(':id/appointments')
+  async appointments(
+    @Actor() actor: AuthenticatedActor,
+    @Param('id') id: string,
+    @Query() query: ListClientsQueryDto,
+  ) {
+    // Comprueba que el cliente sea de este negocio antes de listar nada.
+    await this.clientsService.findOneByTenant(id, actor.tenantId);
+
+    return this.appointmentsService.findPageByClient(
+      actor.tenantId,
+      id,
+      query.page,
+      query.limit,
+    );
   }
 
   @Patch(':id')

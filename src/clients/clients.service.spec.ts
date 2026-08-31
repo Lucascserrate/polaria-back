@@ -232,6 +232,47 @@ describe('ClientsService.resolveByPhone', () => {
     expect(rows).toHaveLength(1);
   });
 
+  it('guarda el resto de la ficha cuando el alta la trae', async () => {
+    // El alta del panel manda email y cumpleaños en el mismo formulario. Se
+    // perdían en silencio: el formulario los aceptaba y la ficha quedaba vacía.
+    const { service } = setup();
+
+    const client = await service.resolveByPhone({
+      tenantId: 'tenant-1',
+      phone: { kind: 'typed', value: '70123456' },
+      source: ClientSource.PANEL,
+      name: 'Ana Quispe',
+      profile: { email: 'ana@ejemplo.com', birthDate: '1994-03-17' },
+    });
+
+    expect(client.email).toBe('ana@ejemplo.com');
+    expect(client.birthDate).toBe('1994-03-17');
+  });
+
+  it('no pisa la ficha del cliente que ya existe', async () => {
+    // Misma regla que el nombre: lo cargado antes vale más que lo que trae este
+    // formulario, que puede ser una carga apurada de alguien que no lo conocía.
+    const { service } = setup();
+
+    await service.resolveByPhone({
+      tenantId: 'tenant-1',
+      phone: { kind: 'typed', value: '70123456' },
+      source: ClientSource.PANEL,
+      name: 'Ana Quispe',
+      profile: { email: 'ana@ejemplo.com' },
+    });
+
+    const otra = await service.resolveByPhone({
+      tenantId: 'tenant-1',
+      phone: { kind: 'whatsapp', value: '59170123456' },
+      source: ClientSource.WHATSAPP,
+      name: 'Ana',
+      profile: { email: 'otro@ejemplo.com' },
+    });
+
+    expect(otra.email).toBe('ana@ejemplo.com');
+  });
+
   it('reactiva al cliente dado de baja que vuelve a reservar', async () => {
     /*
      * Su historial sigue siendo suyo, así que se lo devuelve al ruedo en vez de

@@ -10,6 +10,7 @@ import { Brackets, EntityManager, Repository } from 'typeorm';
 
 import {
   Appointment,
+  AppointmentStatus,
   BLOCKING_APPOINTMENT_STATUSES,
 } from '../appointments/entities/appointment.entity';
 import { isDuplicateEntryError } from '../database/duplicate-entry.util';
@@ -37,6 +38,40 @@ export interface ResolveClientParams {
   name?: string | null;
   /** Por qué puerta entró, si es un alta. Ver `ClientSource`. */
   source: ClientSource;
+  /**
+   * El resto de la ficha, cuando quien llama la tiene. Sólo se usa **al crear**,
+   * igual que el nombre: si el cliente ya existía, lo suyo gana.
+   *
+   * Lo manda el alta del panel, que es el único canal donde alguien se sienta a
+   * cargar estos datos. WhatsApp y la página no los conocen.
+   */
+  profile?: {
+    email?: string | null;
+    birthDate?: string | null;
+    notes?: string;
+  };
+}
+
+/**
+ * Los números de un cliente, para el Resumen de su ficha.
+ *
+ * Ninguno se guarda: todos salen de `appointments`, que ya tiene el estado y la
+ * fecha de cada cita. Guardar contadores obligaría a mantenerlos en los seis
+ * caminos que tocan una cita —crear desde el panel, desde la web, desde
+ * WhatsApp, editar, cancelar, marcar atendida— y es exactamente la clase de dato
+ * que se desincroniza sin que nadie lo note.
+ *
+ * No hay ningún importe. `priceAtBooking` es lo pactado, no lo cobrado, y sin
+ * módulo de pagos un "gasto total" diría un número que el negocio no vio entrar.
+ */
+export interface ClientSummary {
+  totalAppointments: number;
+  completedAppointments: number;
+  cancelledAppointments: number;
+  /** La última que ya ocurrió, o `null` si nunca vino. */
+  lastAppointmentAt: string | null;
+  /** La próxima que todavía ocupa agenda, o `null`. */
+  nextAppointmentAt: string | null;
 }
 
 /** Una página de la lista de clientes del panel. */
@@ -120,6 +155,68 @@ export class ClientsService {
 
   findOne(id: string): Promise<Client | null> {
     return this.clientRepository.findOneBy({ id });
+  }
+
+  /**
+   * Los números del cliente, en una sola consulta agrupada.
+   *
+   * Se resuelve de una y no con cinco consultas porque las cinco preguntas son
+   * sobre el mismo conjunto de filas, y separarlas dejaría que dos de ellas
+   * vieran estados distintos de la base —una cita creada en el medio aparecería
+   * en el total pero no en la próxima—.
+   */
+  async getSummary(id: string, tenantId: string): Promise<ClientSummary> {
+    await this.findOneByTenant(id, tenantId);
+
+    const now = new Date();
+    const row = await this.clientRepository.manager
+      .createQueryBuilder(Appointment, 'appointment')
+      .select('COUNT(*)', 'total')
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :completed THEN 1 ELSE 0 END)`,
+        'completed',
+      )
+      .addSelect(
+        `SUM(CASE WHEN appointment.status = :cancelled THEN 1 ELSE 0 END)`,
+        'cancelled',
+      )
+      /*
+       * La última visita se cuenta sólo entre las atendidas. Una cancelada no es
+       * una visita: decir "última cita: 3 de agosto" por un turno al que la
+       * persona no fue haría que el negocio la trate como alguien que vino hace
+       * poco.
+       */
+      .addSelect(
+        `MAX(CASE WHEN appointment.status = :completed THEN appointment.startTime END)`,
+        'lastAt',
+      )
+      .addSelect(
+        `MIN(CASE WHEN appointment.status IN (:...activeStatuses) AND appointment.startTime >= :now THEN appointment.startTime END)`,
+        'nextAt',
+      )
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.clientId = :clientId', { clientId: id })
+      .setParameters({
+        completed: AppointmentStatus.COMPLETED,
+        cancelled: AppointmentStatus.CANCELLED,
+        activeStatuses: [...BLOCKING_APPOINTMENT_STATUSES],
+        now,
+      })
+      .getRawOne<{
+        total: string;
+        completed: string | null;
+        cancelled: string | null;
+        lastAt: Date | null;
+        nextAt: Date | null;
+      }>();
+
+    return {
+      totalAppointments: Number(row?.total ?? 0),
+      completedAppointments: Number(row?.completed ?? 0),
+      cancelledAppointments: Number(row?.cancelled ?? 0),
+      lastAppointmentAt: row?.lastAt ? row.lastAt.toISOString() : null,
+      nextAppointmentAt: row?.nextAt ? row.nextAt.toISOString() : null,
+    };
   }
 
   /** El cliente, comprobando que sea de este negocio. Lanza 404 si no. */
@@ -272,6 +369,9 @@ export class ClientsService {
           phone,
           name: name ?? undefined,
           createdVia: params.source,
+          email: params.profile?.email?.trim() || null,
+          birthDate: params.profile?.birthDate || null,
+          notes: params.profile?.notes?.trim() || undefined,
         }),
       );
     } catch (error: unknown) {

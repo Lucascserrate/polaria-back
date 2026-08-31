@@ -435,6 +435,66 @@ export class AppointmentsService {
    * flujos internos: esa arrastra la relación `tenant` con el token de WhatsApp
    * adentro, y eso no puede viajar al navegador.
    */
+  /**
+   * El historial de citas de un cliente, de la más nueva a la más vieja.
+   *
+   * Vive acá y no en `clients` para no reescribir los joins ni el mapeo a
+   * `AppointmentItem`: la ficha del cliente muestra las mismas citas que la
+   * agenda, con los mismos datos, y dos consultas que arman lo mismo se separan
+   * a la primera columna que se agregue de un solo lado.
+   *
+   * No filtra por estado. Una cancelada es parte del historial —dice que la
+   * persona reservó y no vino— y esconderla haría que la ficha contradiga al
+   * Resumen, que sí las cuenta.
+   */
+  async findPageByClient(
+    tenantId: string,
+    clientId: string,
+    page = 1,
+    limit = 20,
+  ): Promise<{
+    items: AppointmentItem[];
+    total: number;
+    page: number;
+    limit: number;
+    hasMore: boolean;
+  }> {
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+
+    const [appointments, total] = await this.appointmentRepository
+      .createQueryBuilder('appointment')
+      .leftJoinAndSelect('appointment.tenant', 'tenant')
+      .leftJoinAndSelect('appointment.client', 'client')
+      .leftJoinAndSelect('appointment.services', 'appointmentServices')
+      .leftJoinAndSelect('appointmentServices.service', 'service')
+      .leftJoinAndSelect('appointmentServices.staff', 'staff')
+      // Conserva al profesional dado de baja: la cita ya ocurrió y su historial
+      // no debe perder quién atendió.
+      .withDeleted()
+      .where('appointment.tenantId = :tenantId', { tenantId })
+      .andWhere('appointment.clientId = :clientId', { clientId })
+      .orderBy('appointment.startTime', 'DESC')
+      .skip((safePage - 1) * safeLimit)
+      .take(safeLimit)
+      .getManyAndCount();
+
+    const items = appointments.map((appointment) =>
+      toAppointmentItem(
+        appointment,
+        appointment.tenant?.timezone ?? DEFAULT_TIMEZONE,
+      ),
+    );
+
+    return {
+      items,
+      total,
+      page: safePage,
+      limit: safeLimit,
+      hasMore: (safePage - 1) * safeLimit + items.length < total,
+    };
+  }
+
   async findDetailByTenant(
     id: string,
     tenantId: string,
