@@ -37,6 +37,14 @@ export class ClientsController {
     return this.clientsService.create(createClientDto);
   }
 
+  /**
+   * El cliente de una reserva del panel: se reutiliza el que ya existe o se crea.
+   *
+   * Con teléfono pasa por el mismo resolver que WhatsApp y la página pública, y
+   * por eso reconoce a quien ya reservó por cualquiera de los dos. Sin teléfono
+   * no hay nada que reconocer y se crea uno nuevo cada vez; es el camino que
+   * queda por cerrar del lado de la agenda.
+   */
   @UseGuards(AuthGuard('jwt'))
   @Post('find-or-create')
   findOrCreate(
@@ -47,11 +55,20 @@ export class ClientsController {
     if (!tenantId) {
       throw new UnauthorizedException('Missing tenant id');
     }
-    return this.clientsService.findOrCreateByPhone(
+
+    const typedPhone = findOrCreateDto.phone?.trim();
+    if (!typedPhone) {
+      return this.clientsService.createUnidentified(
+        tenantId,
+        findOrCreateDto.name,
+      );
+    }
+
+    return this.clientsService.resolveByPhone({
       tenantId,
-      findOrCreateDto.name,
-      findOrCreateDto.phone,
-    );
+      phone: { kind: 'typed', value: typedPhone },
+      name: findOrCreateDto.name,
+    });
   }
 
   @UseGuards(AuthGuard('jwt'))

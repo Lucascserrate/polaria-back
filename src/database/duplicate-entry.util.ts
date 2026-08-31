@@ -5,11 +5,12 @@ const MYSQL_DUPLICATE_ENTRY_ERRNO = 1062;
 /**
  * Reconoce el fallo de índice único sin acoplar el llamador al driver.
  *
- * Vive acá y no dentro de un módulo de dominio porque son dos los que dependen
+ * Vive acá y no dentro de un módulo de dominio porque son tres los que dependen
  * de un índice único como última barrera: la reserva doble sobre
- * `(staffId, activeStartTime)` y la cuenta duplicada sobre `googleId`. En los
- * dos casos el choque no es un error del sistema, es una carrera legítima que
- * hay que traducir a una respuesta de producto.
+ * `(staffId, activeStartTime)`, la cuenta duplicada sobre `googleId` y el mismo
+ * cliente entrando dos veces por `(tenantId, phone)`. En los tres casos el
+ * choque no es un error del sistema, es una carrera legítima que hay que
+ * traducir a una respuesta de producto.
  */
 export function isDuplicateEntryError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;

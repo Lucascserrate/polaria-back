@@ -62,3 +62,53 @@ export function normalizeClientPhone(
   const withDialCode = `${dialCode}${digits}`;
   return withDialCode.length <= MAX_DIGITS ? withDialCode : null;
 }
+
+/**
+ * Valida un teléfono que ya viene en el formato de referencia.
+ *
+ * Es el `wa_id` de Meta: E.164 sin `+`, con el país del cliente, no el del
+ * negocio. Sólo se comprueba que sea un teléfono; **no** se le antepone ningún
+ * prefijo, y ahí está toda la razón de que esta función exista aparte.
+ *
+ * Pasar un `wa_id` por `normalizeClientPhone` rompe a cualquier cliente que no
+ * sea del país del negocio, de dos maneras y las dos malas. Al argentino que le
+ * escribe a una barbería boliviana —`5491123456789`, que no empieza con `591`—
+ * se le anteponía el prefijo, el resultado pasaba de quince dígitos y el número
+ * se descartaba entero. Al colombiano —`573001234567`, más corto— el resultado
+ * entraba justo en el límite y se guardaba `591573001234567`: un número que no
+ * existe, en un cliente que parece normal, y con un recordatorio en camino a
+ * ninguna parte.
+ */
+export function canonicalizeWhatsAppPhone(waId: string): string | null {
+  const digits = waId.trim().replace(/\D/g, '');
+
+  if (digits.length < MIN_LOCAL_DIGITS) return null;
+  if (digits.length > MAX_DIGITS) return null;
+
+  return digits;
+}
+
+/**
+ * De dónde salió el teléfono, que es lo que decide cómo se lee.
+ *
+ * La distinción es del canal, no del número: los mismos dígitos significan una
+ * cosa viniendo de Meta y otra viniendo de un formulario. Se declara en el
+ * llamador porque es el único que lo sabe, y se declara explícitamente porque la
+ * alternativa —adivinarlo mirando el número— es justamente lo que corrompía
+ * datos en silencio.
+ */
+export type ClientPhoneInput =
+  /** El `wa_id` de Meta. Ya es canónico: se valida y se usa tal cual. */
+  | { kind: 'whatsapp'; value: string }
+  /**
+   * Lo escribió una persona en un formulario. Se normaliza contra el prefijo
+   * del país del negocio, porque casi siempre va a escribir su número local.
+   */
+  | { kind: 'typed'; value: string; dialCode: string };
+
+/** El teléfono listo para guardar, o `null` si no es utilizable. */
+export function resolveClientPhone(input: ClientPhoneInput): string | null {
+  return input.kind === 'whatsapp'
+    ? canonicalizeWhatsAppPhone(input.value)
+    : normalizeClientPhone(input.value, input.dialCode);
+}

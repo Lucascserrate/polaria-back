@@ -52,7 +52,8 @@ export class Client {
   /**
    * Obligatorio para los clientes de WhatsApp, opcional para los que el negocio
    * carga desde el panel. Nunca cadena vacía: dos vacías chocarían en el índice
-   * único, así que `findOrCreateByPhone` la normaliza a `NULL`.
+   * único, así que nunca se escribe: quien no tiene teléfono se da de alta por
+   * `createUnidentified`, que lo deja en `NULL`.
    */
   @Column({ type: 'varchar', nullable: true })
   phone?: string | null;

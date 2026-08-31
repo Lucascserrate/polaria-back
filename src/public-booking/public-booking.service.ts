@@ -12,7 +12,6 @@ import { BookingAvailabilityService } from '../availability/booking/booking-avai
 import { currentDateInTimeZone } from '../availability/utils/availability.helpers';
 import { resolveBusinessStatus } from '../business_hours/business-status';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
-import { normalizeClientPhone } from '../clients/client-phone.util';
 import { ClientsService } from '../clients/clients.service';
 import { ServicesService } from '../services/services.service';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
@@ -193,16 +192,6 @@ export class PublicBookingService {
       throw new BadRequestException('startTime inválido');
     }
 
-    const phone = normalizeClientPhone(
-      input.customerPhone,
-      dialCodeForTimeZone(tenant.timezone),
-    );
-    if (!phone) {
-      throw new BadRequestException(
-        'El teléfono no parece válido. Revisalo y probá de nuevo.',
-      );
-    }
-
     const service = await this.servicesService.findOneByTenant(
       input.serviceId,
       tenant.id,
@@ -229,11 +218,22 @@ export class PublicBookingService {
       throw new ConflictException(SLOT_TAKEN_MESSAGE);
     }
 
-    const client = await this.clientsService.findOrCreateByPhone(
-      tenant.id,
-      input.customerName.trim(),
-      phone,
-    );
+    /*
+     * El teléfono lo normaliza el resolver, no esta página. Es lo que hace que
+     * quien reserva acá y quien escribe por WhatsApp sean el mismo cliente: si
+     * cada canal normalizara por su cuenta, alcanzaría con que uno lo hiciera
+     * distinto para partirle el historial. Un número ilegible sale de acá como
+     * un 400 con el motivo, igual que antes.
+     */
+    const client = await this.clientsService.resolveByPhone({
+      tenantId: tenant.id,
+      phone: {
+        kind: 'typed',
+        value: input.customerPhone,
+        dialCode: dialCodeForTimeZone(tenant.timezone),
+      },
+      name: input.customerName.trim(),
+    });
 
     try {
       const appointment = await this.appointmentsService.createFromBookingFlow({
