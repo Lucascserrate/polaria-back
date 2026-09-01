@@ -46,9 +46,10 @@ export class CreateTenantDto {
   @IsLongitude()
   longitude?: number | null;
 
-  @ApiProperty()
+  @ApiPropertyOptional()
+  @IsOptional()
   @IsString()
-  whatsappPhoneNumber?: string;
+  whatsappPhoneNumber?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
