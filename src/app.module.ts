@@ -27,6 +27,7 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { FlowsModule } from './flows/flows.module';
 import { ReportsModule } from './reports/reports.module';
 import { PublicBookingModule } from './public-booking/public-booking.module';
+import { SupportModule } from './support/support.module';
 
 @Module({
   imports: [
@@ -70,6 +71,7 @@ import { PublicBookingModule } from './public-booking/public-booking.module';
     FlowsModule,
     ReportsModule,
     PublicBookingModule,
+    SupportModule,
   ],
 })
 export class AppModule {}
