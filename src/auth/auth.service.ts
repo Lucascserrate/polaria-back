@@ -224,6 +224,11 @@ export class AuthService {
       businessName: tenant.name,
       role: actor.role,
       staffId: actor.staffId,
+      // Lo consume la barra de suplantación del panel. Va acá y no en una ruta
+      // propia porque es un dato de "quién sos ahora", y esto ya es esa
+      // pregunta: una ruta aparte se podría no llamar, y entonces alguien
+      // estaría dentro de un negocio ajeno sin que la pantalla lo dijera.
+      impersonatedBy: actor.impersonatedBy,
     };
   }
 

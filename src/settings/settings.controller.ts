@@ -12,6 +12,7 @@ import {
 import { ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
 import { AdminOnly, Roles, RolesGuard } from '../auth/guards/roles.guard';
+import { NoImpersonationGuard } from '../auth/guards/no-impersonation.guard';
 import { Actor, type AuthenticatedActor } from '../auth/actor';
 import { STAFF_ACCESS_ROLES } from '../staff/staff-role';
 import type { Request } from 'express';
@@ -68,7 +69,7 @@ export class SettingsController {
     return this.settingsService.updateSettings(tenantId, updateSettingsDto);
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), NoImpersonationGuard)
   @Patch('whatsapp/embedded-signup')
   completeWhatsappEmbeddedSignup(
     @Req() req: Request,
@@ -124,7 +125,7 @@ export class SettingsController {
     return this.settingsService.refreshWhatsappBilling(actor.tenantId);
   }
 
-  @UseGuards(AuthGuard('jwt'))
+  @UseGuards(AuthGuard('jwt'), NoImpersonationGuard)
   @Post('whatsapp/disconnect')
   disconnectWhatsapp(@Req() req: Request) {
     const tenantId = (req.user as { sub?: string }).sub;

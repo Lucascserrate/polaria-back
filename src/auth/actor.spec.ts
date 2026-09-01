@@ -15,7 +15,39 @@ describe('actorFrom', () => {
       staffId: 'staff-9',
       role: StaffAccessRole.PROFESSIONAL,
       email: 'marco@barberia.com',
+      impersonatedBy: null,
     });
+  });
+
+  /*
+   * La sesión de soporte es, para todo el backend, una sesión de dueño: mismo
+   * tenant y mismo rol, porque el objetivo es ver lo mismo que ve el negocio.
+   * Lo único que la distingue es de dónde vino, y eso es lo que se comprueba acá.
+   */
+  it('un token de soporte dice quién lo abrió, y sigue siendo del dueño', () => {
+    const actor = actorFrom({
+      sub: 'tenant-1',
+      email: 'dueño@barberia.com',
+      role: 'OWNER',
+      imp: true,
+      act: 'soporte@polaria.com',
+    });
+
+    expect(actor.impersonatedBy).toBe('soporte@polaria.com');
+    expect(actor.role).toBe(StaffAccessRole.OWNER);
+    expect(actor.tenantId).toBe('tenant-1');
+  });
+
+  /*
+   * `imp` sin `act` no debería existir —lo firma una sola función— pero si
+   * apareciera, lo importante es que siga contando como suplantación: leerlo
+   * como una sesión normal sería perder el bloqueo de envíos y la barra en
+   * pantalla justo en el token que vino raro.
+   */
+  it('una sesión marcada sin autor sigue siendo de soporte', () => {
+    expect(actorFrom({ sub: 'tenant-1', imp: true }).impersonatedBy).toBe(
+      'desconocido',
+    );
   });
 
   /*

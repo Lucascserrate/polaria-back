@@ -21,6 +21,14 @@ export interface AuthenticatedActor {
   staffId: string | null;
   role: StaffAccessRole;
   email: string | null;
+  /**
+   * Correo del super admin que abrió esta sesión, o `null` si entró el negocio.
+   *
+   * No cambia lo que la sesión **es** —para todo el backend sigue siendo el
+   * dueño— sino de dónde viene. Es lo que permite que un log diga quién hizo
+   * algo y que la pantalla avise que no estás en tu propio negocio.
+   */
+  impersonatedBy: string | null;
 }
 
 /** El payload tal como lo firma `createJwtToken`. */
@@ -29,6 +37,10 @@ export interface JwtPayload {
   email?: string | null;
   actorId?: string | null;
   role?: string | null;
+  /** Sesión abierta por soporte para mirar este negocio. Ver `impersonation.ts`. */
+  imp?: boolean;
+  /** Correo del super admin que la abrió. `act` por RFC 8693. */
+  act?: string | null;
 }
 
 /**
@@ -50,6 +62,7 @@ export const actorFrom = (payload: JwtPayload): AuthenticatedActor => {
     staffId,
     role: resolveRole(payload.role, staffId),
     email: payload.email ?? null,
+    impersonatedBy: payload.imp ? (payload.act ?? 'desconocido') : null,
   };
 };
 

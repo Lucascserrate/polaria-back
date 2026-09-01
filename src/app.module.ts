@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -28,6 +29,7 @@ import { FlowsModule } from './flows/flows.module';
 import { ReportsModule } from './reports/reports.module';
 import { PublicBookingModule } from './public-booking/public-booking.module';
 import { SupportModule } from './support/support.module';
+import { ImpersonationInterceptor } from './auth/impersonation.interceptor';
 
 @Module({
   imports: [
@@ -73,5 +75,9 @@ import { SupportModule } from './support/support.module';
     PublicBookingModule,
     SupportModule,
   ],
+  // Global porque una sesión de soporte lo es en toda la aplicación: si hubiera
+  // que registrarlo módulo por módulo, el que se olvidara sería justo por donde
+  // se escaparía un mensaje a un cliente real. Ver `impersonation.ts`.
+  providers: [{ provide: APP_INTERCEPTOR, useClass: ImpersonationInterceptor }],
 })
 export class AppModule {}

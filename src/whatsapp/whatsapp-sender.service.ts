@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
+import { currentImpersonation } from '../auth/impersonation';
+
 import {
   buildButtonsPayload,
   buildFlowPayload,
@@ -101,6 +103,27 @@ export class WhatsAppSenderService {
     kind: string,
     built: BuiltMessage,
   ): Promise<SendResult> {
+    /*
+     * Nada sale hacia afuera desde una sesión de soporte.
+     *
+     * Va acá y no en cada ruta porque el envío casi nunca es lo que se pidió:
+     * mover una cita avisa al profesional, y quien está mirando el negocio de
+     * otro para entender un problema no tiene por qué hacerle sonar el teléfono
+     * a alguien que no sabe que hay soporte adentro. Esta es la única salida a
+     * la Cloud API, así que taparla acá los tapa todos.
+     *
+     * Se devuelve un fallo normal —no una excepción— para que el resto de la
+     * operación siga su curso: la cita se guarda igual, y lo único que no ocurre
+     * es el aviso.
+     */
+    const impersonation = currentImpersonation();
+    if (impersonation) {
+      this.logger.warn(
+        `WhatsApp ${kind} bloqueado: sesión de soporte (by=${impersonation.by}, tenantId=${impersonation.tenantId}, to=${to}).`,
+      );
+      return { ok: false, error: 'IMPERSONATION_BLOCKED' };
+    }
+
     for (const warning of built.warnings) {
       this.logger.warn(`WhatsApp ${kind} (to=${to}): ${warning}`);
     }

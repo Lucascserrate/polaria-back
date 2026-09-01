@@ -52,3 +52,44 @@ const signPayload = (payload: JwtPayload, jwtService: JwtService) => ({
     secret: jwtSecret,
   }),
 });
+
+/**
+ * Duración de una sesión de soporte.
+ *
+ * Una hora y no los treinta días de un login normal: se entra a un negocio
+ * ajeno para resolver algo puntual, no para quedarse. Si vence a mitad de
+ * camino se vuelve a pedir desde el panel, que es un click.
+ */
+export const IMPERSONATION_TTL = '1h';
+
+/**
+ * El token con el que soporte mira un negocio desde adentro.
+ *
+ * Para todo el backend es una sesión de dueño —mismo `sub`, mismo `role`—
+ * porque el objetivo es ver exactamente lo que ve el negocio: un rol especial
+ * daría una vista que nadie más tiene, y entonces no serviría para reproducir el
+ * problema que el dueño está reportando.
+ *
+ * Lo que sí lo distingue son `imp` y `act`, y esa es toda la diferencia: sin
+ * ellos el token sería indistinguible del que se emite en un login real, y
+ * ningún log podría decir después quién estuvo adentro.
+ *
+ * No se emite `refreshToken` a propósito: renovarse sola convertiría una sesión
+ * de una hora en una permanente.
+ */
+export const createImpersonationToken = (
+  tenant: Tenant,
+  superAdminEmail: string,
+  jwtService: JwtService,
+): string =>
+  jwtService.sign(
+    {
+      sub: tenant.id,
+      email: tenant.email ?? null,
+      actorId: null,
+      role: StaffAccessRole.OWNER,
+      imp: true,
+      act: superAdminEmail,
+    },
+    { expiresIn: IMPERSONATION_TTL, secret: jwtSecret },
+  );
