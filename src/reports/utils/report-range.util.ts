@@ -49,6 +49,15 @@ const lastDayOfMonth = (isoDate: string): string => {
   return new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 };
 
+/** Cuántos días de calendario cubre el rango, contando los dos extremos. */
+const dayCount = (from: string, to: string): number => {
+  const at = (isoDate: string) => {
+    const [year, month, day] = isoDate.split('-').map(Number);
+    return Date.UTC(year, month - 1, day);
+  };
+  return Math.round((at(to) - at(from)) / 86_400_000) + 1;
+};
+
 const resolveDays = (
   preset: ReportPreset,
   today: string,
@@ -87,6 +96,18 @@ const resolveDays = (
   }
 };
 
+/** Un rango de fechas del negocio llevado a instantes. */
+const buildRange = (
+  from: string,
+  to: string,
+  timeZone: string,
+): ReportRange => ({
+  from,
+  to,
+  startUtc: makeDateInTimeZone(from, '00:00', timeZone),
+  endUtc: makeDateInTimeZone(shiftDays(to, 1), '00:00', timeZone),
+});
+
 /**
  * Traduce el filtro que eligió el dueño a un intervalo de instantes.
  *
@@ -109,10 +130,39 @@ export const resolveReportRange = (
     query.to,
   );
 
-  return {
-    from,
-    to,
-    startUtc: makeDateInTimeZone(from, '00:00', timeZone),
-    endUtc: makeDateInTimeZone(shiftDays(to, 1), '00:00', timeZone),
-  };
+  return buildRange(from, to, timeZone);
+};
+
+/**
+ * El período inmediatamente anterior al que se está mirando, para comparar.
+ *
+ * La regla general es "la misma cantidad de días, pegados justo antes": para
+ * `today` da ayer, para `week` da el lunes a domingo anterior, y para un rango a
+ * medida de nueve días da los nueve días previos.
+ *
+ * `month` es la excepción y tiene que serlo: corriendo 31 días hacia atrás desde
+ * el 1 de marzo se cae en el 29 de enero, y nadie compara marzo contra "casi
+ * febrero". Un mes se compara con el mes de calendario anterior aunque midan
+ * distinto, porque eso es lo que la gente quiere decir con "el mes pasado".
+ *
+ * Se deriva del rango ya resuelto y no de `now`: así el período anterior de un
+ * rango personalizado no depende de qué día se lo consulte.
+ */
+export const previousReportRange = (
+  range: ReportRange,
+  preset: ReportPreset,
+  timeZone: string,
+): ReportRange => {
+  if (preset === 'month') {
+    // El día previo al primero del mes es el último del mes anterior.
+    const lastDay = shiftDays(`${range.from.slice(0, 7)}-01`, -1);
+    return buildRange(`${lastDay.slice(0, 7)}-01`, lastDay, timeZone);
+  }
+
+  const length = dayCount(range.from, range.to);
+  return buildRange(
+    shiftDays(range.from, -length),
+    shiftDays(range.from, -1),
+    timeZone,
+  );
 };

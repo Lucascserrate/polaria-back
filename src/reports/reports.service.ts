@@ -12,7 +12,16 @@ import { Tenant } from '../tenants/entities/tenant.entity';
 import { TenantError } from '../tenants/enums/tenant.enum';
 import { ReportQueryDto } from './dto/report-query.dto';
 import { Staff } from '../staff/entities/staff.entity';
-import { ReportRange, resolveReportRange } from './utils/report-range.util';
+import {
+  ReportRange,
+  previousReportRange,
+  resolveReportRange,
+} from './utils/report-range.util';
+import {
+  estimateCommission,
+  parseCommissionRate,
+} from './utils/commission.util';
+import { toMoney, toNumber } from './utils/report-numbers.util';
 import {
   buildReportTimeline,
   type ReportTimeline,
@@ -22,17 +31,11 @@ import {
   ServiceRankingEntry,
   StaffRankingEntry,
   StaffReport,
+  StaffSummary,
   TenantReport,
 } from './reports.types';
 
 const DEFAULT_TIMEZONE = 'America/La_Paz';
-
-/** MySQL devuelve los `SUM`/`COUNT` y los `decimal` como string, o `null`. */
-const toNumber = (value: string | number | null | undefined): number =>
-  Number(value ?? 0);
-
-/** Los montos se exponen ya redondeados: son plata, no promedios crudos. */
-const toMoney = (value: number): number => Math.round(value * 100) / 100;
 
 interface StatusCountRow {
   pending: string | null;
@@ -284,8 +287,7 @@ export class ReportsService {
 
     return rows.map((row) => {
       const revenue = toNumber(row.revenue);
-      const commissionRate =
-        row.commissionRate === null ? null : Number(row.commissionRate);
+      const commissionRate = parseCommissionRate(row.commissionRate);
 
       return {
         staffId: row.staffId,
@@ -293,10 +295,7 @@ export class ReportsService {
         completedAppointments: toNumber(row.completedAppointments),
         revenue: toMoney(revenue),
         commissionRate,
-        estimatedCommission:
-          commissionRate === null
-            ? null
-            : toMoney((revenue * commissionRate) / 100),
+        estimatedCommission: estimateCommission(revenue, commissionRate),
         isFormer: row.deletedAt !== null,
       };
     });
@@ -357,27 +356,47 @@ export class ReportsService {
 
     const timezone = tenant.timezone || DEFAULT_TIMEZONE;
     const now = new Date();
+    const preset = query.preset ?? 'today';
     const range = resolveReportRange(query, timezone, now);
+    const previousRange = previousReportRange(range, preset, timezone);
 
-    const [summary, timeline, serviceRanking, revenueSnapshots] =
-      await Promise.all([
-        this.getStaffSummary(tenantId, staffId, range),
-        this.getStaffTimeline(tenantId, staffId, range, timezone),
-        this.getStaffServiceRanking(tenantId, staffId, range),
-        this.getStaffRevenueSnapshots(tenantId, staffId, timezone, now),
-      ]);
+    /*
+     * La tasa se lee una vez y se le pasa a los dos resúmenes. Es a propósito que
+     * al período anterior se le aplique la tasa de hoy y no la que regía entonces:
+     * la comparación tiene que responder "trabajé más o menos", y con dos tasas
+     * distintas respondería "me cambiaron la comisión", que es otra pregunta.
+     */
+    const commissionRate = parseCommissionRate(staff.commissionRate);
+
+    const [
+      summary,
+      previousSummary,
+      timeline,
+      serviceRanking,
+      revenueSnapshots,
+    ] = await Promise.all([
+      this.getStaffSummary(tenantId, staffId, range, commissionRate),
+      this.getStaffSummary(tenantId, staffId, previousRange, commissionRate),
+      this.getStaffTimeline(tenantId, staffId, range, timezone),
+      this.getStaffServiceRanking(tenantId, staffId, range),
+      this.getStaffRevenueSnapshots(tenantId, staffId, timezone, now),
+    ]);
 
     return {
       range: {
-        preset: query.preset ?? 'today',
+        preset,
         from: range.from,
         to: range.to,
         timezone,
       },
       currency: tenant.currency,
-      staff: { id: staff.id, name: staff.name },
+      staff: { id: staff.id, name: staff.name, commissionRate },
       revenueSnapshots,
       summary,
+      comparison: {
+        range: { from: previousRange.from, to: previousRange.to },
+        summary: previousSummary,
+      },
       timeline,
       serviceRanking,
     };
@@ -395,11 +414,19 @@ export class ReportsService {
     );
   }
 
+  /**
+   * El resumen de un profesional en un rango cualquiera.
+   *
+   * La tasa entra por parámetro en vez de leerse acá adentro porque el reporte
+   * llama a este método dos veces —el período y el anterior— y una segunda lectura
+   * de la misma fila sería una consulta de más para el mismo dato.
+   */
   private async getStaffSummary(
     tenantId: string,
     staffId: string,
     range: ReportRange,
-  ): Promise<StaffReport['summary']> {
+    commissionRate: number | null,
+  ): Promise<StaffSummary> {
     const [counts, billed] = await Promise.all([
       /*
        * Los estados se cuentan sobre citas **distintas** en las que tenga algún
@@ -449,6 +476,7 @@ export class ReportsService {
 
     return {
       revenueTotal: toMoney(revenueTotal),
+      estimatedCommission: estimateCommission(revenueTotal, commissionRate),
       completedCount,
       cancelledCount: toNumber(counts?.cancelled),
       pendingCount: toNumber(counts?.pending),
