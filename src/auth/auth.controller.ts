@@ -12,6 +12,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import type { CookieOptions, Request, Response } from 'express';
 import { AuthService } from './auth.service';
+import { GoogleAuthGuard } from './guards/google-auth.guard';
 import { Actor, type AuthenticatedActor } from './actor';
 import type { GoogleUserDto } from './dto/google-user.dto';
 
@@ -34,7 +35,7 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Get('google')
-  @UseGuards(AuthGuard('google'))
+  @UseGuards(GoogleAuthGuard)
   async googleLogin() {}
 
   @Get('google/callback')
