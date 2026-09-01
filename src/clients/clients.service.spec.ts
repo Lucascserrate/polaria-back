@@ -99,7 +99,7 @@ describe('ClientsService.resolveByPhone', () => {
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
       source: ClientSource.WEB,
-      name: 'Ana Quispe',
+      name: 'Ana García',
     });
 
     expect(porLaWeb.id).toBe(porWhatsApp.id);
@@ -115,7 +115,7 @@ describe('ClientsService.resolveByPhone', () => {
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
       source: ClientSource.WEB,
-      name: 'Ana Quispe',
+      name: 'Ana García',
     });
 
     const otra = await service.resolveByPhone({
@@ -125,7 +125,7 @@ describe('ClientsService.resolveByPhone', () => {
       name: 'anita',
     });
 
-    expect(otra.name).toBe('Ana Quispe');
+    expect(otra.name).toBe('Ana García');
   });
 
   it('conserva el número del cliente extranjero que llega por WhatsApp', async () => {
@@ -241,7 +241,7 @@ describe('ClientsService.resolveByPhone', () => {
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
       source: ClientSource.PANEL,
-      name: 'Ana Quispe',
+      name: 'Ana García',
       profile: { email: 'ana@ejemplo.com', birthDate: '1994-03-17' },
     });
 
@@ -258,7 +258,7 @@ describe('ClientsService.resolveByPhone', () => {
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
       source: ClientSource.PANEL,
-      name: 'Ana Quispe',
+      name: 'Ana García',
       profile: { email: 'ana@ejemplo.com' },
     });
 
@@ -286,7 +286,7 @@ describe('ClientsService.resolveByPhone', () => {
       tenantId: 'tenant-1',
       phone: { kind: 'typed', value: '70123456' },
       source: ClientSource.PANEL,
-      name: 'Ana Quispe',
+      name: 'Ana García',
     });
     rows[0].deletedAt = new Date();
 
@@ -294,7 +294,7 @@ describe('ClientsService.resolveByPhone', () => {
       tenantId: 'tenant-1',
       phone: { kind: 'whatsapp', value: '59170123456' },
       source: ClientSource.WHATSAPP,
-      name: 'Ana',
+      name: 'Ana García',
     });
 
     expect(devuelto.id).toBe(original.id);
