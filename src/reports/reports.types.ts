@@ -92,16 +92,22 @@ export interface StaffReport {
     commissionRate: number | null;
   };
   /**
-   * Facturado hoy, en la semana y en el mes, al margen del período elegido.
+   * Lo generado en el mes en curso, al margen del período elegido.
    *
-   * Van siempre y no dependen del selector porque responden la pregunta con la que
-   * un profesional abre esta pantalla —"cómo vengo"— y esa no debería costar tres
-   * clicks. El resto de las métricas sí sigue al período.
+   * Es la única cifra que no sigue al selector, y sobrevive por un motivo
+   * concreto: quien mira "hoy" a media mañana ve un cero, y necesita el mes al
+   * lado para saber que está viendo una jornada que recién empieza y no una
+   * pantalla rota.
+   *
+   * Antes eran tres —hoy, semana y mes—, que son exactamente las tres opciones del
+   * selector: la pantalla respondía dos veces la misma pregunta, con dos
+   * jerarquías distintas. Quedó la que el selector no puede dar sin perder el
+   * período que se está mirando.
    */
-  revenueSnapshots: {
-    today: number;
-    week: number;
-    month: number;
+  currentMonth: {
+    revenue: number;
+    /** Su parte, o `null` si el negocio no configuró comisión. */
+    estimatedCommission: number | null;
   };
   summary: StaffSummary;
   /**

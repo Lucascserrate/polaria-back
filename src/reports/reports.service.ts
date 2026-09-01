@@ -368,19 +368,20 @@ export class ReportsService {
      */
     const commissionRate = parseCommissionRate(staff.commissionRate);
 
-    const [
-      summary,
-      previousSummary,
-      timeline,
-      serviceRanking,
-      revenueSnapshots,
-    ] = await Promise.all([
-      this.getStaffSummary(tenantId, staffId, range, commissionRate),
-      this.getStaffSummary(tenantId, staffId, previousRange, commissionRate),
-      this.getStaffTimeline(tenantId, staffId, range, timezone),
-      this.getStaffServiceRanking(tenantId, staffId, range),
-      this.getStaffRevenueSnapshots(tenantId, staffId, timezone, now),
-    ]);
+    const [summary, previousSummary, timeline, serviceRanking, currentMonth] =
+      await Promise.all([
+        this.getStaffSummary(tenantId, staffId, range, commissionRate),
+        this.getStaffSummary(tenantId, staffId, previousRange, commissionRate),
+        this.getStaffTimeline(tenantId, staffId, range, timezone),
+        this.getStaffServiceRanking(tenantId, staffId, range),
+        this.getStaffCurrentMonth(
+          tenantId,
+          staffId,
+          timezone,
+          now,
+          commissionRate,
+        ),
+      ]);
 
     return {
       range: {
@@ -391,7 +392,7 @@ export class ReportsService {
       },
       currency: tenant.currency,
       staff: { id: staff.id, name: staff.name, commissionRate },
-      revenueSnapshots,
+      currentMonth,
       summary,
       comparison: {
         range: { from: previousRange.from, to: previousRange.to },
@@ -489,35 +490,31 @@ export class ReportsService {
   }
 
   /**
-   * Facturado hoy, esta semana y este mes, al margen del período elegido.
+   * Lo generado en el mes en curso, al margen del período elegido.
    *
-   * Tres consultas y no una con `CASE`: los tres rangos se solapan —hoy está
-   * dentro de la semana, y la semana puede cruzar el mes— así que un solo barrido
-   * tendría que traer el mes entero y sumar en memoria tres veces. Son tres
-   * agregados que resuelven por índice.
+   * Un agregado y no tres: hoy y la semana ya son dos opciones del selector, así
+   * que sus totales se calculan cuando alguien los pide. El mes es el único que
+   * hace falta tener siempre a mano, porque es el contexto de un "hoy" que recién
+   * empieza.
    */
-  private async getStaffRevenueSnapshots(
+  private async getStaffCurrentMonth(
     tenantId: string,
     staffId: string,
     timezone: string,
     now: Date,
-  ): Promise<StaffReport['revenueSnapshots']> {
-    const revenueFor = async (preset: 'today' | 'week' | 'month') => {
-      const range = resolveReportRange({ preset }, timezone, now);
-      const row = await this.billedSegmentsForStaff(tenantId, staffId, range)
-        .select('SUM(segment.priceAtBooking)', 'revenue')
-        .getRawOne<{ revenue: string | null }>();
+    commissionRate: number | null,
+  ): Promise<StaffReport['currentMonth']> {
+    const range = resolveReportRange({ preset: 'month' }, timezone, now);
+    const row = await this.billedSegmentsForStaff(tenantId, staffId, range)
+      .select('SUM(segment.priceAtBooking)', 'revenue')
+      .getRawOne<{ revenue: string | null }>();
 
-      return toMoney(toNumber(row?.revenue));
+    const revenue = toNumber(row?.revenue);
+
+    return {
+      revenue: toMoney(revenue),
+      estimatedCommission: estimateCommission(revenue, commissionRate),
     };
-
-    const [today, week, month] = await Promise.all([
-      revenueFor('today'),
-      revenueFor('week'),
-      revenueFor('month'),
-    ]);
-
-    return { today, week, month };
   }
 
   private async getStaffTimeline(
