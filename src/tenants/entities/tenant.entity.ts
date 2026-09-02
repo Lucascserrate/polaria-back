@@ -304,6 +304,21 @@ export class Tenant {
   @Column({ default: true })
   aiEnabled!: boolean;
 
+  /**
+   * El saludo con el que Polaria recibe a un cliente que todavía no tiene turno.
+   *
+   * `NULL` es el estado normal y significa "el de fábrica", no "sin saludo": el
+   * menú de bienvenida no puede salir sin cuerpo. Guardar una copia del texto
+   * por defecto en cada negocio habría congelado esa copia, y cualquier arreglo
+   * al saludo original no llegaría a quien nunca lo editó.
+   *
+   * Se lee siempre con `renderWelcomeMessage`, que resuelve el marcador
+   * `{negocio}`. Guardar el marcador y no el nombre es lo que hace que
+   * renombrarse no deje el saludo con el nombre viejo.
+   */
+  @Column({ type: 'varchar', length: 1024, nullable: true })
+  welcomeMessage!: string | null;
+
   @Column({ nullable: true })
   googleRefreshToken?: string;
 

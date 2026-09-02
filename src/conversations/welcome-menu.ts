@@ -55,17 +55,74 @@ export function isMenuSelection(raw: string): boolean {
 }
 
 /**
+ * El marcador que se reemplaza por el nombre del negocio al enviar.
+ *
+ * Es el único que admite el saludo, y a propósito: cada marcador nuevo es una
+ * regla más que el negocio tiene que aprender para editar dos líneas, y el
+ * saludo es justamente el mensaje donde no hay ningún dato que resolver salvo
+ * quién habla.
+ *
+ * Guardar el marcador en lugar del nombre ya resuelto es lo que hace que
+ * renombrarse no deje el saludo presentándose con el nombre viejo.
+ */
+export const WELCOME_MESSAGE_PLACEHOLDER = '{negocio}';
+
+/** El saludo mientras el negocio no escriba el suyo. Ver `renderWelcomeMessage`. */
+export const DEFAULT_WELCOME_MESSAGE = `¡Hola! 👋 Soy el asistente de ${WELCOME_MESSAGE_PLACEHOLDER}. ¿En qué puedo ayudarte?`;
+
+/**
+ * Largo máximo del texto que se acepta desde el panel.
+ *
+ * Muy por debajo del techo de WhatsApp —1024 caracteres en el cuerpo de un
+ * mensaje con botones— a propósito: esto se lee en un teléfono arriba de dos
+ * botones, y a los 600 caracteres dejó de ser un saludo. El margen que queda
+ * hasta el techo real es lo que absorbe el nombre del negocio al reemplazar el
+ * marcador, que puede aparecer más de una vez.
+ */
+export const WELCOME_MESSAGE_MAX_LENGTH = 600;
+
+/**
+ * El saludo tal como sale, con el marcador resuelto.
+ *
+ * Ausente, `null` o en blanco significan "el de fábrica", no "no saludes": el
+ * menú no puede salir sin cuerpo, así que no hay forma de dejarlo vacío. Por eso
+ * la decisión se toma acá y no en cada llamador.
+ *
+ * No recorta: el cuerpo lo recorta `buildButtonsMessage` contra el límite real
+ * del canal, que es quien lo conoce. Duplicar ese tope acá lo ataría a WhatsApp
+ * sin necesidad.
+ */
+export function renderWelcomeMessage(
+  template: string | null | undefined,
+  businessName: string,
+): string {
+  const source = template?.trim() ? template.trim() : DEFAULT_WELCOME_MESSAGE;
+
+  return source.split(WELCOME_MESSAGE_PLACEHOLDER).join(businessName);
+}
+
+/**
  * Texto y opciones del menú.
  *
  * El título de botón admite 20 caracteres, así que las etiquetas se mantienen
- * cortas a propósito.
+ * cortas a propósito. El cuerpo, en cambio, lo escribe el negocio: es la primera
+ * frase que lee un cliente y no había razón para que sonara igual en todos.
+ *
+ * Las opciones no se tocan. Son el alcance real de Polaria —agendar, o
+ * apartarse— y no una preferencia: un negocio que pudiera renombrar "Hablar con
+ * alguien" o quitarlo estaría cambiando lo que el producto hace, no cómo lo
+ * dice.
  */
-export function buildWelcomeMenu(businessName: string): {
+export function buildWelcomeMenu(params: {
+  businessName: string;
+  /** Lo que el negocio guardó en Configuración. Ver `renderWelcomeMessage`. */
+  welcomeMessage?: string | null;
+}): {
   body: string;
   options: WelcomeMenuOption[];
 } {
   return {
-    body: `¡Hola! 👋 Soy el asistente de ${businessName}. ¿En qué puedo ayudarte?`,
+    body: renderWelcomeMessage(params.welcomeMessage, params.businessName),
     options: [
       {
         id: encodeMenuAction(WelcomeMenuAction.BOOK),

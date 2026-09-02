@@ -31,4 +31,15 @@ export class UpdateTenantDto extends PartialType(CreateTenantDto) {
   @IsOptional()
   @IsDateString()
   whatsappConnectedAt?: string;
+
+  /**
+   * Saludo propio del negocio. `null` lo devuelve al de fábrica.
+   *
+   * Nulable de forma explícita y no opcional a secas: TypeORM ignora las
+   * propiedades `undefined` al guardar, así que sin el `| null` no habría forma
+   * de borrarlo y "volver al texto original" quedaría sin implementar.
+   */
+  @IsOptional()
+  @IsString()
+  welcomeMessage?: string | null;
 }

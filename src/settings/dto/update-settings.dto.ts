@@ -13,6 +13,7 @@ import {
 import { Type } from 'class-transformer';
 import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
 import { BUSINESS_TYPES } from '../../tenants/business-type';
+import { WELCOME_MESSAGE_MAX_LENGTH } from '../../conversations/welcome-menu';
 import { SUPPORTED_REMINDER_OFFSETS } from '../../reminders/reminder-offsets';
 
 class LocationDto {
@@ -126,6 +127,20 @@ export class UpdateSettingsDto {
   @IsInt({ each: true })
   @IsIn(SUPPORTED_REMINDER_OFFSETS, { each: true })
   reminderOffsets?: number[];
+
+  /**
+   * El saludo con el que Polaria recibe a un cliente sin turno.
+   *
+   * `null` —y la cadena vacía, que se guarda como `null`— lo devuelven al de
+   * fábrica. Ausente lo deja como está. No hay forma de configurarlo en blanco:
+   * el menú de bienvenida no puede salir sin cuerpo.
+   *
+   * Admite el marcador `{negocio}`; ver `renderWelcomeMessage`.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(WELCOME_MESSAGE_MAX_LENGTH)
+  welcomeMessage?: string | null;
 
   @IsOptional()
   @ValidateNested()

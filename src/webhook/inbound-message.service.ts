@@ -859,7 +859,10 @@ export class InboundMessageService {
 
     if (!next) {
       const tenant = await this.tenantsService.findOne(tenantId);
-      return buildWelcomeMenu(tenant?.name ?? 'la barbería');
+      return buildWelcomeMenu({
+        businessName: tenant?.name ?? 'la barbería',
+        welcomeMessage: tenant?.welcomeMessage,
+      });
     }
 
     const summary = toAppointmentSummary(next);

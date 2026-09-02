@@ -2,10 +2,13 @@ import {
   buildBookedMenu,
   describeUpcomingAppointment,
   buildWelcomeMenu,
+  DEFAULT_WELCOME_MESSAGE,
   decodeMenuAction,
   encodeMenuAction,
   isMenuSelection,
+  renderWelcomeMessage,
   shouldSendWelcomeMenu,
+  WELCOME_MESSAGE_PLACEHOLDER,
   WELCOME_MENU_COOLDOWN_MINUTES,
   WELCOME_MENU_SOURCE,
   WelcomeMenuAction,
@@ -85,9 +88,55 @@ describe('codificación de acciones del menú', () => {
   });
 });
 
+describe('renderWelcomeMessage', () => {
+  it('reemplaza el marcador por el nombre del negocio', () => {
+    expect(
+      renderWelcomeMessage(
+        `Bienvenido a ${WELCOME_MESSAGE_PLACEHOLDER}.`,
+        'Barbería Polaria',
+      ),
+    ).toBe('Bienvenido a Barbería Polaria.');
+  });
+
+  it('reemplaza todas las apariciones, no sólo la primera', () => {
+    expect(
+      renderWelcomeMessage(
+        `${WELCOME_MESSAGE_PLACEHOLDER} te saluda. ¿Reservás en ${WELCOME_MESSAGE_PLACEHOLDER}?`,
+        'Polaria',
+      ),
+    ).toBe('Polaria te saluda. ¿Reservás en Polaria?');
+  });
+
+  it('deja intacto un texto que no usa el marcador', () => {
+    expect(renderWelcomeMessage('Buenas, ¿qué necesitás?', 'Polaria')).toBe(
+      'Buenas, ¿qué necesitás?',
+    );
+  });
+
+  it('usa el de fábrica cuando no hay texto propio', () => {
+    // Los tres significan lo mismo —"no lo configuré"— y ninguno puede
+    // producir un menú sin cuerpo.
+    for (const empty of [undefined, null, '   ']) {
+      expect(renderWelcomeMessage(empty, 'Polaria')).toBe(
+        renderWelcomeMessage(DEFAULT_WELCOME_MESSAGE, 'Polaria'),
+      );
+    }
+  });
+
+  it('el de fábrica nombra al negocio', () => {
+    expect(renderWelcomeMessage(null, 'Barbería Polaria')).toContain(
+      'Barbería Polaria',
+    );
+    // Y no deja el marcador crudo a la vista del cliente.
+    expect(renderWelcomeMessage(null, 'Barbería Polaria')).not.toContain(
+      WELCOME_MESSAGE_PLACEHOLDER,
+    );
+  });
+});
+
 describe('buildWelcomeMenu', () => {
   it('nombra al negocio y ofrece las dos salidas', () => {
-    const menu = buildWelcomeMenu('Barbería Polaria');
+    const menu = buildWelcomeMenu({ businessName: 'Barbería Polaria' });
 
     expect(menu.body).toContain('Barbería Polaria');
     expect(menu.options.map((option) => option.id)).toEqual([
@@ -96,14 +145,39 @@ describe('buildWelcomeMenu', () => {
     ]);
   });
 
+  it('usa el saludo del negocio cuando lo hay', () => {
+    const menu = buildWelcomeMenu({
+      businessName: 'Barbería Polaria',
+      welcomeMessage: `Buenas 💈 Acá ${WELCOME_MESSAGE_PLACEHOLDER}. ¿Te agendo?`,
+    });
+
+    expect(menu.body).toBe('Buenas 💈 Acá Barbería Polaria. ¿Te agendo?');
+  });
+
+  it('las opciones no dependen del saludo', () => {
+    // Son el alcance real del producto —agendar o apartarse—, no una
+    // preferencia: editar el texto no puede cambiar lo que Polaria hace.
+    const custom = buildWelcomeMenu({
+      businessName: 'X',
+      welcomeMessage: 'Hola.',
+    });
+
+    expect(custom.options).toEqual(
+      buildWelcomeMenu({ businessName: 'X' }).options,
+    );
+  });
+
   it('los títulos entran en el límite de un botón de WhatsApp', () => {
-    for (const option of buildWelcomeMenu('Barbería Polaria').options) {
+    for (const option of buildWelcomeMenu({ businessName: 'Barbería Polaria' })
+      .options) {
       expect(option.title.length).toBeLessThanOrEqual(20);
     }
   });
 
   it('cabe en el máximo de tres botones', () => {
-    expect(buildWelcomeMenu('X').options.length).toBeLessThanOrEqual(3);
+    expect(
+      buildWelcomeMenu({ businessName: 'X' }).options.length,
+    ).toBeLessThanOrEqual(3);
   });
 });
 

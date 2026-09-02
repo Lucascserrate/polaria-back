@@ -21,6 +21,12 @@ import { WhatsAppBillingService } from '../whatsapp/whatsapp-billing.service';
 import { buildBillingSetupUrl } from '../whatsapp/billing-status';
 import type { WeeklyScheduleRange } from '../schedule/weekly-schedule.util';
 import { normalizeReminderOffsets } from '../reminders/reminder-offsets';
+import {
+  buildWelcomeMenu,
+  DEFAULT_WELCOME_MESSAGE,
+  WELCOME_MESSAGE_MAX_LENGTH,
+  WELCOME_MESSAGE_PLACEHOLDER,
+} from '../conversations/welcome-menu';
 import { buildReminderPreview } from '../reminders/reminder-message';
 import { REMINDER_TEMPLATE_BUTTONS } from '../whatsapp/reminder-template';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
@@ -191,6 +197,44 @@ type SettingsResponse = {
   };
   /** Si el negocio activó los avisos automáticos, al equipo y a los clientes. */
   notificationsEnabled: boolean;
+  /**
+   * El saludo con el que Polaria recibe a un cliente que no tiene turno.
+   *
+   * Va como objeto y no como una cadena suelta porque el panel necesita las
+   * cuatro cosas para dibujar el editor sin adivinar ninguna: qué guardó el
+   * negocio, cuál es el texto original al que puede volver, cómo queda una vez
+   * resuelto el marcador, y hasta dónde puede escribir. Repetir el original o el
+   * límite del lado del navegador crearía una segunda copia que se
+   * desactualizaría sola.
+   */
+  welcomeMessage: {
+    /** Lo que el negocio guardó, con el marcador sin resolver. `null` = el de fábrica. */
+    text: string | null;
+    /** El de fábrica, también con el marcador sin resolver. */
+    defaultText: string;
+    /**
+     * El marcador que se reemplaza al enviar.
+     *
+     * Viaja en lugar de estar escrito en el panel para que exista un solo lugar
+     * donde se decide cómo se llama. La vista previa la arma el navegador —a
+     * diferencia de la de recordatorios, que sale del backend— porque tiene que
+     * actualizarse mientras se escribe; lo que no puede duplicarse es el
+     * marcador, que es lo único que el panel no podría adivinar.
+     */
+    placeholder: string;
+    maxLength: number;
+    /**
+     * Los botones del menú, en orden.
+     *
+     * Van en la respuesta y no escritos en el panel porque son parte de lo que
+     * ve el cliente: una vista previa que mostrara otras etiquetas —o ninguna—
+     * estaría mintiendo sobre el mensaje que se aprueba. Salen del mismo
+     * `buildWelcomeMenu` que arma el envío, así que no pueden divergir.
+     *
+     * No son editables: son el alcance real de Polaria, no una preferencia.
+     */
+    previewButtons: string[];
+  };
 };
 
 @Injectable()
@@ -337,6 +381,15 @@ export class SettingsService {
         }),
       },
       notificationsEnabled: tenant.whatsappNotificationsEnabled,
+      welcomeMessage: {
+        text: tenant.welcomeMessage,
+        defaultText: DEFAULT_WELCOME_MESSAGE,
+        placeholder: WELCOME_MESSAGE_PLACEHOLDER,
+        maxLength: WELCOME_MESSAGE_MAX_LENGTH,
+        previewButtons: buildWelcomeMenu({
+          businessName: tenant.name,
+        }).options.map((option) => option.title),
+      },
     };
   }
 
@@ -400,6 +453,18 @@ export class SettingsService {
         // `NULL`: "sin dirección" es un estado, no un texto en blanco.
         address:
           dto.address === undefined ? undefined : dto.address?.trim() || null,
+      });
+    }
+
+    /*
+     * `null` y la cadena vacía vuelven al saludo de fábrica; ausente lo deja
+     * como está. Se guarda `NULL` y no una copia del texto original a propósito:
+     * la copia congelaría el saludo de ese negocio, y un arreglo al texto por
+     * defecto —una palabra que se lee mal— no le llegaría nunca.
+     */
+    if (dto.welcomeMessage !== undefined) {
+      await this.tenantsService.update(tenantId, {
+        welcomeMessage: dto.welcomeMessage?.trim() || null,
       });
     }
 
