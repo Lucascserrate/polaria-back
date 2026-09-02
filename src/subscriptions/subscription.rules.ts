@@ -64,9 +64,102 @@ export type ResolvedSubscription = {
 
 /** Fin de la prueba a partir de su inicio. */
 export function trialEndsAt(startedAt: Date): Date {
-  return new Date(
-    startedAt.getTime() + TRIAL_DURATION_DAYS * 24 * 60 * 60 * 1000,
-  );
+  return addDays(startedAt, TRIAL_DURATION_DAYS);
+}
+
+/**
+ * Las extensiones que soporte puede dar, en días.
+ *
+ * Una lista cerrada y no un número libre: es una decisión comercial que se toma
+ * en un puñado de tamaños, y un campo abierto habilita tipear 700 días —o −7—
+ * en una pantalla que regala producto.
+ */
+export const TRIAL_EXTENSION_DAYS = [7, 14, 30] as const;
+
+/**
+ * Lo que hace falta saber del negocio para extenderle la prueba.
+ *
+ * Aparte de `SubscriptionSnapshot`, que es el que decide el acceso, aunque se
+ * parezcan: aquél no necesita `trialStartedAt` y no tiene por qué crecer para
+ * que esto exista. Son dos preguntas distintas sobre las mismas columnas.
+ */
+export type TrialExtensionInput = {
+  subscriptionStatus: string | null;
+  trialStartedAt: Date | null;
+  trialEndsAt: Date | null;
+};
+
+export type TrialExtension =
+  | {
+      granted: true;
+      /** El vencimiento nuevo. */
+      trialEndsAt: Date;
+      /** Cuándo empezó a probar. Se conserva el original si ya había uno. */
+      trialStartedAt: Date;
+    }
+  | { granted: false; reason: 'PAID_SUBSCRIPTION' | 'INVALID_DAYS' };
+
+/**
+ * Si tiene sentido ofrecerle una extensión a este negocio.
+ *
+ * Sólo el que ya paga queda afuera: extenderle una prueba lo bajaría de
+ * categoría, que es exactamente lo contrario de lo que quiere quien aprieta el
+ * botón. Todos los demás estados —incluida una prueba vencida hace meses, o un
+ * negocio que nunca la arrancó— son casos legítimos de soporte.
+ *
+ * Se exporta para que el panel pinte el botón con la misma regla que lo aplica:
+ * un botón habilitado que el backend después rechaza es peor que uno gris.
+ */
+export function canExtendTrial(subscriptionStatus: string | null): boolean {
+  return subscriptionStatus !== SubscriptionStatus.ACTIVE;
+}
+
+/**
+ * Le da más prueba a un negocio.
+ *
+ * Se suma **al vencimiento vigente** y no a hoy: extender el jueves una prueba
+ * que vence el domingo tiene que dejar diez días, no siete. Con la prueba ya
+ * vencida no queda nada que preservar y el reloj arranca ahora, que es lo que
+ * convierte esto en la forma de revivir una prueba muerta.
+ *
+ * El inicio real no se reescribe. Es el dato de cuándo este negocio empezó a
+ * probar Polaria, y pisarlo en cada extensión borraría la única forma de
+ * saberlo. Se escribe sólo cuando no hay ninguno, que es el negocio al que
+ * soporte le arranca la prueba a mano; a partir de ahí `startTrial` deja de
+ * tocarlo —su condición es `trialStartedAt IS NULL`—, así que conectar WhatsApp
+ * más tarde no le regala días nuevos ni reinicia el reloj.
+ *
+ * Rechaza los días inválidos en lugar de confiar en el validador de la ruta: un
+ * número negativo acá no extendería nada, **acortaría** la prueba, y esta
+ * función no puede tener una forma de hacer lo contrario de lo que dice.
+ */
+export function extendTrial(
+  input: TrialExtensionInput,
+  days: number,
+  now: Date,
+): TrialExtension {
+  if (!Number.isInteger(days) || days <= 0) {
+    return { granted: false, reason: 'INVALID_DAYS' };
+  }
+
+  if (!canExtendTrial(input.subscriptionStatus)) {
+    return { granted: false, reason: 'PAID_SUBSCRIPTION' };
+  }
+
+  const ongoing =
+    input.subscriptionStatus === SubscriptionStatus.TRIAL &&
+    input.trialEndsAt !== null &&
+    input.trialEndsAt > now;
+
+  return {
+    granted: true,
+    trialEndsAt: addDays(ongoing ? (input.trialEndsAt as Date) : now, days),
+    trialStartedAt: input.trialStartedAt ?? now,
+  };
+}
+
+function addDays(from: Date, days: number): Date {
+  return new Date(from.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
 export function resolveSubscription(

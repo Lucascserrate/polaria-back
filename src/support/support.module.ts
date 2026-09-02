@@ -6,6 +6,7 @@ import { TenantsModule } from '../tenants/tenants.module';
 import { SuperAdminGuard } from '../auth/guards/super-admin.guard';
 import { SupportWhatsappController } from './support-whatsapp.controller';
 import { SupportImpersonationController } from './support-impersonation.controller';
+import { SupportTrialController } from './support-trial.controller';
 
 /**
  * Las rutas internas de soporte que operan sobre un tenant ajeno.
@@ -16,7 +17,11 @@ import { SupportImpersonationController } from './support-impersonation.controll
  */
 @Module({
   imports: [ConfigModule, SettingsModule, TenantsModule],
-  controllers: [SupportWhatsappController, SupportImpersonationController],
+  controllers: [
+    SupportWhatsappController,
+    SupportImpersonationController,
+    SupportTrialController,
+  ],
   providers: [SuperAdminGuard],
 })
 export class SupportModule {}

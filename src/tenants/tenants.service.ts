@@ -1,4 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
@@ -7,6 +12,7 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { isDuplicateEntryError } from '../database/duplicate-entry.util';
 import {
+  extendTrial,
   SubscriptionStatus,
   trialEndsAt,
 } from '../subscriptions/subscription.rules';
@@ -234,6 +240,74 @@ export class TenantsService {
     }
 
     return started;
+  }
+
+  /**
+   * Le da más prueba gratuita a un negocio. Lo pide soporte.
+   *
+   * Va acá y no en `support/` porque es el segundo escritor del mismo reloj que
+   * `startTrial`, y las dos formas de mover `trialEndsAt` conviene leerlas
+   * juntas. Lo que sí vive en `support/` es la ruta: es lo que se lleva el
+   * repositorio de administración cuando se separe.
+   *
+   * A diferencia de `startTrial`, esto **no** es idempotente y no debe serlo:
+   * apretar dos veces "+7 días" son catorce días, no siete. Por eso la decisión
+   * es explícita —alguien la toma en una pantalla— y por eso queda en el log.
+   *
+   * La regla de cuánto y desde cuándo está en `extendTrial`, que es pura. Acá
+   * sólo queda cargar, escribir y contar.
+   */
+  async extendTrial(
+    tenantId: string,
+    days: number,
+    now: Date = new Date(),
+  ): Promise<Tenant> {
+    const tenant = await this.findOne(tenantId);
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    const outcome = extendTrial(
+      {
+        subscriptionStatus: tenant.subscriptionStatus,
+        trialStartedAt: tenant.trialStartedAt ?? null,
+        trialEndsAt: tenant.trialEndsAt ?? null,
+      },
+      days,
+      now,
+    );
+
+    if (!outcome.granted) {
+      throw new ConflictException(
+        outcome.reason === 'PAID_SUBSCRIPTION'
+          ? 'Este negocio ya tiene una suscripción paga: extenderle la prueba lo bajaría de categoría.'
+          : 'La extensión tiene que ser un número de días positivo.',
+      );
+    }
+
+    await this.tenantRepository.update(tenantId, {
+      subscriptionStatus: SubscriptionStatus.TRIAL,
+      trialStartedAt: outcome.trialStartedAt,
+      trialEndsAt: outcome.trialEndsAt,
+    });
+
+    /*
+     * En `log` y con las dos fechas: es la única huella de que alguien regaló
+     * producto. No hay auditoría en Polaria todavía, así que esta línea es lo
+     * que permite reconstruir después quién tenía prueba y hasta cuándo.
+     */
+    this.logger.log(
+      `Prueba extendida ${days} días (tenantId=${tenantId}, desde=${
+        tenant.trialEndsAt?.toISOString() ?? 'sin prueba'
+      }, hasta=${outcome.trialEndsAt.toISOString()}).`,
+    );
+
+    const updated = await this.findOne(tenantId);
+    if (!updated) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    return updated;
   }
 
   /** Único camino para resolver el tenant de un webhook `account_update`. */
