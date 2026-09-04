@@ -4,6 +4,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
+import { currentImpersonation } from '../auth/impersonation';
 import { Service } from '../services/entities/service.entity';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
@@ -54,6 +55,10 @@ const SENDING_TIMEOUT_MINUTES = 15;
  * Que los dos puedan correr a la vez sin duplicar mensajes lo garantiza `claim`: la
  * condición `state = PENDING` viaja dentro del `UPDATE`, así que la base elige un
  * solo ganador por fila.
+ *
+ * Hay un tercer caso: desde una sesión de soporte `flush` no hace nada y queda todo
+ * para el cron. La cola es global, así que vaciarla desde ahí afectaba a otros
+ * negocios; está explicado en `flush`.
  */
 @Injectable()
 export class StaffNotificationsJob {
@@ -96,6 +101,31 @@ export class StaffNotificationsJob {
    * caso es a propósito que no lance: la operación principal ya terminó bien.
    */
   async flush(): Promise<void> {
+    /*
+     * Desde una sesión de soporte no se despacha: lo hace el cron un minuto
+     * después.
+     *
+     * No es por prudencia, es por un daño concreto. La cola es **global**, no
+     * del negocio que se está mirando: `findPending` trae lo más viejo de todos
+     * los tenants. Como el request que toca una cita llama a `flush`, mover una
+     * cita mientras se suplanta a una barbería vaciaba la cola de *las demás*,
+     * y el bloqueo de envíos las devolvía como `IMPERSONATION_BLOCKED` — que
+     * `dispatch` guarda con `markFailed`, o sea para siempre. Avisos de otros
+     * negocios perdidos en silencio.
+     *
+     * Saltearlo no pierde nada: la fila queda `PENDING` y el barrido de cada
+     * minuto la toma. Lo único que se resigna es el despacho inmediato, que
+     * existe para que el profesional se entere en segundos, y eso no hace falta
+     * cuando quien tocó la cita fue soporte.
+     */
+    const impersonation = currentImpersonation();
+    if (impersonation) {
+      this.logger.log(
+        `Despacho de avisos postergado al cron: sesión de soporte (by=${impersonation.by}, tenantId=${impersonation.tenantId}).`,
+      );
+      return;
+    }
+
     try {
       const pending = await this.repository.findPending(BATCH_SIZE);
 
