@@ -3,6 +3,7 @@ import {
   daysInRange,
   parseCalendarDate,
   rangeWindow,
+  startOfTodayUtc,
   timeZoneOffsetMinutes,
 } from './appointment-window';
 
@@ -145,5 +146,51 @@ describe('timeZoneOffsetMinutes', () => {
     const instant = new Date('2026-08-22T12:00:00.000Z');
 
     expect(timeZoneOffsetMinutes('Asia/Kolkata', instant)).toBe(330);
+  });
+});
+
+describe('startOfTodayUtc', () => {
+  /*
+   * Es la frontera de "el día ya terminó", y de ella depende qué citas se le
+   * reclaman al negocio como sin cerrar. Una hora de error mete las de esta
+   * mañana en la lista de días pasados.
+   */
+  it('es la medianoche del local, no la de UTC', () => {
+    const instant = new Date('2026-08-22T15:00:00.000Z');
+
+    expect(startOfTodayUtc(LA_PAZ, instant).toISOString()).toBe(
+      '2026-08-22T04:00:00.000Z',
+    );
+  });
+
+  /*
+   * El caso que separa las dos zonas: a las 02:00 UTC del sábado en Bolivia
+   * todavía es viernes por la noche, así que las citas del viernes **no** son de
+   * un día cerrado y no corresponde reclamarlas.
+   */
+  it('respeta que el día del local puede ser el anterior', () => {
+    const instant = new Date('2026-08-22T02:00:00.000Z');
+
+    expect(startOfTodayUtc(LA_PAZ, instant).toISOString()).toBe(
+      '2026-08-21T04:00:00.000Z',
+    );
+    expect(startOfTodayUtc('UTC', instant).toISOString()).toBe(
+      '2026-08-22T00:00:00.000Z',
+    );
+  });
+
+  /* En una zona con horario de verano, el desplazamiento es el del día pedido. */
+  it('toma el desplazamiento vigente ese día', () => {
+    const summer = startOfTodayUtc(
+      SANTIAGO,
+      new Date('2026-01-15T18:00:00.000Z'),
+    );
+    const winter = startOfTodayUtc(
+      SANTIAGO,
+      new Date('2026-07-15T18:00:00.000Z'),
+    );
+
+    expect(summer.toISOString()).toBe('2026-01-15T03:00:00.000Z');
+    expect(winter.toISOString()).toBe('2026-07-15T04:00:00.000Z');
   });
 });

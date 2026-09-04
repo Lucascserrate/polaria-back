@@ -6,7 +6,7 @@
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, MoreThanOrEqual, Repository } from 'typeorm';
+import { Between, In, LessThan, MoreThanOrEqual, Repository } from 'typeorm';
 
 import {
   Appointment,
@@ -43,6 +43,7 @@ import {
   daysInRange,
   parseCalendarDate,
   rangeWindow,
+  startOfTodayUtc,
   type CalendarDate,
 } from './appointment-window';
 
@@ -569,6 +570,74 @@ export class AppointmentsService {
       .getRawMany<{ appointmentId: string }>();
 
     return rows.map((row) => row.appointmentId);
+  }
+
+  /**
+   * Las citas de días ya cerrados que siguen sin resolverse.
+   *
+   * Son las que quedaron en pendiente o confirmado después de que su día
+   * terminara, y existen como consulta propia porque tienen una consecuencia
+   * concreta y silenciosa: los ingresos y las comisiones se calculan **solo**
+   * sobre las completadas —ver `billedSegments` en `ReportsService`—, así que
+   * cada una de estas vale cero para el negocio y cero para quien atendió. El
+   * reporte no miente, pero cuenta menos de lo que pasó.
+   *
+   * La frontera es la medianoche de hoy en la zona del local y no "ya pasó la
+   * hora de fin": un día cerrado es inequívoco, mientras que una cita que
+   * terminó hace veinte minutos puede seguir en curso de hecho, y avisar ahí
+   * sería apurar a alguien que está trabajando.
+   *
+   * Sin piso de fecha a propósito. Se devuelven las más viejas primero y solo
+   * unas pocas, pero `total` cuenta todas: es la única forma de que un negocio
+   * con meses de atraso llegue a tener los números bien alguna vez, y recortar
+   * la cuenta a los últimos días haría que las viejas quedaran invisibles y sin
+   * resolver para siempre.
+   */
+  async findUnresolvedByTenant(
+    tenantId: string,
+    limit: number,
+  ): Promise<{ items: AppointmentItem[]; total: number; timezone: string }> {
+    const tenantRepo = this.appointmentRepository.manager.getRepository(Tenant);
+    const tenant = await tenantRepo.findOne({ where: { id: tenantId } });
+    const timezone = tenant?.timezone ?? DEFAULT_TIMEZONE;
+
+    const where = {
+      tenantId,
+      status: In([...OPEN_APPOINTMENT_STATUSES]),
+      startTime: LessThan(startOfTodayUtc(timezone, new Date())),
+    };
+
+    /*
+     * La cuenta va aparte de la página y no se deriva de `items.length`: la
+     * tarjeta muestra unas pocas pero el contador tiene que decir cuántas hay,
+     * que es lo que hace visible el tamaño real del atraso.
+     */
+    const [appointments, total] = await Promise.all([
+      this.appointmentRepository.find({
+        where,
+        relations: {
+          client: true,
+          tenant: true,
+          reminders: true,
+          services: {
+            service: true,
+            staff: true,
+          },
+        },
+        // Igual que la agenda: una cita de alguien dado de baja sigue siendo una
+        // cita sin cerrar, y sin esto llegaría sin profesional.
+        withDeleted: true,
+        order: { startTime: 'ASC' },
+        take: limit,
+      }),
+      this.appointmentRepository.count({ where, withDeleted: true }),
+    ]);
+
+    return {
+      items: appointments.map((a) => toAppointmentItem(a, timezone)),
+      total,
+      timezone,
+    };
   }
 
   /**

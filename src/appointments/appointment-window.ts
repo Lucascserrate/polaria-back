@@ -142,3 +142,15 @@ export const currentCalendarDate = (
     day: value('day'),
   };
 };
+
+/**
+ * La medianoche de hoy en la zona del negocio, expresada en UTC.
+ *
+ * Es la frontera de "el día ya terminó". Se calcula en la zona del local y no en
+ * la de quien mira: a las 21:00 del lunes en Bolivia ya es martes en Europa, y
+ * las citas del lunes todavía no son de un día cerrado.
+ */
+export const startOfTodayUtc = (timezone: string, now: Date): Date => {
+  const today = currentCalendarDate(timezone, now);
+  return rangeWindow(timezone, today, today).startUtc;
+};

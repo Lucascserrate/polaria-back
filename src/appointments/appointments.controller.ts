@@ -101,6 +101,37 @@ export class AppointmentsController {
     );
   }
 
+  /**
+   * Las citas de días cerrados que siguen sin resolverse.
+   *
+   * Va antes de `:id`, igual que `range`, para que `unresolved` no se lea como el
+   * identificador de una cita.
+   *
+   * `@AdminOnly` porque cerrar una cita es cambiarle el estado, y eso hoy solo lo
+   * puede hacer el negocio —ver `PATCH :id`—. Mostrárselas a un profesional sería
+   * darle una lista de tareas que no puede ejecutar.
+   */
+  @AdminOnly()
+  @Get('unresolved')
+  findUnresolved(
+    @Actor() actor: AuthenticatedActor,
+    @Query('limit') limit?: string,
+  ) {
+    /*
+     * El tope es del servidor y no de quien pregunta: el `limit` acota lo que se
+     * dibuja, pero un valor absurdo desde el request no puede convertir una
+     * tarjeta en una descarga de la agenda entera.
+     */
+    const parsed = Number(limit);
+    const take =
+      Number.isFinite(parsed) && parsed > 0 ? Math.min(parsed, 20) : 4;
+
+    return this.appointmentsService.findUnresolvedByTenant(
+      actor.tenantId,
+      take,
+    );
+  }
+
   @AdminOnly()
   @Get(':id')
   findOne(@Req() req: Request, @Param('id') id: string) {
