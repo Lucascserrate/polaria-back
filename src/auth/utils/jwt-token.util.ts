@@ -3,6 +3,7 @@ import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Staff } from '../../staff/entities/staff.entity';
 import { StaffAccessRole } from '../../staff/staff-role';
 import type { JwtPayload } from '../actor';
+import { IMPERSONATION_TTL_SECONDS } from './auth-cookies.util';
 
 const jwtSecret = process.env.SECRET_JWT ?? '';
 
@@ -54,15 +55,6 @@ const signPayload = (payload: JwtPayload, jwtService: JwtService) => ({
 });
 
 /**
- * Duración de una sesión de soporte.
- *
- * Una hora y no los treinta días de un login normal: se entra a un negocio
- * ajeno para resolver algo puntual, no para quedarse. Si vence a mitad de
- * camino se vuelve a pedir desde el panel, que es un click.
- */
-export const IMPERSONATION_TTL = '1h';
-
-/**
  * El token con el que soporte mira un negocio desde adentro.
  *
  * Para todo el backend es una sesión de dueño —mismo `sub`, mismo `role`—
@@ -91,5 +83,5 @@ export const createImpersonationToken = (
       imp: true,
       act: superAdminEmail,
     },
-    { expiresIn: IMPERSONATION_TTL, secret: jwtSecret },
+    { expiresIn: IMPERSONATION_TTL_SECONDS, secret: jwtSecret },
   );

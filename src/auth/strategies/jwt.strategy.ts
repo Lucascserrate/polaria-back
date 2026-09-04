@@ -5,6 +5,7 @@ import type { Request } from 'express';
 
 import type { JwtPayload } from '../actor';
 import { IMPERSONATION_COOKIE } from '../utils/auth-cookies.util';
+import { isUnexpiredJwt } from '../utils/jwt-expiry.util';
 
 const jwtSecret = process.env.SECRET_JWT ?? '';
 
@@ -14,15 +15,29 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromExtractors([
         /*
-         * La sesión de soporte gana sobre la propia mientras exista.
+         * La sesión de soporte gana sobre la propia mientras **siga vigente**.
          *
-         * Es todo el interruptor de la suplantación: en vez de pisar
-         * `accessToken` —que dejaría al super admin sin su sesión y obligaría a
-         * volver a entrar con Google al terminar—, se agrega una cookie aparte
-         * que tiene prioridad. Salir es borrarla.
+         * Es el interruptor de la suplantación: en vez de pisar `accessToken`
+         * —que dejaría al super admin sin su sesión y obligaría a volver a
+         * entrar con Google al terminar—, se agrega una cookie aparte que tiene
+         * prioridad. Salir es borrarla.
+         *
+         * El chequeo de vencimiento no es una optimización: es lo que evita
+         * quedarse afuera. `fromExtractors` devuelve el **primer** token que
+         * encuentra y ahí termina su trabajo; si entregaba el de suplantación
+         * vencido, Passport lo rechazaba y no había segunda oportunidad para
+         * `accessToken`. Resultado: a la hora de entrar a un negocio, todas las
+         * peticiones daban 401 y volver a loguearse no servía de nada, porque la
+         * cookie vieja seguía ganando. Una sesión de soporte que vence tiene que
+         * devolverte a la tuya, no dejarte sin ninguna.
          */
-        (req: Request) =>
-          (req?.cookies?.[IMPERSONATION_COOKIE] as string | undefined) ?? null,
+        (req: Request) => {
+          const token = req?.cookies?.[IMPERSONATION_COOKIE] as
+            | string
+            | undefined;
+
+          return isUnexpiredJwt(token) ? token : null;
+        },
         (req: Request) => {
           return req?.cookies?.accessToken as string | null;
         },
