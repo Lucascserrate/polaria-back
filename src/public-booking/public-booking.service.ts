@@ -15,6 +15,10 @@ import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { ClientsService } from '../clients/clients.service';
 import { ClientSource } from '../clients/entities/client.entity';
 import { ServicesService } from '../services/services.service';
+import {
+  CONSULTATION_FIRST_NOTICE,
+  isSelfBookable,
+} from '../services/booking-policy';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { TenantsService } from '../tenants/tenants.service';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -93,6 +97,7 @@ export class PublicBookingService {
         // MySQL devuelve `decimal` como cadena; la página recibe un número.
         price: Number(service.price),
         durationMinutes: service.durationMinutes,
+        selfBookable: isSelfBookable(service.bookingPolicy),
       })),
     };
   }
@@ -199,6 +204,17 @@ export class PublicBookingService {
     );
     if (!service || !service.isActive) {
       throw new NotFoundException('El servicio ya no está disponible');
+    }
+
+    /*
+     * El rechazo es explícito y no un "no hay horarios".
+     *
+     * `loadContext` ya corta este caso, pero devolvería que el horario no está
+     * disponible, y eso manda al cliente a probar otro día por algo que ningún día
+     * va a resolver. Acá sabemos el motivo, así que se dice.
+     */
+    if (!isSelfBookable(service.bookingPolicy)) {
+      throw new BadRequestException(CONSULTATION_FIRST_NOTICE);
     }
 
     const confirmation = await this.bookingAvailabilityService.confirmSlot({

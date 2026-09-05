@@ -4,6 +4,7 @@ import { AIService } from '../../ai/ai.service';
 import type { AssistantPromptContext } from '../prompts/assistant.system';
 import { buildAssistantSystemPrompt } from '../prompts/assistant.system';
 import { ServicesService } from '../../services/services.service';
+import { isSelfBookable } from '../../services/booking-policy';
 
 type EnrichmentNeeds = {
   prices?: boolean;
@@ -73,11 +74,14 @@ export class AssistantReplyEnricherService {
     const facts: Record<string, unknown> = {};
 
     if (needs.prices) {
+      // El catálogo entero: un servicio con consulta previa igual se cotiza, y
+      // esconderlo dejaría al asistente sin poder contestar cuánto sale.
       const services = await this.servicesService.findActiveByTenant(tenantId);
       facts.services = services.map((s) => ({
         name: s.name,
         price: s.price,
         durationMinutes: s.durationMinutes,
+        selfBookable: isSelfBookable(s.bookingPolicy),
       }));
     }
 

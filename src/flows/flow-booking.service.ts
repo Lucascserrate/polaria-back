@@ -396,7 +396,8 @@ export class FlowBookingService {
   /** El precio va en el título: el `data-source` de un `Dropdown` solo lleva id y título. */
   private async serviceOptions(tenantId: string): Promise<FlowOption[]> {
     const [services, currency] = await Promise.all([
-      this.servicesService.findActiveByTenant(tenantId),
+      // Solo los reservables por el cliente: el Flow es un canal suyo.
+      this.servicesService.findSelfBookableByTenant(tenantId),
       this.resolveCurrency(tenantId),
     ]);
 

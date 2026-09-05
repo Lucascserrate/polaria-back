@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 
 import type { Service } from '../../services/entities/service.entity';
+import { isSelfBookable } from '../../services/booking-policy';
 import type { Staff } from '../../staff/entities/staff.entity';
 import { AvailabilityCalculator } from '../availability.calculator';
 import { AvailabilityRepository } from '../availability.repository';
@@ -145,8 +146,15 @@ export class BookingAvailabilityService {
     const timeZone = tenant?.timezone;
     if (!timeZone) return [];
 
-    const services =
-      await this.availabilityRepository.getActiveServices(tenantId);
+    /*
+     * Solo los reservables por el cliente. Esta consulta alimenta los días sin
+     * cupo del `CalendarPicker` de WhatsApp Flows, que es un canal del cliente: un
+     * servicio con consulta previa marcaría un día como disponible por algo que
+     * ese cliente no puede reservar.
+     */
+    const services = (
+      await this.availabilityRepository.getActiveServices(tenantId)
+    ).filter((service) => isSelfBookable(service.bookingPolicy));
     if (services.length === 0) return [];
 
     const staffList =
@@ -451,6 +459,24 @@ export class BookingAvailabilityService {
     ]);
     const service = services[0];
     if (!service || service.durationMinutes <= 0) return null;
+
+    /*
+     * Un servicio con consulta previa no tiene horarios **para el cliente**.
+     *
+     * La regla vive acá y no en cada canal porque `loadContext` es por donde pasan
+     * los tres —el flujo de WhatsApp, el Flow y la página pública— tanto para
+     * listar horarios como para confirmar uno. Esconder el servicio de la lista de
+     * opciones es la comodidad; que su id no rinda ningún horario es lo que hace
+     * que sea una regla y no una sugerencia.
+     *
+     * `scope === 'panel'` la saltea a propósito: el negocio agenda estos servicios
+     * justamente después de la consulta, que es el punto de la política. Ese scope
+     * solo llega desde el endpoint autenticado del panel; la página pública manda
+     * `'client'` escrito a mano y no puede pedir otra cosa.
+     */
+    if (scope === 'client' && !isSelfBookable(service.bookingPolicy)) {
+      return null;
+    }
 
     const staffList = await this.availabilityRepository.getStaffList(
       tenantId,

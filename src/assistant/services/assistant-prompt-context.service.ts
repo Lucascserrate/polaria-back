@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { BusinessHoursService } from '../../business_hours/business_hours.service';
 import { ServicesService } from '../../services/services.service';
+import { isSelfBookable } from '../../services/booking-policy';
 import { StaffService } from '../../staff/staff.service';
 import { TenantsService } from '../../tenants/tenants.service';
 import type { BusinessHour } from '../../business_hours/entities/business_hour.entity';
@@ -92,7 +93,20 @@ export class AssistantPromptContextService {
       const dayName = dayNames[dayIndex] ?? `dia ${dayIndex}`;
       return `${dayName}: ${match[2]} - ${match[3]}`;
     });
-    const serviceNames = services.map((item) => item.name);
+    /*
+     * El catálogo completo, con los que necesitan consulta previa marcados.
+     *
+     * No se filtran: si el asistente no supiera que el servicio existe,
+     * contestaría que el negocio no lo ofrece —que es falso y le cuesta al negocio
+     * un cliente—. La marca va pegada al nombre porque es lo que el modelo lee, y
+     * así puede explicar el motivo en lugar de mandar a reservar algo que el flujo
+     * después va a rechazar.
+     */
+    const serviceNames = services.map((item) =>
+      isSelfBookable(item.bookingPolicy)
+        ? item.name
+        : `${item.name} (requiere consulta previa: no se reserva por chat, hay que coordinarla con el negocio)`,
+    );
     const servicesCatalog = services.map((item) => ({
       name: item.name,
       price: Number(item.price),

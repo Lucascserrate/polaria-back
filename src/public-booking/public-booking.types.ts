@@ -36,6 +36,19 @@ export type PublicService = {
   /** Ya convertido a número: MySQL devuelve `decimal` como cadena. */
   price: number;
   durationMinutes: number;
+  /**
+   * Si el cliente puede reservarlo por su cuenta.
+   *
+   * Los que no se muestran igual, con su precio y su duración: la página también
+   * sirve para contar qué hace el negocio, y esconder media carta la empobrece.
+   * Lo que la página no debe hacer es dejar elegirlos —el backend rechaza el
+   * intento de todos modos, ver `loadContext`—.
+   *
+   * Viaja como booleano y no como la política cruda porque a la página no le
+   * importa el motivo, solo si el botón se puede apretar. El motivo, cuando haya
+   * más de uno, lo explica el negocio.
+   */
+  selfBookable: boolean;
 };
 
 export type PublicStaff = {

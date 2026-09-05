@@ -819,7 +819,13 @@ export class BookingFlowService {
     date: string,
     limits?: BookingChannelLimits,
   ): Promise<BookingPrompt> {
-    const services = await this.servicesService.findActiveByTenant(
+    /*
+     * Solo los que el cliente puede elegir. Un servicio con consulta previa no
+     * rinde horarios en este canal —lo corta `loadContext`—, así que ofrecerlo
+     * sería llevarlo a un paso que termina en "no hay horarios" sin explicar por
+     * qué.
+     */
+    const services = await this.servicesService.findSelfBookableByTenant(
       session.tenantId,
     );
 
@@ -982,7 +988,9 @@ export class BookingFlowService {
         return BOOKING_DATE_HORIZON_DAYS;
 
       case BookingSessionState.ASK_SERVICE: {
-        const services = await this.servicesService.findActiveByTenant(
+        // La misma lista que se ofreció: si contara todo el catálogo, un número
+        // válido para el cliente quedaría fuera de rango o al revés.
+        const services = await this.servicesService.findSelfBookableByTenant(
           session.tenantId,
         );
         return services.length;
