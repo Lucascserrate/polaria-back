@@ -3,6 +3,7 @@ import { AuthGuard, type IAuthModuleOptions } from '@nestjs/passport';
 import type { Request, Response } from 'express';
 import { AUTH_COOKIE_OPTIONS } from '../auth/utils/auth-cookies.util';
 import { CUSTOMER_GOOGLE_STRATEGY } from './customer-google.strategy';
+import { withCookieDomain } from './customer-session';
 import { DEFAULT_PUBLIC_SITE_BASE_URL } from '../tenants/public-booking-url';
 
 /**
@@ -65,12 +66,14 @@ export class CustomerGoogleAuthGuard extends AuthGuard(
       safeReturnTo(
         (request.query as Record<string, string | undefined>).returnTo,
       ),
-      {
+      // Mismo dominio que la sesión: la escribe y la lee la API, pero sobrevive
+      // un viaje a Google. `withCookieDomain` explica por qué la clave no puede
+      // ir con valor `undefined`.
+      withCookieDomain({
         ...AUTH_COOKIE_OPTIONS,
         httpOnly: true,
         maxAge: RETURN_TO_TTL_SECONDS * 1000,
-        domain: process.env.COOKIE_DOMAIN?.trim() || undefined,
-      },
+      }),
     );
 
     return super.canActivate(context);

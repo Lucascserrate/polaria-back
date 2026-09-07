@@ -3,6 +3,7 @@ import {
   CanActivate,
   ExecutionContext,
   Injectable,
+  Logger,
   UnauthorizedException,
   createParamDecorator,
 } from '@nestjs/common';
@@ -21,6 +22,8 @@ import { AUTH_COOKIE_OPTIONS } from '../auth/utils/auth-cookies.util';
  * el guard del panel, y el del panel no valida acá.
  */
 export const CUSTOMER_COOKIE = 'customerToken';
+
+const logger = new Logger('CustomerSession');
 
 /**
  * Un mes. Los clientes no vuelven cada día, y una sesión que caduca en dos horas
@@ -58,15 +61,57 @@ const customerSecret = (): string =>
  * del mismo `localhost` —las cookies no distinguen puerto— y ponerle un dominio
  * a mano solo daría problemas.
  */
-const cookieDomain = (): string | undefined =>
-  process.env.COOKIE_DOMAIN?.trim() || undefined;
+/**
+ * Agrega `domain` **sólo si hay uno**, en lugar de pasarlo como `undefined`.
+ *
+ * No es una preferencia de estilo: la librería `cookie` que usa Express valida
+ * el dominio en cuanto la clave existe en el objeto, aunque su valor sea
+ * `undefined`, y tira `TypeError: option domain is invalid`. Con
+ * `COOKIE_DOMAIN` vacío —que es lo normal en desarrollo— eso rompía tanto abrir
+ * como cerrar sesión, y el error salía en el borrado de la cookie, lejos de la
+ * causa.
+ */
+export const withCookieDomain = (base: CookieOptions): CookieOptions => {
+  const domain = readCookieDomain();
 
-const customerCookieOptions = (): CookieOptions => ({
-  ...AUTH_COOKIE_OPTIONS,
-  httpOnly: true,
-  maxAge: CUSTOMER_SESSION_TTL_SECONDS * 1000,
-  domain: cookieDomain(),
-});
+  return domain ? { ...base, domain } : { ...base };
+};
+
+/**
+ * El dominio configurado, si es un dominio de verdad.
+ *
+ * Se valida porque el nombre de la variable invita a poner la dirección del
+ * sitio, y un dominio de cookie no es una URL: no lleva esquema, ni puerto, ni
+ * ruta. Con `localhost:3000` ahí, Express rechaza la cookie con
+ * `TypeError: option domain is invalid` **al emitirla y al borrarla**, así que
+ * el síntoma es que no se puede iniciar ni cerrar sesión, y el mensaje no
+ * menciona la variable que lo causó.
+ *
+ * Ante un valor inválido se ignora y se avisa, en lugar de romper: una
+ * credencial mal escrita no debería dejar sin login a todo el sitio, y el aviso
+ * es lo que hace que el problema se encuentre en un minuto.
+ */
+const readCookieDomain = (): string | undefined => {
+  const raw = process.env.COOKIE_DOMAIN?.trim();
+  if (!raw) return undefined;
+
+  // Un punto inicial —`.polariahq.com`— es válido: significa "y subdominios".
+  if (!/^\.?[a-z0-9-]+(\.[a-z0-9-]+)*$/i.test(raw)) {
+    logger.warn(
+      `COOKIE_DOMAIN="${raw}" no es un dominio válido para una cookie: no puede llevar puerto, esquema ni ruta. Se ignora, y la sesión queda atada al host que la emite. En producción tiene que ser algo como ".polariahq.com".`,
+    );
+    return undefined;
+  }
+
+  return raw;
+};
+
+const customerCookieOptions = (): CookieOptions =>
+  withCookieDomain({
+    ...AUTH_COOKIE_OPTIONS,
+    httpOnly: true,
+    maxAge: CUSTOMER_SESSION_TTL_SECONDS * 1000,
+  });
 
 /** Lo único que lleva el token: de quién es la sesión. */
 interface CustomerTokenPayload {
@@ -122,10 +167,7 @@ export class CustomerSessionService {
   clearCookie(res: Response): void {
     // Mismo dominio que al emitirla: una cookie de `.polariahq.com` no se borra
     // con un `clearCookie` sin dominio, y la sesión seguiría viva.
-    res.clearCookie(CUSTOMER_COOKIE, {
-      ...AUTH_COOKIE_OPTIONS,
-      domain: cookieDomain(),
-    });
+    res.clearCookie(CUSTOMER_COOKIE, withCookieDomain(AUTH_COOKIE_OPTIONS));
   }
 }
 

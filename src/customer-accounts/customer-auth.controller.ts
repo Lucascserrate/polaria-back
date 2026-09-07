@@ -28,6 +28,7 @@ import {
   CustomerAccountId,
   CustomerGuard,
   CustomerSessionService,
+  withCookieDomain,
 } from './customer-session';
 import { SetCustomerPhoneDto } from './dto/set-customer-phone.dto';
 
@@ -78,10 +79,10 @@ export class CustomerAuthController {
       ],
     );
 
-    res.clearCookie(CUSTOMER_RETURN_TO_COOKIE, {
-      ...AUTH_COOKIE_OPTIONS,
-      domain: process.env.COOKIE_DOMAIN?.trim() || undefined,
-    });
+    res.clearCookie(
+      CUSTOMER_RETURN_TO_COOKIE,
+      withCookieDomain(AUTH_COOKIE_OPTIONS),
+    );
 
     if (!profile) {
       this.logger.warn('Callback de Google sin perfil: no se abre sesión.');
