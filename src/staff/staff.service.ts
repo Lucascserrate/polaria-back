@@ -28,6 +28,12 @@ import { normalizePhoneNumber } from '../webhook/webhook-meta.util';
 import { normalizeAccessEmail } from './staff-access';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { isDuplicateEntryError } from '../database/duplicate-entry.util';
+import {
+  CloudinaryService,
+  type UploadImageOptions,
+} from '../cloudinary/cloudinary.service';
+import { tenantAssetPath } from '../cloudinary/asset-path';
+import type { UploadedImageFile } from '../cloudinary/image-upload';
 
 /**
  * Deja el teléfono como lo espera la API de Meta: solo `+` y dígitos.
@@ -58,6 +64,37 @@ export type StaffWithHistory = Staff & {
   futureAppointmentCount: number;
 };
 
+/**
+ * Dónde vive la foto de un miembro del equipo en Cloudinary.
+ *
+ * Determinista y derivado de la fila: subir de nuevo **reemplaza** el archivo
+ * anterior en lugar de dejarlo huérfano, y es lo que permite que la columna
+ * guarde solo la URL y no también el identificador. El `tenantId` sale siempre
+ * del propio registro y no de quien llama, así que la ruta no puede terminar
+ * apuntando a la carpeta de otro negocio.
+ */
+function staffPhotoPath(staff: Pick<Staff, 'id' | 'tenantId'>): string {
+  return tenantAssetPath(staff.tenantId, 'staff', staff.id);
+}
+
+/**
+ * El recorte con el que se guarda la foto.
+ *
+ * Cuadrada porque el avatar es un círculo en todas las pantallas donde
+ * aparece: recortar acá es lo que evita que una foto vertical se muestre
+ * apretada, y guardar el cuadrado ya hecho ahorra pedirle a Cloudinary un
+ * recorte distinto en cada lugar.
+ *
+ * `fill` con gravedad automática deja el sujeto dentro del cuadro —a diferencia
+ * de un recorte al centro, que en una foto de cuerpo entero corta la cabeza—.
+ * No se usa gravedad de rostro a propósito: acá también se suben logos y fotos
+ * donde no hay una cara que detectar. 512px alcanza para el avatar más grande
+ * de la ficha en una pantalla de densidad doble.
+ */
+const STAFF_PHOTO_TRANSFORMATION: UploadImageOptions['transformation'] = [
+  { width: 512, height: 512, crop: 'fill', gravity: 'auto' },
+];
+
 @Injectable()
 export class StaffService {
   private readonly logger = new Logger(StaffService.name);
@@ -69,6 +106,7 @@ export class StaffService {
     private serviceRepository: Repository<Service>,
     @InjectRepository(Tenant)
     private tenantRepository: Repository<Tenant>,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   /**
@@ -355,6 +393,73 @@ export class StaffService {
   }
 
   /**
+   * Guarda la foto del miembro del equipo y devuelve su ficha ya actualizada.
+   *
+   * Se aplica en el momento y no con el resto del formulario, igual que el
+   * acceso: es un archivo, no un campo de texto, y dejarlo dentro del borrador
+   * significaría subirlo recién al guardar —con la persona esperando sin saber
+   * si su foto entró— o mantener un archivo en memoria del navegador mientras
+   * se recorren las otras cuatro secciones.
+   *
+   * El orden importa y es el mismo que en el logo del negocio: primero
+   * Cloudinary, después la base. Si la subida falla, la columna sigue
+   * apuntando a la foto anterior —que existe— y el negocio ve un error con lo
+   * que ya tenía intacto. Al revés, una URL guardada de una subida que falló
+   * sería un avatar roto en toda la agenda.
+   */
+  async updatePhoto(
+    id: string,
+    file: UploadedImageFile | undefined,
+  ): Promise<Staff | null> {
+    const staff = await this.staffRepository.findOne({ where: { id } });
+    if (!staff) return null;
+
+    const image = await this.cloudinaryService.uploadImage(file, {
+      publicId: staffPhotoPath(staff),
+      transformation: STAFF_PHOTO_TRANSFORMATION,
+    });
+
+    /*
+     * `update` y no `save`: la ficha se cargó sin relaciones, y guardarla
+     * entera haría pasar por el camino que recalcula `name` y toca columnas
+     * que esta operación no vino a cambiar.
+     */
+    await this.staffRepository.update(id, { photoUrl: image.url });
+
+    this.logger.log(
+      `Foto actualizada (staffId=${id}, tenantId=${staff.tenantId}, bytes=${image.bytes}, ${image.width}x${image.height}).`,
+    );
+
+    return this.findOne(id);
+  }
+
+  /**
+   * Quita la foto: borra el archivo y la referencia.
+   *
+   * Se borra de verdad y no solo la columna. Un archivo que ya no se alcanza
+   * desde ninguna pantalla igual ocupa la cuota de la cuenta, y con la columna
+   * en `NULL` no queda nada que diga que existió.
+   *
+   * Primero el archivo remoto y después la columna, al revés que al subir: si
+   * el borrado falla, la columna sigue apuntando a una imagen que existe y se
+   * puede reintentar. En el otro orden, un fallo dejaría el archivo sin nadie
+   * que lo mencione.
+   */
+  async removePhoto(id: string): Promise<Staff | null> {
+    const staff = await this.staffRepository.findOne({ where: { id } });
+    if (!staff) return null;
+
+    if (!staff.photoUrl) return this.findOne(id);
+
+    await this.cloudinaryService.deleteImage(staffPhotoPath(staff));
+    await this.staffRepository.update(id, { photoUrl: null });
+
+    this.logger.log(`Foto quitada (staffId=${id}).`);
+
+    return this.findOne(id);
+  }
+
+  /**
    * Elimina un profesional, físicamente o dándolo de baja según su historial.
    *
    * La distinción no es cosmética. `appointment_services.staff` tiene
@@ -367,7 +472,10 @@ export class StaffService {
    * caso del profesional cargado por error.
    */
   async remove(id: string): Promise<{ deleted: true; mode: 'HARD' | 'SOFT' }> {
-    return this.staffRepository.manager.transaction(async (manager) => {
+    const outcome = await this.staffRepository.manager.transaction<{
+      mode: 'HARD' | 'SOFT';
+      photoPath: string | null;
+    }>(async (manager) => {
       // Se toma la fila para que dos eliminaciones simultáneas no decidan cada
       // una sobre el mismo profesional con la misma información.
       const staff = await manager.findOne(Staff, {
@@ -398,13 +506,27 @@ export class StaffService {
        * fila, el profesional vuelva inactivo y no directamente tomando reservas.
        */
       staff.isActive = false;
+
+      /*
+       * La foto se va con la persona, en los dos modos de eliminación.
+       *
+       * En la baja lógica la ficha sobrevive para sostener el historial, pero
+       * ya no se muestra en ninguna pantalla: dejar el archivo sería cuota
+       * ocupada por una imagen que nadie puede volver a ver. Se limpia la
+       * columna acá —dentro de la transacción— y el archivo se borra después
+       * de confirmar, para no dejar la referencia apuntando a algo que ya no
+       * existe.
+       */
+      const photoPath = staff.photoUrl ? staffPhotoPath(staff) : null;
+      staff.photoUrl = null;
+
       await manager.save(Staff, staff);
 
       if (plan.mode === 'HARD') {
         const hardDeleted = await this.hardDelete(manager, id);
         if (hardDeleted) {
           this.logger.log(`Profesional eliminado (staffId=${id}).`);
-          return { deleted: true, mode: 'HARD' };
+          return { mode: 'HARD', photoPath };
         }
 
         // Apareció un segmento entre el conteo y el borrado. La condición del
@@ -418,8 +540,29 @@ export class StaffService {
       this.logger.log(
         `Profesional dado de baja conservando historial (staffId=${id}, segmentos=${counts.totalSegments}).`,
       );
-      return { deleted: true, mode: 'SOFT' };
+      return { mode: 'SOFT', photoPath };
     });
+
+    /*
+     * El archivo se borra recién acá, con la eliminación ya confirmada, y su
+     * fallo no la deshace: la fila ya no menciona la foto, así que un error de
+     * red con Cloudinary dejaría un archivo huérfano —que se limpia con la
+     * carpeta del negocio— y no un profesional que volvió a existir porque no
+     * se pudo borrar una imagen.
+     */
+    if (outcome.photoPath) {
+      try {
+        await this.cloudinaryService.deleteImage(outcome.photoPath);
+      } catch (error: unknown) {
+        this.logger.warn(
+          `Quedó la foto de un profesional eliminado (staffId=${id}, publicId=${outcome.photoPath}): ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    return { deleted: true, mode: outcome.mode };
   }
 
   /**

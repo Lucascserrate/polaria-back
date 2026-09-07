@@ -7,10 +7,17 @@ import {
   Param,
   Delete,
   UseGuards,
+  UseInterceptors,
+  UploadedFile,
   NotFoundException,
 } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { ApiBody, ApiConsumes, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '@nestjs/passport';
+import { FileInterceptor } from '@nestjs/platform-express';
+import {
+  IMAGE_UPLOAD_OPTIONS,
+  type UploadedImageFile,
+} from '../cloudinary/image-upload';
 import { StaffService } from './staff.service';
 import { CreateStaffDto } from './dto/create-staff.dto';
 import { UpdateStaffDto } from './dto/update-staff.dto';
@@ -94,6 +101,45 @@ export class StaffController {
   async remove(@Actor() actor: AuthenticatedActor, @Param('id') id: string) {
     await this.requireInTenant(actor, id);
     return this.staffService.remove(id);
+  }
+
+  /**
+   * Su foto. `multipart/form-data`, campo `file`.
+   *
+   * No lleva DTO —lo que llega es un archivo, y validar formato y tamaño es
+   * cosa de `assertUploadedImage`— y se aplica de inmediato en lugar de viajar
+   * con el resto de la ficha, igual que el acceso. Ver
+   * `StaffService.updatePhoto`.
+   *
+   * Responde la ficha completa, como `PATCH /staff/:id`, así el panel no tiene
+   * que combinar la respuesta con lo que ya tenía en pantalla.
+   */
+  @Post(':id/photo')
+  @UseInterceptors(FileInterceptor('file', IMAGE_UPLOAD_OPTIONS))
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: { file: { type: 'string', format: 'binary' } },
+      required: ['file'],
+    },
+  })
+  async uploadPhoto(
+    @Actor() actor: AuthenticatedActor,
+    @Param('id') id: string,
+    @UploadedFile() file: UploadedImageFile | undefined,
+  ) {
+    await this.requireInTenant(actor, id);
+    return this.staffService.updatePhoto(id, file);
+  }
+
+  @Delete(':id/photo')
+  async removePhoto(
+    @Actor() actor: AuthenticatedActor,
+    @Param('id') id: string,
+  ) {
+    await this.requireInTenant(actor, id);
+    return this.staffService.removePhoto(id);
   }
 
   /** Habilita el acceso a Polaria con un correo. */

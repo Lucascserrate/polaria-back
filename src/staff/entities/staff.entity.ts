@@ -77,6 +77,9 @@ export class Staff {
   @Column({ type: 'varchar', length: 255, nullable: true })
   lastName?: string | null;
 
+  @Column({ type: 'varchar', length: 512, nullable: true })
+  photoUrl?: string | null;
+
   /**
    * Cargo, texto libre. `NULL` es lo normal.
    *
