@@ -15,6 +15,7 @@ import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { ClientsService } from '../clients/clients.service';
 import { ClientSource } from '../clients/entities/client.entity';
 import { ServicesService } from '../services/services.service';
+import { BusinessPhotosService } from '../business-photos/business-photos.service';
 import {
   CONSULTATION_FIRST_NOTICE,
   isSelfBookable,
@@ -50,6 +51,7 @@ export class PublicBookingService {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly servicesService: ServicesService,
+    private readonly businessPhotosService: BusinessPhotosService,
     private readonly businessHoursService: BusinessHoursService,
     private readonly bookingAvailabilityService: BookingAvailabilityService,
     private readonly clientsService: ClientsService,
@@ -59,9 +61,10 @@ export class PublicBookingService {
   async getProfile(slug: string): Promise<PublicBusinessProfile> {
     const tenant = await this.resolveTenant(slug);
 
-    const [services, businessHours] = await Promise.all([
+    const [services, businessHours, photos] = await Promise.all([
       this.servicesService.findActiveByTenant(tenant.id),
       this.businessHoursService.getTenantSchedule(tenant.id),
+      this.businessPhotosService.list(tenant.id),
     ]);
 
     return {
@@ -69,6 +72,7 @@ export class PublicBookingService {
       name: tenant.name,
       businessType: tenant.businessType ?? null,
       logoUrl: tenant.logoUrl,
+      photos,
       timezone: tenant.timezone,
       currency: tenant.currency,
       dialCode: dialCodeForTimeZone(tenant.timezone),

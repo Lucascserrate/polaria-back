@@ -30,6 +30,7 @@ import { ReportsModule } from './reports/reports.module';
 import { PublicBookingModule } from './public-booking/public-booking.module';
 import { SupportModule } from './support/support.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
+import { BusinessPhotosModule } from './business-photos/business-photos.module';
 import { ImpersonationInterceptor } from './auth/impersonation.interceptor';
 
 @Module({
@@ -76,6 +77,7 @@ import { ImpersonationInterceptor } from './auth/impersonation.interceptor';
     PublicBookingModule,
     SupportModule,
     CloudinaryModule,
+    BusinessPhotosModule,
   ],
   // Global porque una sesión de soporte lo es en toda la aplicación: si hubiera
   // que registrarlo módulo por módulo, el que se olvidara sería justo por donde

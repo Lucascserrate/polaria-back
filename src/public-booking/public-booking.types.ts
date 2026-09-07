@@ -23,6 +23,15 @@ export type PublicBusinessProfile = {
    * una imagen que puede no llegar nunca.
    */
   logoUrl: string | null;
+  /**
+   * Fotos del local, en orden. La primera es la portada.
+   *
+   * Un arreglo vacío es el caso normal y significa "este negocio no subió
+   * fotos": la página no dibuja galería, y no deja un hueco donde irían. Con
+   * las medidas de cada una para que el espacio esté reservado antes de que la
+   * imagen cargue.
+   */
+  photos: PublicPhoto[];
   timezone: string;
   /** ISO 4217, para formatear los precios con la moneda del negocio. */
   currency: string;
@@ -63,6 +72,20 @@ export type PublicStaff = {
   id: string;
   name: string;
   jobTitle: string | null;
+};
+
+/**
+ * Una foto de la galería. Ver `BusinessPhotoView`.
+ *
+ * Se declara acá y no se importa del módulo de fotos por lo mismo que el resto
+ * de este archivo: este es el contrato público, y tiene que poder quedarse
+ * igual aunque el modelo interno cambie.
+ */
+export type PublicPhoto = {
+  id: string;
+  url: string;
+  width: number;
+  height: number;
 };
 
 /**

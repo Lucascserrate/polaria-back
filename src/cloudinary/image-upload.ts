@@ -40,10 +40,13 @@ export interface UploadedImageFile {
  * Además el disco del contenedor es efímero: un archivo ahí no sobrevive al
  * próximo deploy, con lo cual no serviría ni como respaldo.
  */
-export const IMAGE_UPLOAD_OPTIONS: MulterOptions = {
+export const imageUploadOptions = (maxFiles = 1): MulterOptions => ({
   storage: memoryStorage(),
-  limits: { fileSize: MAX_IMAGE_BYTES, files: 1 },
-};
+  limits: { fileSize: MAX_IMAGE_BYTES, files: maxFiles },
+});
+
+/** Un solo archivo, que es el caso de una imagen que es única por dueño. */
+export const IMAGE_UPLOAD_OPTIONS: MulterOptions = imageUploadOptions(1);
 
 /**
  * Valida lo que llegó antes de gastar una llamada a Cloudinary.
