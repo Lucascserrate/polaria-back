@@ -33,18 +33,28 @@ export class CreatePublicBookingDto {
   @IsISO8601()
   startTime!: string;
 
-  @ApiProperty({ example: 'Lucas' })
+  /**
+   * Nombre de quien reserva. **Opcional solo con sesión de cliente iniciada**:
+   * en ese caso el nombre sale de la cuenta y lo que venga acá se ignora.
+   *
+   * Sin sesión sigue siendo obligatorio, y el que rechaza la reserva sin nombre
+   * es el servicio, no este DTO: la regla depende de si hay cookie, y eso
+   * `class-validator` no lo ve. Ver `PublicBookingService.createBooking`.
+   */
+  @ApiPropertyOptional({ example: 'Lucas' })
+  @IsOptional()
   @IsString()
   @Length(2, 120)
-  customerName!: string;
+  customerName?: string;
 
   /**
    * Teléfono tal como lo escribe el cliente. Se normaliza del lado del servidor
    * al mismo formato con el que WhatsApp guarda a esta persona, para que no
    * quede duplicada. Ver `normalizeClientPhone`.
    */
-  @ApiProperty({ example: '70123456' })
+  @ApiPropertyOptional({ example: '70123456' })
+  @IsOptional()
   @IsString()
   @Length(6, 25)
-  customerPhone!: string;
+  customerPhone?: string;
 }

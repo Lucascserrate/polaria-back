@@ -101,6 +101,17 @@ export type ClientPhoneInput =
   /** El `wa_id` de Meta. Ya es canónico: se valida y se usa tal cual. */
   | { kind: 'whatsapp'; value: string }
   /**
+   * El teléfono guardado en una cuenta de Polaria (`customer_accounts.phone`).
+   *
+   * También es canónico, porque se guardó pasando por esta misma función cuando
+   * la persona lo escribió una vez. Tiene su propio `kind` en lugar de viajar
+   * como `whatsapp` porque el canal es otro y la próxima vez que alguien lea
+   * este archivo tiene que poder saber de dónde salió cada número; y porque si
+   * mañana el formato de la cuenta cambiara, el cambio se hace acá y no en cada
+   * llamador.
+   */
+  | { kind: 'account'; value: string }
+  /**
    * Lo escribió una persona en un formulario. Se normaliza contra el prefijo
    * del país del negocio, porque casi siempre va a escribir su número local.
    */
@@ -108,7 +119,7 @@ export type ClientPhoneInput =
 
 /** El teléfono listo para guardar, o `null` si no es utilizable. */
 export function resolveClientPhone(input: ClientPhoneInput): string | null {
-  return input.kind === 'whatsapp'
-    ? canonicalizeWhatsAppPhone(input.value)
-    : normalizeClientPhone(input.value, input.dialCode);
+  return input.kind === 'typed'
+    ? normalizeClientPhone(input.value, input.dialCode)
+    : canonicalizeWhatsAppPhone(input.value);
 }

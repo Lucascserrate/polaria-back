@@ -71,6 +71,9 @@ export class Appointment {
   @JoinColumn({ name: 'clientId' })
   client!: Client;
 
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  customerAccountId!: string | null;
+
   @OneToMany(
     () => AppointmentService,
     (appointmentService) => appointmentService.appointment,

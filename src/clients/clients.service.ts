@@ -33,6 +33,7 @@ export interface ResolveClientParams {
    */
   phone:
     | { kind: 'whatsapp'; value: string }
+    | { kind: 'account'; value: string }
     | { kind: 'typed'; value: string; dialCode?: string };
   /** Con qué nombre se crea, si todavía no existía. Nunca pisa el que ya tiene. */
   name?: string | null;
@@ -344,15 +345,20 @@ export class ClientsService {
   async resolveByPhone(params: ResolveClientParams): Promise<Client> {
     const { tenantId } = params;
 
+    /*
+     * Solo `typed` necesita el prefijo del país. Los otros dos canales traen el
+     * número ya canónico —el `wa_id` de Meta y el que la persona guardó en su
+     * cuenta— y deducirles un prefijo les agregaría el código de país de nuevo.
+     */
     const phoneInput: ClientPhoneInput =
-      params.phone.kind === 'whatsapp'
-        ? params.phone
-        : {
+      params.phone.kind === 'typed'
+        ? {
             kind: 'typed',
             value: params.phone.value,
             dialCode:
               params.phone.dialCode ?? (await this.dialCodeFor(tenantId)),
-          };
+          }
+        : params.phone;
 
     const phone = resolveClientPhone(phoneInput);
     if (!phone) {

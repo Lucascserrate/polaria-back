@@ -6,6 +6,7 @@ import { BusinessHoursModule } from '../business_hours/business_hours.module';
 import { ClientsModule } from '../clients/clients.module';
 import { ServicesModule } from '../services/services.module';
 import { BusinessPhotosModule } from '../business-photos/business-photos.module';
+import { CustomerAccountsModule } from '../customer-accounts/customer-accounts.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { PublicBookingController } from './public-booking.controller';
 import { PublicBookingService } from './public-booking.service';
@@ -28,6 +29,7 @@ import { PublicBookingService } from './public-booking.service';
     ClientsModule,
     AppointmentsModule,
     BusinessPhotosModule,
+    CustomerAccountsModule,
   ],
   controllers: [PublicBookingController],
   providers: [PublicBookingService],

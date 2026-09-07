@@ -855,6 +855,7 @@ export class AppointmentsService {
     staffId: string;
     startTime: Date;
     endTime: Date;
+    customerAccountId?: string | null;
   }): Promise<Appointment> {
     const service = await this.serviceRepository.findOne({
       where: {
@@ -874,6 +875,7 @@ export class AppointmentsService {
       this.appointmentRepository.create({
         tenantId: input.tenantId,
         clientId: input.clientId,
+        customerAccountId: input.customerAccountId ?? null,
         startTime: input.startTime,
         endTime: input.endTime,
         status: AppointmentStatus.CONFIRMED,

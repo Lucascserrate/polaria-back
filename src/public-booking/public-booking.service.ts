@@ -16,6 +16,7 @@ import { ClientsService } from '../clients/clients.service';
 import { ClientSource } from '../clients/entities/client.entity';
 import { ServicesService } from '../services/services.service';
 import { BusinessPhotosService } from '../business-photos/business-photos.service';
+import { CustomerAccountsService } from '../customer-accounts/customer-accounts.service';
 import {
   CONSULTATION_FIRST_NOTICE,
   isSelfBookable,
@@ -69,6 +70,7 @@ export class PublicBookingService {
     private readonly tenantsService: TenantsService,
     private readonly servicesService: ServicesService,
     private readonly businessPhotosService: BusinessPhotosService,
+    private readonly customerAccountsService: CustomerAccountsService,
     private readonly businessHoursService: BusinessHoursService,
     private readonly bookingAvailabilityService: BookingAvailabilityService,
     private readonly clientsService: ClientsService,
@@ -207,9 +209,10 @@ export class PublicBookingService {
       serviceId: string;
       staffId?: string;
       startTime: string;
-      customerName: string;
-      customerPhone: string;
+      customerName?: string;
+      customerPhone?: string;
     },
+    customerAccountId?: string | null,
   ): Promise<PublicBookingConfirmation> {
     const tenant = await this.resolveTenant(slug);
 
@@ -262,14 +265,48 @@ export class PublicBookingService {
      * distinto para partirle el historial. Un número ilegible sale de acá como
      * un 400 con el motivo, igual que antes.
      */
+    const account = customerAccountId
+      ? await this.customerAccountsService.findById(customerAccountId)
+      : null;
+
+    /*
+     * Con cuenta pero sin teléfono no se puede reservar, y no es un caso raro:
+     * Google no da el número, así que toda cuenta nace sin él. La página lo pide
+     * una vez antes de llegar hasta acá; este 400 es la red por si no lo hizo.
+     */
+    if (account && !account.phone) {
+      throw new BadRequestException(
+        'Agregá tu número de teléfono para confirmar la reserva.',
+      );
+    }
+
+    if (!account && !(input.customerName && input.customerPhone)) {
+      throw new BadRequestException(
+        'Faltan el nombre y el teléfono, o iniciar sesión.',
+      );
+    }
+
+    /*
+     * El teléfono lo normaliza el resolver, no esta página. Es lo que hace que
+     * quien reserva acá y quien escribe por WhatsApp sean el mismo cliente: si
+     * cada canal normalizara por su cuenta, alcanzaría con que uno lo hiciera
+     * distinto para partirle el historial. Un número ilegible sale de acá como
+     * un 400 con el motivo, igual que antes.
+     *
+     * El de la cuenta entra como `account` y no como `typed` porque ya está
+     * canónico —se guardó pasando por la misma función— y volver a interpretarlo
+     * contra el prefijo del negocio le agregaría el código de país dos veces.
+     */
     const client = await this.clientsService.resolveByPhone({
       tenantId: tenant.id,
-      phone: {
-        kind: 'typed',
-        value: input.customerPhone,
-        dialCode: dialCodeForTimeZone(tenant.timezone),
-      },
-      name: input.customerName.trim(),
+      phone: account?.phone
+        ? { kind: 'account', value: account.phone }
+        : {
+            kind: 'typed',
+            value: input.customerPhone ?? '',
+            dialCode: dialCodeForTimeZone(tenant.timezone),
+          },
+      name: (account?.name ?? input.customerName ?? '').trim(),
       source: ClientSource.WEB,
     });
 
@@ -277,6 +314,7 @@ export class PublicBookingService {
       const appointment = await this.appointmentsService.createFromBookingFlow({
         tenantId: tenant.id,
         clientId: client.id,
+        customerAccountId: account?.id ?? null,
         serviceId: input.serviceId,
         staffId: confirmation.staffId,
         startTime: confirmation.startTime,
