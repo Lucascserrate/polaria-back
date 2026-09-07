@@ -32,6 +32,7 @@ export type PublicBusinessProfile = {
    * imagen cargue.
    */
   photos: PublicPhoto[];
+  team: PublicStaff[];
   timezone: string;
   /** ISO 4217, para formatear los precios con la moneda del negocio. */
   currency: string;
@@ -72,6 +73,7 @@ export type PublicStaff = {
   id: string;
   name: string;
   jobTitle: string | null;
+  photoUrl: string | null;
 };
 
 /**

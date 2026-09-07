@@ -13,6 +13,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateIf,
   ValidateNested,
 } from 'class-validator';
 import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
@@ -33,6 +34,11 @@ export class CreateStaffDto {
   @MaxLength(255)
   firstName!: string;
 
+  /**
+   * La cadena vacía es lo que **borra** el apellido, y no una omisión: el campo
+   * ausente significa "no se tocó". Es la misma convención en los cuatro campos
+   * de texto opcionales de la ficha; ver `normalizeStaffText`.
+   */
   @ApiPropertyOptional({
     description: 'Apellido. La cadena vacía lo deja sin apellido.',
   })
@@ -42,7 +48,8 @@ export class CreateStaffDto {
   lastName?: string;
 
   @ApiPropertyOptional({
-    description: 'Cargo, texto libre. Visible para el equipo.',
+    description:
+      'Cargo, texto libre. Visible para el equipo. La cadena vacía lo borra.',
     example: 'Barbero',
   })
   @IsOptional()
@@ -76,8 +83,19 @@ export class CreateStaffDto {
   @IsBoolean()
   providesServices?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    description:
+      'Correo de contacto. La cadena vacía lo borra; no es el correo con el que inicia sesión.',
+  })
   @IsOptional()
+  /*
+   * La cadena vacía se salta la validación de formato a propósito: es la forma
+   * que tiene el panel de borrar el correo, y `@IsEmail()` la rechazaría como
+   * un correo mal escrito. `@IsOptional()` no alcanza —solo perdona `null` y
+   * `undefined`—. El vacío se convierte en `NULL` al guardar, así que no llega
+   * a la columna.
+   */
+  @ValidateIf((dto: CreateStaffDto) => dto.email !== '')
   @IsEmail()
   email?: string;
 

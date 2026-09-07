@@ -22,6 +22,7 @@ import {
 } from '../services/booking-policy';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { TenantsService } from '../tenants/tenants.service';
+import type { Staff } from '../staff/entities/staff.entity';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import type {
   PublicBookingConfirmation,
@@ -29,6 +30,22 @@ import type {
   PublicSlot,
   PublicStaff,
 } from './public-booking.types';
+
+/**
+ * Un profesional, recortado a lo publicable.
+ *
+ * Uno solo para el paso de reserva y para la sección "Equipo": si cada uno
+ * armara su objeto, agregar un campo en un lado y olvidarlo en el otro haría
+ * que el mismo profesional se viera distinto en dos pantallas de la misma
+ * página. Y lo que **no** entra —correo, rol, comisión, jornada— no entra una
+ * sola vez.
+ */
+const toPublicStaff = (member: Staff): PublicStaff => ({
+  id: member.id,
+  name: member.name,
+  jobTitle: member.jobTitle ?? null,
+  photoUrl: member.photoUrl ?? null,
+});
 
 /**
  * Todo lo que puede pedir alguien que no inició sesión.
@@ -61,10 +78,11 @@ export class PublicBookingService {
   async getProfile(slug: string): Promise<PublicBusinessProfile> {
     const tenant = await this.resolveTenant(slug);
 
-    const [services, businessHours, photos] = await Promise.all([
+    const [services, businessHours, photos, team] = await Promise.all([
       this.servicesService.findActiveByTenant(tenant.id),
       this.businessHoursService.getTenantSchedule(tenant.id),
       this.businessPhotosService.list(tenant.id),
+      this.bookingAvailabilityService.getBookableStaff({ tenantId: tenant.id }),
     ]);
 
     return {
@@ -73,6 +91,7 @@ export class PublicBookingService {
       businessType: tenant.businessType ?? null,
       logoUrl: tenant.logoUrl,
       photos,
+      team: team.map(toPublicStaff),
       timezone: tenant.timezone,
       currency: tenant.currency,
       dialCode: dialCodeForTimeZone(tenant.timezone),
@@ -121,11 +140,7 @@ export class PublicBookingService {
       serviceId,
     });
 
-    return staff.map((member) => ({
-      id: member.id,
-      name: member.name,
-      jobTitle: member.jobTitle ?? null,
-    }));
+    return staff.map(toPublicStaff);
   }
 
   async getSlots(

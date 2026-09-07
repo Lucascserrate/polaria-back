@@ -101,8 +101,8 @@ export class Staff {
   @Column({ type: 'varchar', length: 16, nullable: true })
   calendarColor?: StaffCalendarColor | null;
 
-  @Column({ nullable: true })
-  email?: string;
+  @Column({ type: 'varchar', nullable: true })
+  email?: string | null;
 
   /**
    * WhatsApp del profesional, en formato internacional (`+59170000000`).

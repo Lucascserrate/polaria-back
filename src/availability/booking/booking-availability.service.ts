@@ -228,6 +228,19 @@ export class BookingAvailabilityService {
   }
 
   /**
+   * El equipo que atiende, sin acotar a un servicio.
+   *
+   * Alimenta la sección "Equipo" de la página pública. Pasa por acá y no por una
+   * consulta propia para que sea **la misma regla** que decide quién puede
+   * recibir una reserva (`BOOKABLE_STAFF_WHERE`: activo y atiende clientes): un
+   * profesional publicado en la página que después no aparece entre las opciones
+   * de reserva es peor que no publicarlo.
+   */
+  getBookableStaff(params: { tenantId: string }): Promise<Staff[]> {
+    return this.availabilityRepository.getStaffList(params.tenantId, []);
+  }
+
+  /**
    * De una lista de fechas, las que el negocio realmente atiende.
    *
    * Sirve para no ofrecer días que no llevan a ninguna parte: elegir "domingo

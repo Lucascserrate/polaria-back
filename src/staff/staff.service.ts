@@ -14,6 +14,7 @@ import { UpdateStaffDto } from './dto/update-staff.dto';
 import { WeeklyRangeDto } from '../schedule/weekly-range.dto';
 import { assertValidStaffSchedules } from './utils/staff-schedule.util';
 import { displayNameOf } from './utils/display-name';
+import { normalizeOptionalText } from './utils/optional-text';
 import { Service } from '../services/entities/service.entity';
 import {
   Appointment,
@@ -51,6 +52,31 @@ function normalizeStaffPhone(
 ): string | null | undefined {
   if (phone === undefined) return undefined;
   return normalizePhoneNumber(phone.trim()) || null;
+}
+
+/**
+ * Los campos de texto opcionales de una ficha, listos para guardar.
+ *
+ * Están todos juntos porque comparten la misma regla y el mismo riesgo: si la
+ * cadena vacía no se convierte en `NULL`, **vaciar el campo desde el panel no
+ * hace nada** —el patch trae `''`, la columna queda con el valor anterior o con
+ * una cadena vacía que ningún lector espera—. Ver `normalizeOptionalText`.
+ *
+ * `phone` va en la lista aunque tenga su propia función: es un campo de texto
+ * opcional más, solo que además se le normaliza el formato del número.
+ */
+function normalizeStaffText(input: {
+  lastName?: string;
+  jobTitle?: string;
+  email?: string;
+  phone?: string;
+}) {
+  return {
+    lastName: normalizeOptionalText(input.lastName),
+    jobTitle: normalizeOptionalText(input.jobTitle),
+    email: normalizeOptionalText(input.email),
+    phone: normalizeStaffPhone(input.phone),
+  };
 }
 
 /**
@@ -242,11 +268,16 @@ export class StaffService {
       schedules: schedules ?? [],
     });
 
+    const text = normalizeStaffText(rest);
+
     const staff = this.staffRepository.create({
       ...rest,
+      ...text,
       // `name` es una proyección, no un dato de entrada: ver `display-name.ts`.
-      name: displayNameOf(rest),
-      phone: normalizeStaffPhone(rest.phone),
+      name: displayNameOf({
+        firstName: rest.firstName,
+        lastName: text.lastName,
+      }),
     });
 
     if (Array.isArray(serviceIds) && serviceIds.length) {
@@ -360,11 +391,15 @@ export class StaffService {
       schedules: schedules ?? staff.schedules ?? [],
     });
 
-    // `merge` saltea las columnas en `undefined`, así que mandar el teléfono
-    // sin normalizar no pisaría nada cuando el patch no lo trae.
+    /*
+     * `merge` saltea las columnas en `undefined`, y de ahí sale la convención:
+     * el campo ausente no se toca y la cadena vacía lo borra. Mandar el texto
+     * sin normalizar es lo que hacía que vaciar el apellido, el cargo o el
+     * email no guardara nada. Ver `normalizeStaffText`.
+     */
     this.staffRepository.merge(staff, {
       ...rest,
-      phone: normalizeStaffPhone(rest.phone),
+      ...normalizeStaffText(rest),
     });
 
     /*
