@@ -68,6 +68,7 @@ export class PublicBookingService {
       slug: tenant.slug as string,
       name: tenant.name,
       businessType: tenant.businessType ?? null,
+      logoUrl: tenant.logoUrl,
       timezone: tenant.timezone,
       currency: tenant.currency,
       dialCode: dialCodeForTimeZone(tenant.timezone),

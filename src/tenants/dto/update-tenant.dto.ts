@@ -42,4 +42,8 @@ export class UpdateTenantDto extends PartialType(CreateTenantDto) {
   @IsOptional()
   @IsString()
   welcomeMessage?: string | null;
+
+  @IsOptional()
+  @IsString()
+  logoUrl?: string | null;
 }

@@ -15,6 +15,14 @@ export type PublicBusinessProfile = {
   name: string;
   /** Ver `BUSINESS_TYPES`. `null` mientras el negocio no lo cargó. */
   businessType: string | null;
+  /**
+   * Logo del negocio, o `null` si no subió ninguno.
+   *
+   * `null` es el caso mayoritario y no un error: la página tiene que resolverse
+   * sin logo —con el nombre, que siempre está— y no reservarle un hueco vacío a
+   * una imagen que puede no llegar nunca.
+   */
+  logoUrl: string | null;
   timezone: string;
   /** ISO 4217, para formatear los precios con la moneda del negocio. */
   currency: string;

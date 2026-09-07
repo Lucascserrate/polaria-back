@@ -31,6 +31,9 @@ import { buildReminderPreview } from '../reminders/reminder-message';
 import { REMINDER_TEMPLATE_BUTTONS } from '../whatsapp/reminder-template';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { buildPublicBookingUrl } from '../tenants/public-booking-url';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
+import { tenantAssetPath } from '../cloudinary/asset-path';
+import type { UploadedImageFile } from '../cloudinary/image-upload';
 import { DataSource } from 'typeorm';
 import axios, { AxiosError } from 'axios';
 
@@ -115,6 +118,15 @@ type SettingsResponse = {
    * muestre plata la necesita.
    */
   currency: string;
+  /**
+   * Logo del negocio, o `null` si no subió ninguno.
+   *
+   * Es la URL lista para usar en un `src`, versión incluida: el panel no arma
+   * direcciones de Cloudinary ni sabe en qué carpeta vive la imagen. Eso deja
+   * que mañana el archivo se mude —a otra cuenta, a otro proveedor— sin tocar
+   * el navegador.
+   */
+  logoUrl: string | null;
   /**
    * Coordenadas del local, como números.
    *
@@ -251,6 +263,7 @@ export class SettingsService {
     private readonly whatsAppTemplateService: WhatsAppTemplateService,
     private readonly whatsAppTemplatesRepository: WhatsAppTemplatesRepository,
     private readonly whatsAppBillingService: WhatsAppBillingService,
+    private readonly cloudinaryService: CloudinaryService,
   ) {}
 
   /**
@@ -324,6 +337,7 @@ export class SettingsService {
       timezone: tenant.timezone,
       dialCode: dialCodeForTimeZone(tenant.timezone),
       currency: tenant.currency,
+      logoUrl: tenant.logoUrl,
       location: toLocation(tenant.latitude, tenant.longitude),
       businessHours,
       aiEnabled: tenant.aiEnabled,
@@ -551,6 +565,80 @@ export class SettingsService {
       };
       await scheduleService.replaceTenantSchedule(tenantId, dto.businessHours);
     }
+
+    return this.getSettings(tenantId);
+  }
+
+  /**
+   * Guarda el logo que subió el negocio y devuelve la configuración ya
+   * actualizada, igual que el resto de los ajustes.
+   *
+   * El identificador en Cloudinary es siempre el mismo para un negocio, así que
+   * subir de nuevo **reemplaza** el archivo anterior en lugar de dejarlo
+   * huérfano. Es lo que evita que cambiar el logo diez veces cueste diez
+   * imágenes que nadie va a volver a mirar y que nada en la base menciona.
+   *
+   * El orden importa: primero Cloudinary, después la base. Si la subida falla,
+   * la columna sigue apuntando al logo viejo —que existe— y el negocio ve un
+   * error con su logo anterior intacto. Al revés, una URL guardada de una
+   * subida que falló sería una imagen rota en su página pública.
+   */
+  async updateLogo(
+    tenantId: string,
+    file: UploadedImageFile | undefined,
+  ): Promise<SettingsResponse> {
+    const tenant = await this.tenantsService.findOne(tenantId);
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    const image = await this.cloudinaryService.uploadImage(file, {
+      publicId: tenantAssetPath(tenantId, 'logo'),
+
+      /**
+       * 600px de lado es más de lo que cualquier pantalla usa para un logo, que
+       * se muestra al tamaño de un avatar. `limit` reduce si excede y no toca lo
+       * que ya entra, así que un logo chico no se agranda ni se pixela.
+       */
+      transformation: [{ width: 600, height: 600, crop: 'limit' }],
+    });
+
+    await this.tenantsService.update(tenantId, { logoUrl: image.url });
+
+    this.logger.log(
+      `Logo actualizado tenantId=${tenantId} bytes=${image.bytes} formato=${image.format} ${image.width}x${image.height}`,
+    );
+
+    return this.getSettings(tenantId);
+  }
+
+  /**
+   * Quita el logo: borra el archivo y la referencia.
+   *
+   * Se borra de verdad y no solo la columna. Un archivo que ya no se puede
+   * alcanzar desde ninguna pantalla igual ocupa la cuota de la cuenta, y con la
+   * columna en `NULL` no queda nada que diga que existía: sería basura
+   * imposible de encontrar salvo mirando el panel de Cloudinary a mano.
+   *
+   * Primero el archivo remoto y después la columna, por lo mismo que en
+   * `updateLogo` pero al revés: si el borrado remoto falla, la columna sigue
+   * apuntando a una imagen que existe y se puede reintentar. En el otro orden,
+   * un fallo dejaría el archivo sin nadie que lo mencione.
+   */
+  async removeLogo(tenantId: string): Promise<SettingsResponse> {
+    const tenant = await this.tenantsService.findOne(tenantId);
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    if (!tenant.logoUrl) {
+      return this.getSettings(tenantId);
+    }
+
+    await this.cloudinaryService.deleteImage(tenantAssetPath(tenantId, 'logo'));
+    await this.tenantsService.update(tenantId, { logoUrl: null });
+
+    this.logger.log(`Logo quitado tenantId=${tenantId}`);
 
     return this.getSettings(tenantId);
   }

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { BookingFlowModule } from '../booking-flow/booking-flow.module';
 import { BusinessHoursModule } from '../business_hours/business_hours.module';
 import { WhatsAppModule } from '../whatsapp/whatsapp.module';
@@ -8,12 +9,14 @@ import { SettingsService } from './settings.service';
 
 @Module({
   // `BookingFlowModule` entra por la desconexión: cerrar las reservas en curso
-  // es parte de soltar la conexión de WhatsApp.
+  // es parte de soltar la conexión de WhatsApp. `CloudinaryModule` entra por el
+  // logo del negocio, que es un ajuste como cualquier otro.
   imports: [
     TenantsModule,
     BusinessHoursModule,
     BookingFlowModule,
     WhatsAppModule,
+    CloudinaryModule,
   ],
   controllers: [SettingsController],
   providers: [SettingsService],
