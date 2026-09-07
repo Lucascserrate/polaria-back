@@ -1,5 +1,6 @@
 import {
   ConflictException,
+  ForbiddenException,
   Injectable,
   NotFoundException,
   BadRequestException,
@@ -447,6 +448,33 @@ export class SettingsService {
      */
     if (dto.polariaName) {
       await this.tenantsService.ensureSlug(tenantId, dto.polariaName);
+    }
+
+    /*
+     * El rubro se escribe una vez y no se vuelve a tocar desde acá.
+     *
+     * No es un dato de preferencia: alimenta decisiones de producto —qué
+     * servicios se sugieren, con qué tono contesta el asistente— y va a
+     * alimentar la comparación entre negocios del mismo rubro. Un negocio que
+     * se pasa de "Barbería" a "Clínica dental" un martes no cambió de rubro,
+     * cambió los datos de todos los que se comparan con él.
+     *
+     * Un negocio que de verdad cambió de rubro es raro y es una conversación
+     * con soporte, que lo corrige por `/tenants`. Acá no queda un formulario
+     * para eso.
+     *
+     * Reenviar el mismo valor no falla: la configuración inicial guarda todo
+     * junto al final y puede repetir el rubro que ya está guardado. Lo que se
+     * rechaza es el cambio, no la repetición.
+     */
+    if (
+      dto.businessType &&
+      tenant.businessType &&
+      dto.businessType !== tenant.businessType
+    ) {
+      throw new ForbiddenException(
+        'El rubro del negocio no se cambia desde la configuración. Escribinos y lo corregimos.',
+      );
     }
 
     if (
