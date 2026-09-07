@@ -44,11 +44,29 @@ const customerSecret = (): string =>
     .update('polaria:customer-session:v1')
     .digest('hex');
 
-const CUSTOMER_COOKIE_OPTIONS: CookieOptions = {
+/**
+ * El dominio de la cookie, y por qué hace falta declararlo.
+ *
+ * La sesión la emite la API (`api.polariahq.com`) pero la tiene que **leer el
+ * sitio público** (`polariahq.com`) al renderizar la página de reservas: es así
+ * como el HTML llega sabiendo si mostrar el botón de Google o el resumen. Una
+ * cookie sin dominio queda atada al host que la emitió, así que el sitio no la
+ * vería nunca y todo el mundo parecería recién llegado.
+ *
+ * Con `COOKIE_DOMAIN=.polariahq.com` la comparten los dos subdominios. Se deja
+ * sin definir en desarrollo a propósito: ahí la API y el sitio son dos puertos
+ * del mismo `localhost` —las cookies no distinguen puerto— y ponerle un dominio
+ * a mano solo daría problemas.
+ */
+const cookieDomain = (): string | undefined =>
+  process.env.COOKIE_DOMAIN?.trim() || undefined;
+
+const customerCookieOptions = (): CookieOptions => ({
   ...AUTH_COOKIE_OPTIONS,
   httpOnly: true,
   maxAge: CUSTOMER_SESSION_TTL_SECONDS * 1000,
-};
+  domain: cookieDomain(),
+});
 
 /** Lo único que lleva el token: de quién es la sesión. */
 interface CustomerTokenPayload {
@@ -98,11 +116,16 @@ export class CustomerSessionService {
   }
 
   setCookie(res: Response, accountId: string): void {
-    res.cookie(CUSTOMER_COOKIE, this.sign(accountId), CUSTOMER_COOKIE_OPTIONS);
+    res.cookie(CUSTOMER_COOKIE, this.sign(accountId), customerCookieOptions());
   }
 
   clearCookie(res: Response): void {
-    res.clearCookie(CUSTOMER_COOKIE, AUTH_COOKIE_OPTIONS);
+    // Mismo dominio que al emitirla: una cookie de `.polariahq.com` no se borra
+    // con un `clearCookie` sin dominio, y la sesión seguiría viva.
+    res.clearCookie(CUSTOMER_COOKIE, {
+      ...AUTH_COOKIE_OPTIONS,
+      domain: cookieDomain(),
+    });
   }
 }
 

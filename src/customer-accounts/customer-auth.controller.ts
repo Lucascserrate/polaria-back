@@ -78,7 +78,10 @@ export class CustomerAuthController {
       ],
     );
 
-    res.clearCookie(CUSTOMER_RETURN_TO_COOKIE, AUTH_COOKIE_OPTIONS);
+    res.clearCookie(CUSTOMER_RETURN_TO_COOKIE, {
+      ...AUTH_COOKIE_OPTIONS,
+      domain: process.env.COOKIE_DOMAIN?.trim() || undefined,
+    });
 
     if (!profile) {
       this.logger.warn('Callback de Google sin perfil: no se abre sesión.');

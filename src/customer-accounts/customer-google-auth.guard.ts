@@ -69,6 +69,7 @@ export class CustomerGoogleAuthGuard extends AuthGuard(
         ...AUTH_COOKIE_OPTIONS,
         httpOnly: true,
         maxAge: RETURN_TO_TTL_SECONDS * 1000,
+        domain: process.env.COOKIE_DOMAIN?.trim() || undefined,
       },
     );
 
