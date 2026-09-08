@@ -22,6 +22,7 @@ export const MAX_SLUG_LENGTH = 60;
  */
 export const RESERVED_SLUGS = new Set([
   'api',
+  'explore',
   'privacy',
   'terms',
   'app',

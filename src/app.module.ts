@@ -28,6 +28,7 @@ import { OnboardingModule } from './onboarding/onboarding.module';
 import { FlowsModule } from './flows/flows.module';
 import { ReportsModule } from './reports/reports.module';
 import { PublicBookingModule } from './public-booking/public-booking.module';
+import { PublicDirectoryModule } from './public-directory/public-directory.module';
 import { SupportModule } from './support/support.module';
 import { CloudinaryModule } from './cloudinary/cloudinary.module';
 import { BusinessPhotosModule } from './business-photos/business-photos.module';
@@ -76,6 +77,7 @@ import { ImpersonationInterceptor } from './auth/impersonation.interceptor';
     FlowsModule,
     ReportsModule,
     PublicBookingModule,
+    PublicDirectoryModule,
     SupportModule,
     CloudinaryModule,
     BusinessPhotosModule,

@@ -45,6 +45,31 @@ export class ServicesService {
   }
 
   /**
+   * De un grupo de negocios, cuáles ofrecen algo hoy.
+   *
+   * Lo usa el buscador para no listar cuentas a medio configurar: un negocio
+   * sin servicios activos tiene página pública, pero es una página donde no hay
+   * nada que reservar.
+   *
+   * Una consulta para todos y no una por negocio: la alternativa es pedir la
+   * carta completa de cada uno para terminar preguntando si está vacía. Y
+   * siempre acotada por `tenantIds` —nunca un `DISTINCT` sobre la tabla
+   * entera—, que es lo que la mantiene barata cuando el listado crezca.
+   */
+  async tenantIdsWithActiveServices(tenantIds: string[]): Promise<Set<string>> {
+    if (tenantIds.length === 0) return new Set();
+
+    const rows = await this.serviceRepository
+      .createQueryBuilder('service')
+      .select('DISTINCT service.tenantId', 'tenantId')
+      .where('service.tenantId IN (:...tenantIds)', { tenantIds })
+      .andWhere('service.isActive = :isActive', { isActive: true })
+      .getRawMany<{ tenantId: string }>();
+
+    return new Set(rows.map((row) => row.tenantId));
+  }
+
+  /**
    * Los servicios que un cliente puede elegir por su cuenta.
    *
    * Es el listado de los canales donde reserva el cliente: el flujo de WhatsApp y

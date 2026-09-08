@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { IsNull, Not, Repository } from 'typeorm';
 
 import { Tenant } from './entities/tenant.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -131,6 +131,27 @@ export class TenantsService {
   /** El negocio detrás de `polariahq.com/[slug]`. */
   findBySlug(slug: string): Promise<Tenant | null> {
     return this.tenantRepository.findOneBy({ slug: slug.toLowerCase() });
+  }
+
+  /**
+   * Los negocios que pueden aparecer en el buscador público.
+   *
+   * Dos condiciones acá y una tercera afuera: tiene slug —sin él no hay página
+   * adónde mandar a nadie— y la cuenta está activa. Que además ofrezca algo lo
+   * decide `PublicDirectoryService`, que es el dueño del criterio completo;
+   * esto sólo evita traer de la base a los que no pueden entrar de ninguna
+   * manera.
+   *
+   * Devuelve entidades y no una forma pública a propósito: recortar lo que se
+   * publica es responsabilidad de quien publica, y hacerlo acá dejaría la
+   * decisión repartida entre dos módulos.
+   */
+  listPublic(limit: number): Promise<Tenant[]> {
+    return this.tenantRepository.find({
+      where: { slug: Not(IsNull()), status: 'active' },
+      order: { name: 'ASC' },
+      take: limit,
+    });
   }
 
   /**

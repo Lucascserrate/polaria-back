@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import { BusinessPhoto } from './entities/business-photo.entity';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { tenantAssetPath } from '../cloudinary/asset-path';
@@ -88,6 +88,29 @@ export class BusinessPhotosService {
     });
 
     return photos.map(toView);
+  }
+
+  /**
+   * La portada de varios negocios de una vez, para el buscador.
+   *
+   * Pide `position: 0` en lugar de traer las galerías y quedarse con la primera
+   * de cada una: es una fila por negocio en vez de hasta diez, y el buscador
+   * dibuja una sola foto por tarjeta. Que la posición 0 exista siempre que haya
+   * fotos lo sostiene `reindex`, que renumera después de cada borrado —sin eso,
+   * borrar la portada dejaría al negocio empezando en 1 y sin imagen acá—.
+   *
+   * Un `Map` y no un arreglo porque quien llama ya tiene su lista de negocios en
+   * orden y sólo necesita cruzar; los que no subieron fotos simplemente no
+   * están, que es el caso mayoritario.
+   */
+  async covers(tenantIds: string[]): Promise<Map<string, BusinessPhotoView>> {
+    if (tenantIds.length === 0) return new Map();
+
+    const photos = await this.photosRepository.find({
+      where: { tenantId: In(tenantIds), position: 0 },
+    });
+
+    return new Map(photos.map((photo) => [photo.tenantId, toView(photo)]));
   }
 
   /**
