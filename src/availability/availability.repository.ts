@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, LessThan, MoreThan, Repository } from 'typeorm';
 import {
   Appointment,
   BLOCKING_APPOINTMENT_STATUSES,
@@ -11,8 +11,15 @@ import { Service } from '../services/entities/service.entity';
 import { Staff } from '../staff/entities/staff.entity';
 import { BOOKABLE_STAFF_WHERE } from '../staff/staff-role';
 import { StaffSchedule } from '../staff/entities/staff_schedule.entity';
+import { ScheduleBlock } from '../schedule-blocks/entities/schedule-block.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import {
+  parseCalendarDate,
+  rangeWindow,
+} from '../appointments/appointment-window';
 import { makeDateInTimeZone, addMinutes } from './utils/availability.helpers';
+import type { SlotRange } from './utils/availability.types';
+import { groupBlocksByStaff } from './utils/schedule-blocks';
 
 @Injectable()
 export class AvailabilityRepository {
@@ -27,6 +34,8 @@ export class AvailabilityRepository {
     private readonly staffRepository: Repository<Staff>,
     @InjectRepository(StaffSchedule)
     private readonly staffScheduleRepository: Repository<StaffSchedule>,
+    @InjectRepository(ScheduleBlock)
+    private readonly scheduleBlockRepository: Repository<ScheduleBlock>,
     @InjectRepository(Appointment)
     private readonly appointmentRepository: Repository<Appointment>,
     @InjectRepository(AppointmentServiceEntity)
@@ -102,6 +111,61 @@ export class AvailabilityRepository {
     }
 
     return grouped;
+  }
+
+  /**
+   * Las franjas marcadas como no disponibles que le aplican a cada profesional.
+   *
+   * Una sola lista plana cubre el rango entero, sin agrupar por día: los
+   * bloqueos son instantes absolutos, así que los que caen fuera de una fecha no
+   * se solapan con su jornada y no hace falta separarlos.
+   *
+   * El reparto de los bloqueos del negocio entero lo hace `groupBlocksByStaff`,
+   * que es donde se puede probar sin base.
+   *
+   * @param toDate Último día del rango, inclusive. Omitido, es un solo día.
+   */
+  async getScheduleBlocksByStaff(
+    tenantId: string,
+    timeZone: string,
+    staffIds: string[],
+    fromDate: string,
+    toDate?: string,
+  ): Promise<Record<string, SlotRange[]>> {
+    const uniqueStaffIds = Array.from(new Set(staffIds)).filter(Boolean);
+    if (!uniqueStaffIds.length) return {};
+
+    const from = parseCalendarDate(fromDate);
+    const to = parseCalendarDate(toDate ?? fromDate);
+    if (!from || !to) return groupBlocksByStaff([], uniqueStaffIds);
+
+    /*
+     * La ventana sale de `rangeWindow` y no de sumarle 24 horas al primer día:
+     * con un cambio de horario de verano en el medio, la medianoche del último
+     * día no está a 24 horas de la del primero y el rango quedaría corto justo
+     * en la punta.
+     */
+    const { startUtc, endUtc } = rangeWindow(timeZone, from, to);
+
+    /*
+     * Solapamiento, no inicio: un bloqueo puede haber empezado el día anterior y
+     * seguir tapando la primera hora del rango.
+     */
+    const overlapping = {
+      tenantId,
+      startTime: LessThan(endUtc),
+      endTime: MoreThan(startUtc),
+    };
+
+    const blocks = await this.scheduleBlockRepository.find({
+      where: [
+        { ...overlapping, staffId: In(uniqueStaffIds) },
+        { ...overlapping, staffId: IsNull() },
+      ],
+      order: { startTime: 'ASC' },
+    });
+
+    return groupBlocksByStaff(blocks, uniqueStaffIds);
   }
 
   async getStaffList(

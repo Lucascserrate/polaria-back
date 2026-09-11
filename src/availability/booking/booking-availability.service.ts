@@ -75,6 +75,17 @@ export type BookingSlotsQuery = {
  */
 const BUSINESS_PROBE = '__business__';
 
+/**
+ * La primera y la última de un conjunto de fechas `YYYY-MM-DD`.
+ *
+ * Ese formato ordena alfabéticamente igual que cronológicamente, así que
+ * alcanza con ordenar las cadenas. Se asume al menos una fecha.
+ */
+const extremesOf = (dates: string[]): [string, string] => {
+  const sorted = [...dates].sort();
+  return [sorted[0], sorted[sorted.length - 1]];
+};
+
 export type SlotConfirmation =
   | { available: true; startTime: Date; endTime: Date; staffId: string }
   | { available: false };
@@ -161,10 +172,16 @@ export class BookingAvailabilityService {
       await this.availabilityRepository.getActiveStaffWithServices(tenantId);
     if (staffList.length === 0) return [];
 
-    const [businessHours, schedulesByStaff] = await Promise.all([
+    const [businessHours, schedulesByStaff, blocksByStaff] = await Promise.all([
       this.availabilityRepository.getBusinessHours(tenantId),
       this.availabilityRepository.getStaffSchedules(
         staffList.map((staff) => staff.id),
+      ),
+      this.availabilityRepository.getScheduleBlocksByStaff(
+        tenantId,
+        timeZone,
+        staffList.map((staff) => staff.id),
+        date,
       ),
     ]);
 
@@ -174,6 +191,7 @@ export class BookingAvailabilityService {
       businessHours,
       staff: staffList,
       schedulesByStaff,
+      blocksByStaff,
     });
 
     const appointmentsByStaff =
@@ -280,10 +298,22 @@ export class BookingAvailabilityService {
     );
     if (staffList.length === 0) return [];
 
-    const [businessHours, schedulesByStaff] = await Promise.all([
+    const [businessHours, schedulesByStaff, blocksByStaff] = await Promise.all([
       this.availabilityRepository.getBusinessHours(tenantId),
       this.availabilityRepository.getStaffSchedules(
         staffList.map((staff) => staff.id),
+      ),
+      /*
+       * Una sola consulta para todas las fechas, acotada por sus extremos. Se
+       * ordenan acá en vez de confiar en que vengan así: son `YYYY-MM-DD`, que
+       * ordena alfabéticamente igual que cronológicamente, y un rango invertido
+       * traería cero bloqueos sin que nada avisara.
+       */
+      this.availabilityRepository.getScheduleBlocksByStaff(
+        tenantId,
+        timeZone,
+        staffList.map((staff) => staff.id),
+        ...extremesOf(dates),
       ),
     ]);
 
@@ -293,6 +323,7 @@ export class BookingAvailabilityService {
       businessHours,
       staff: staffList,
       schedulesByStaff,
+      blocksByStaff,
       /*
        * El mismo piso que usa el armado de horarios. Sin él, un negocio
        * consultado diez minutos antes de cerrar ofrecía "hoy" como día con
@@ -360,6 +391,16 @@ export class BookingAvailabilityService {
         false,
     }));
 
+    /*
+     * Sin bloqueos, a diferencia de todo lo demás en este archivo, y por lo que
+     * separa a las advertencias del motor: el motor descarta lo que no es
+     * ofrecible, y esto explica qué tiene de raro lo que el panel pidió igual.
+     *
+     * Restándolos acá, agendar sobre un bloqueo diría "ese profesional no
+     * trabaja a esa hora" —y trabaja— o "el negocio no abre" —y abre—. Un
+     * bloqueo no es ausencia de jornada y merece decirlo con sus palabras, que
+     * son las de `TIME_BLOCKED`.
+     */
     const workingRangesByStaff = resolveWorkingRangesByStaff({
       date,
       timeZone,
@@ -498,19 +539,34 @@ export class BookingAvailabilityService {
     );
     if (staffList.length === 0) return null;
 
-    const [businessHours, schedulesByStaff] = await Promise.all([
+    const [businessHours, schedulesByStaff, blocksByStaff] = await Promise.all([
       this.availabilityRepository.getBusinessHours(tenantId),
       this.availabilityRepository.getStaffSchedules(
         staffList.map((staff) => staff.id),
       ),
+      this.availabilityRepository.getScheduleBlocksByStaff(
+        tenantId,
+        timeZone,
+        staffList.map((staff) => staff.id),
+        date,
+      ),
     ]);
 
+    /*
+     * Los bloqueos se restan también con `scope === 'panel'`.
+     *
+     * Esta lista responde "qué horarios hay", y una hora bloqueada no es un
+     * horario que haya. Que el panel igual pueda agendar encima no sale de que
+     * se la ofrezcan: sale de que crear la reserva advierte en vez de impedir.
+     * Ver `collectBookingWarnings`.
+     */
     const workingRangesByStaff = resolveWorkingRangesByStaff({
       date,
       timeZone,
       businessHours,
       staff: staffList,
       schedulesByStaff,
+      blocksByStaff,
     });
 
     // Solo siguen los que efectivamente trabajan esa fecha. Esto también cubre

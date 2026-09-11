@@ -83,10 +83,17 @@ export class AvailabilityService {
     );
 
     if (staffList.length > 0) {
-      const schedulesByStaff =
-        await this.availabilityRepository.getStaffSchedules(
+      const [schedulesByStaff, blocksByStaff] = await Promise.all([
+        this.availabilityRepository.getStaffSchedules(
           staffList.map((staff) => staff.id),
-        );
+        ),
+        this.availabilityRepository.getScheduleBlocksByStaff(
+          input.tenantId,
+          timeZone,
+          staffList.map((staff) => staff.id),
+          desiredDate,
+        ),
+      ]);
 
       const workingRangesByStaff = resolveWorkingRangesByStaff({
         date: desiredDate,
@@ -94,6 +101,7 @@ export class AvailabilityService {
         businessHours,
         staff: staffList,
         schedulesByStaff,
+        blocksByStaff,
       });
 
       const workingStaff = staffList.filter(
@@ -151,10 +159,17 @@ export class AvailabilityService {
         return { isAvailable: false, suggestedSlots: [] };
       }
 
-      const schedulesByStaff =
-        await this.availabilityRepository.getStaffSchedules(
+      const [schedulesByStaff, blocksByStaff] = await Promise.all([
+        this.availabilityRepository.getStaffSchedules(
           activeStaff.map((s) => s.id),
-        );
+        ),
+        this.availabilityRepository.getScheduleBlocksByStaff(
+          input.tenantId,
+          timeZone,
+          activeStaff.map((s) => s.id),
+          desiredDate,
+        ),
+      ]);
 
       const workingRangesByStaff = resolveWorkingRangesByStaff({
         date: desiredDate,
@@ -162,6 +177,7 @@ export class AvailabilityService {
         businessHours,
         staff: activeStaff,
         schedulesByStaff,
+        blocksByStaff,
       });
 
       const staffCandidates = activeStaff.filter(
@@ -396,6 +412,16 @@ export class AvailabilityService {
       ),
     ]);
 
+    /*
+     * Sin bloqueos, y es a propósito.
+     *
+     * Esto dibuja las columnas de la agenda, que es otra pregunta que la del
+     * motor: no es "qué le puedo ofrecer a un cliente" sino "cuál es la jornada
+     * de cada uno". El bloqueo se muestra ahí como lo que es —un bloque propio,
+     * con su motivo y su botón de borrar— y no como un agujero en la jornada.
+     * Restándolo acá aparecería dos veces: el rayado de "cerrado" debajo del
+     * bloque, y ese rayado no se puede borrar.
+     */
     const rangesByStaff = resolveWorkingRangesByStaff({
       date: targetDate,
       timeZone,
