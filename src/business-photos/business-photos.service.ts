@@ -250,11 +250,13 @@ export class BusinessPhotosService {
     const ordered = [cover, ...photos.filter((photo) => photo.id !== photoId)];
 
     await this.photosRepository.manager.transaction(async (manager) => {
-      await Promise.all(
-        ordered.map((photo, index) =>
-          manager.update(BusinessPhoto, { id: photo.id }, { position: index }),
-        ),
-      );
+      for (const [index, photo] of ordered.entries()) {
+        await manager.update(
+          BusinessPhoto,
+          { id: photo.id },
+          { position: index },
+        );
+      }
     });
 
     this.logger.log(`Portada cambiada tenantId=${tenantId} photoId=${photoId}`);
@@ -277,12 +279,15 @@ export class BusinessPhotosService {
       select: { id: true },
     });
 
+    // De a una, por lo mismo que en `setCover`.
     await this.photosRepository.manager.transaction(async (manager) => {
-      await Promise.all(
-        photos.map((photo, index) =>
-          manager.update(BusinessPhoto, { id: photo.id }, { position: index }),
-        ),
-      );
+      for (const [index, photo] of photos.entries()) {
+        await manager.update(
+          BusinessPhoto,
+          { id: photo.id },
+          { position: index },
+        );
+      }
     });
   }
 }
