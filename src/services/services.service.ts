@@ -19,13 +19,6 @@ export class ServicesService {
     return this.serviceRepository.save(service);
   }
 
-  findByTenant(tenantId: string): Promise<Service[]> {
-    return this.serviceRepository.find({
-      where: { tenantId },
-      order: { name: 'ASC' },
-    });
-  }
-
   /**
    * Todo el catálogo vigente del negocio.
    *

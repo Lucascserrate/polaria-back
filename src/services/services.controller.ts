@@ -36,13 +36,25 @@ export class ServicesController {
     return this.servicesService.create(createServiceDto);
   }
 
+  /**
+   * El catálogo vigente del negocio.
+   *
+   * Solo los activos. Eliminar un servicio es marcarlo inactivo —la fila queda
+   * para que las citas que lo usaron conserven su precio y su duración—, así que
+   * devolverlos acá hacía que un servicio eliminado siguiera en la lista, igual
+   * que antes de eliminarlo, y que se lo pudiera elegir en una cita nueva que
+   * después el guardado rechazaba.
+   *
+   * Incluye los que el cliente no puede reservar solo: esta lista contesta "qué
+   * ofrece el negocio", y esa política se muestra en cada fila.
+   */
   @Get()
   findAll(@Req() req: Request) {
     const tenantId = (req.user as { sub?: string }).sub;
     if (!tenantId) {
       throw new UnauthorizedException('Missing tenant id');
     }
-    return this.servicesService.findByTenant(tenantId);
+    return this.servicesService.findActiveByTenant(tenantId);
   }
 
   @Get(':id')
