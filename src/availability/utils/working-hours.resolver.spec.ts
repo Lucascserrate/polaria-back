@@ -5,6 +5,8 @@ import {
   isWithinWorkingRanges,
   mergeRanges,
   resolveWorkingRanges,
+  resolveWorkingRangesByStaff,
+  subtractRanges,
   type WeeklyTimeRange,
 } from './working-hours.resolver';
 
@@ -22,6 +24,12 @@ const weekly = (
   dayOfWeek = MONDAY_DOW,
 ): WeeklyTimeRange => ({ dayOfWeek, startTime, endTime });
 
+/** Un tramo absoluto del lunes de prueba: una franja ya resuelta, un bloqueo. */
+const slot = (startTime: string, endTime: string): SlotRange => ({
+  startTime: at(startTime),
+  endTime: at(endTime),
+});
+
 const asLocalTimes = (ranges: SlotRange[]): string[][] =>
   ranges.map((range) => [
     range.startTime.toISOString(),
@@ -35,6 +43,7 @@ const resolve = (input: {
   businessHours: WeeklyTimeRange[];
   usesCustomSchedule?: boolean;
   staffSchedules?: WeeklyTimeRange[];
+  blocks?: SlotRange[];
 }) =>
   resolveWorkingRanges({
     date: MONDAY,
@@ -42,6 +51,7 @@ const resolve = (input: {
     businessHours: input.businessHours,
     usesCustomSchedule: input.usesCustomSchedule ?? false,
     staffSchedules: input.staffSchedules ?? [],
+    blocks: input.blocks,
   });
 
 describe('resolveWorkingRanges', () => {
@@ -173,6 +183,119 @@ describe('resolveWorkingRanges', () => {
 
     expect(asLocalTimes(ranges)).toEqual(expected(['09:00', '20:00']));
   });
+
+  /*
+   * La capa de excepciones por fecha. Es una resta y no una intersección: lo que
+   * define a un bloqueo es que puede caer en el medio de la jornada y partirla.
+   */
+  it('parte la jornada en dos cuando el bloqueo cae en el medio', () => {
+    const ranges = resolve({
+      businessHours: [weekly('09:00', '18:00')],
+      blocks: [slot('12:00', '13:00')],
+    });
+
+    expect(asLocalTimes(ranges)).toEqual(
+      expected(['09:00', '12:00'], ['13:00', '18:00']),
+    );
+  });
+
+  it('recorta el borde cuando el bloqueo arranca con la jornada', () => {
+    const ranges = resolve({
+      businessHours: [weekly('09:00', '18:00')],
+      blocks: [slot('09:00', '11:00')],
+    });
+
+    expect(asLocalTimes(ranges)).toEqual(expected(['11:00', '18:00']));
+  });
+
+  it('deja la jornada vacía cuando el bloqueo la cubre entera', () => {
+    const ranges = resolve({
+      businessHours: [weekly('09:00', '18:00')],
+      blocks: [slot('08:00', '20:00')],
+    });
+
+    expect(ranges).toEqual([]);
+  });
+
+  it('resta después de recortar contra el negocio, no antes', () => {
+    // El bloqueo se come una hora que la jornada propia ya no tenía: no puede
+    // devolverla ni correr el borde.
+    const ranges = resolve({
+      businessHours: [weekly('09:00', '18:00')],
+      usesCustomSchedule: true,
+      staffSchedules: [weekly('10:00', '16:00')],
+      blocks: [slot('08:00', '10:30')],
+    });
+
+    expect(asLocalTimes(ranges)).toEqual(expected(['10:30', '16:00']));
+  });
+
+  it('atraviesa un turno partido restando de los dos tramos', () => {
+    const ranges = resolve({
+      businessHours: [weekly('09:00', '13:00'), weekly('15:00', '20:00')],
+      blocks: [slot('12:00', '16:00')],
+    });
+
+    expect(asLocalTimes(ranges)).toEqual(
+      expected(['09:00', '12:00'], ['16:00', '20:00']),
+    );
+  });
+
+  it('ignora un bloqueo de otro día', () => {
+    const ranges = resolve({
+      businessHours: [weekly('09:00', '18:00')],
+      // Mismas horas, pero del martes: no toca la jornada del lunes.
+      blocks: [
+        {
+          startTime: makeDateInTimeZone('2026-03-17', '12:00', TIME_ZONE),
+          endTime: makeDateInTimeZone('2026-03-17', '13:00', TIME_ZONE),
+        },
+      ],
+    });
+
+    expect(asLocalTimes(ranges)).toEqual(expected(['09:00', '18:00']));
+  });
+
+  it('sin bloqueos devuelve la jornada intacta', () => {
+    const ranges = resolve({
+      businessHours: [weekly('09:00', '18:00')],
+      blocks: [],
+    });
+
+    expect(asLocalTimes(ranges)).toEqual(expected(['09:00', '18:00']));
+  });
+});
+
+describe('resolveWorkingRangesByStaff', () => {
+  const byStaff = (blocksByStaff?: Record<string, SlotRange[]>) =>
+    resolveWorkingRangesByStaff({
+      date: MONDAY,
+      timeZone: TIME_ZONE,
+      businessHours: [weekly('09:00', '18:00')],
+      staff: [
+        { id: 'lucas', usesCustomSchedule: false },
+        { id: 'fernando', usesCustomSchedule: false },
+      ],
+      schedulesByStaff: {},
+      blocksByStaff,
+    });
+
+  /* Lo que hace que "se fue Lucas" no sea "cerró el local". */
+  it('el bloqueo de uno no le toca la jornada al otro', () => {
+    const ranges = byStaff({ lucas: [slot('12:00', '13:00')] });
+
+    expect(asLocalTimes(ranges.lucas)).toEqual(
+      expected(['09:00', '12:00'], ['13:00', '18:00']),
+    );
+    expect(asLocalTimes(ranges.fernando)).toEqual(expected(['09:00', '18:00']));
+  });
+
+  it('sin bloqueos, todos conservan su jornada', () => {
+    const ranges = byStaff();
+
+    expect(asLocalTimes(ranges.lucas)).toEqual(expected(['09:00', '18:00']));
+    expect(asLocalTimes(ranges.fernando)).toEqual(expected(['09:00', '18:00']));
+  });
 });
 
 describe('mergeRanges', () => {
@@ -224,6 +347,108 @@ describe('mergeRanges', () => {
     mergeRanges([original, range('13:00', '20:00')]);
 
     expect(original.endTime.toISOString()).toBe(at('13:00').toISOString());
+  });
+});
+
+describe('subtractRanges', () => {
+  const workday = [slot('09:00', '18:00')];
+
+  it('sin huecos devuelve lo mismo', () => {
+    expect(asLocalTimes(subtractRanges(workday, []))).toEqual(
+      expected(['09:00', '18:00']),
+    );
+  });
+
+  it('parte la franja cuando el hueco cae adentro', () => {
+    expect(
+      asLocalTimes(subtractRanges(workday, [slot('12:00', '13:00')])),
+    ).toEqual(expected(['09:00', '12:00'], ['13:00', '18:00']));
+  });
+
+  it('recorta por el principio', () => {
+    expect(
+      asLocalTimes(subtractRanges(workday, [slot('07:00', '10:00')])),
+    ).toEqual(expected(['10:00', '18:00']));
+  });
+
+  it('recorta por el final', () => {
+    expect(
+      asLocalTimes(subtractRanges(workday, [slot('17:00', '22:00')])),
+    ).toEqual(expected(['09:00', '17:00']));
+  });
+
+  it('elimina la franja que queda tapada entera', () => {
+    expect(subtractRanges(workday, [slot('09:00', '18:00')])).toEqual([]);
+  });
+
+  it('deja intacta la franja cuando el hueco no la toca', () => {
+    expect(
+      asLocalTimes(subtractRanges(workday, [slot('19:00', '21:00')])),
+    ).toEqual(expected(['09:00', '18:00']));
+  });
+
+  /* Un hueco que termina justo donde empieza la franja no le saca nada. */
+  it('no recorta por tocarse en el borde', () => {
+    expect(
+      asLocalTimes(subtractRanges(workday, [slot('07:00', '09:00')])),
+    ).toEqual(expected(['09:00', '18:00']));
+  });
+
+  it('aplica varios huecos a la misma franja', () => {
+    expect(
+      asLocalTimes(
+        subtractRanges(workday, [
+          slot('11:00', '12:00'),
+          slot('15:00', '16:00'),
+        ]),
+      ),
+    ).toEqual(
+      expected(['09:00', '11:00'], ['12:00', '15:00'], ['16:00', '18:00']),
+    );
+  });
+
+  it('acepta los huecos desordenados', () => {
+    expect(
+      asLocalTimes(
+        subtractRanges(workday, [
+          slot('15:00', '16:00'),
+          slot('11:00', '12:00'),
+        ]),
+      ),
+    ).toEqual(
+      expected(['09:00', '11:00'], ['12:00', '15:00'], ['16:00', '18:00']),
+    );
+  });
+
+  /*
+   * Dos bloqueos que se pisan son dos motivos para el mismo rato, no un dato
+   * roto. Sin fusionarlos antes, el segundo cortaría un pedazo que el primero ya
+   * se había llevado y saldría una franja de cero minutos.
+   */
+  it('fusiona los huecos que se solapan antes de restar', () => {
+    expect(
+      asLocalTimes(
+        subtractRanges(workday, [
+          slot('11:00', '14:00'),
+          slot('13:00', '15:00'),
+        ]),
+      ),
+    ).toEqual(expected(['09:00', '11:00'], ['15:00', '18:00']));
+  });
+
+  it('resta de varias franjas a la vez', () => {
+    const split = [slot('09:00', '13:00'), slot('15:00', '20:00')];
+
+    expect(
+      asLocalTimes(subtractRanges(split, [slot('10:00', '16:00')])),
+    ).toEqual(expected(['09:00', '10:00'], ['16:00', '20:00']));
+  });
+
+  it('no muta las franjas recibidas', () => {
+    const original = slot('09:00', '18:00');
+    subtractRanges([original], [slot('12:00', '13:00')]);
+
+    expect(original.endTime.toISOString()).toBe(at('18:00').toISOString());
   });
 });
 
@@ -342,6 +567,81 @@ describe('datesWithCoverage', () => {
         schedulesByStaff: { lucas: [] },
       }),
     ).toEqual(['2026-03-21']);
+  });
+
+  /*
+   * Un feriado: el local abre según el horario, pero ese día está bloqueado
+   * entero. Es el mismo caso que el domingo —no se puede llegar a él— y tiene
+   * que desaparecer del selector de fechas, no ofrecerse para después contestar
+   * "no quedan horarios".
+   */
+  it('descarta el día bloqueado entero para todo el equipo', () => {
+    const wednesday = (time: string) =>
+      makeDateInTimeZone('2026-03-18', time, TIME_ZONE);
+
+    expect(
+      datesWithCoverage({
+        dates: WEEK,
+        timeZone: TIME_ZONE,
+        businessHours: OPEN_MONDAY_TO_SATURDAY,
+        staff: withoutOwnSchedule,
+        schedulesByStaff: {},
+        blocksByStaff: {
+          fernando: [
+            { startTime: wednesday('08:00'), endTime: wednesday('20:00') },
+          ],
+        },
+      }),
+    ).toEqual([
+      '2026-03-16',
+      '2026-03-17',
+      '2026-03-19',
+      '2026-03-20',
+      '2026-03-21',
+    ]);
+  });
+
+  it('conserva el día al que el bloqueo solo le saca un rato', () => {
+    const wednesday = (time: string) =>
+      makeDateInTimeZone('2026-03-18', time, TIME_ZONE);
+
+    expect(
+      datesWithCoverage({
+        dates: ['2026-03-18'],
+        timeZone: TIME_ZONE,
+        businessHours: OPEN_MONDAY_TO_SATURDAY,
+        staff: withoutOwnSchedule,
+        schedulesByStaff: {},
+        blocksByStaff: {
+          fernando: [
+            { startTime: wednesday('12:00'), endTime: wednesday('13:00') },
+          ],
+        },
+      }),
+    ).toEqual(['2026-03-18']);
+  });
+
+  it('conserva el día en que al otro no lo bloquearon', () => {
+    const wednesday = (time: string) =>
+      makeDateInTimeZone('2026-03-18', time, TIME_ZONE);
+
+    expect(
+      datesWithCoverage({
+        dates: ['2026-03-18'],
+        timeZone: TIME_ZONE,
+        businessHours: OPEN_MONDAY_TO_SATURDAY,
+        staff: [
+          { id: 'lucas', usesCustomSchedule: false },
+          { id: 'fernando', usesCustomSchedule: false },
+        ],
+        schedulesByStaff: {},
+        blocksByStaff: {
+          lucas: [
+            { startTime: wednesday('08:00'), endTime: wednesday('20:00') },
+          ],
+        },
+      }),
+    ).toEqual(['2026-03-18']);
   });
 
   it('sin horario del negocio no queda ninguna fecha', () => {

@@ -28,24 +28,39 @@ export interface ResolveWorkingRangesInput {
   usesCustomSchedule: boolean;
   /** Todas las franjas propias del profesional, de cualquier día. */
   staffSchedules: WeeklyTimeRange[];
+  /**
+   * Franjas marcadas como no disponibles que le aplican a este profesional.
+   *
+   * Vienen como instantes absolutos y no como franjas semanales porque son
+   * excepciones de un día concreto: un bloqueo no se repite todos los martes.
+   * Por eso tampoco hace falta filtrarlas por fecha acá —las que no toquen este
+   * día simplemente no se solapan con nada— y una sola lista sirve para
+   * resolver varias fechas seguidas.
+   *
+   * Quien las arma ya mezcló las del negocio entero con las de la persona: acá
+   * son todas iguales, huecos que restar. Ver `ScheduleBlock`.
+   */
+  blocks?: SlotRange[];
 }
 
 /**
  * Franjas en las que un profesional puede recibir reservas en una fecha dada.
  *
- *     franjas = horario_del_negocio ∩ jornada_del_profesional
+ *     franjas = (horario_del_negocio ∩ jornada_del_profesional) − bloqueos
  *
- * Las dos capas significan cosas distintas y por eso se componen en vez de
- * pisarse: el horario del negocio es la envolvente —cuándo está abierto el
+ * Las dos primeras capas significan cosas distintas y por eso se componen en vez
+ * de pisarse: el horario del negocio es la envolvente —cuándo está abierto el
  * local, dato que además se le informa al cliente— y la jornada del profesional
  * es capacidad dentro de esa envolvente. De ahí que sea una intersección: si el
  * local cierra a las 20:00, un olvido en la ficha de una persona no puede
  * generar reservas a las 21:00.
  *
- * Recibe la **fecha** y no el día de la semana a propósito. Un `dayOfWeek` es un
- * número del 0 al 6 y no permite preguntarle a una excepción por fecha
- * (vacaciones, feriados) si aplica. Con la fecha, esa capa entra más adelante
- * como un paso más acá adentro, sin tocar a ningún llamador.
+ * La tercera es de otra naturaleza y por eso se resta en lugar de intersecarse.
+ * Las dos primeras son lo que pasa **todas las semanas**; un bloqueo es lo que
+ * pasó **ese día**: alguien salió, se cortó la luz. Es la capa de excepciones por
+ * fecha que esta función venía esperando, y el motivo de que reciba la **fecha**
+ * y no el día de la semana: un `dayOfWeek` es un número del 0 al 6 y no permite
+ * preguntarle a una excepción por fecha si aplica.
  *
  * Devuelve instantes absolutos, ya resueltos contra la zona horaria del negocio,
  * y sin solapamientos: es lo que necesitan tanto la generación de la grilla de
@@ -54,8 +69,14 @@ export interface ResolveWorkingRangesInput {
 export const resolveWorkingRanges = (
   input: ResolveWorkingRangesInput,
 ): SlotRange[] => {
-  const { date, timeZone, businessHours, usesCustomSchedule, staffSchedules } =
-    input;
+  const {
+    date,
+    timeZone,
+    businessHours,
+    usesCustomSchedule,
+    staffSchedules,
+    blocks = [],
+  } = input;
 
   const dayOfWeek = getDayOfWeek(date, timeZone);
 
@@ -66,7 +87,7 @@ export const resolveWorkingRanges = (
   // Local cerrado: no hay jornada propia que valga.
   if (business.length === 0) return [];
 
-  if (!usesCustomSchedule) return business;
+  if (!usesCustomSchedule) return subtractRanges(business, blocks);
 
   const own = mergeRanges(
     toAbsoluteRanges(staffSchedules, dayOfWeek, date, timeZone),
@@ -76,7 +97,7 @@ export const resolveWorkingRanges = (
   // día, no trabaja. Ver `Staff.usesCustomSchedule`.
   if (own.length === 0) return [];
 
-  return intersectRanges(business, own);
+  return subtractRanges(intersectRanges(business, own), blocks);
 };
 
 /**
@@ -93,6 +114,12 @@ export const resolveWorkingRangesByStaff = (input: {
   staff: Array<{ id: string; usesCustomSchedule: boolean }>;
   /** Jornadas propias por `staffId`, tal como las agrupa el repositorio. */
   schedulesByStaff: Record<string, WeeklyTimeRange[]>;
+  /**
+   * Bloqueos por `staffId`, con los del negocio entero ya repartidos en la
+   * lista de cada uno. Omitirlo es no tener ninguno, que es lo que responde el
+   * negocio que nunca marcó un horario no disponible.
+   */
+  blocksByStaff?: Record<string, SlotRange[]>;
 }): Record<string, SlotRange[]> => {
   const rangesByStaff: Record<string, SlotRange[]> = {};
 
@@ -103,6 +130,7 @@ export const resolveWorkingRangesByStaff = (input: {
       businessHours: input.businessHours,
       usesCustomSchedule: member.usesCustomSchedule,
       staffSchedules: input.schedulesByStaff[member.id] ?? [],
+      blocks: input.blocksByStaff?.[member.id] ?? [],
     });
   }
 
@@ -125,6 +153,12 @@ export const resolveWorkingRangesByStaff = (input: {
  * fecha, que son varias consultas por día; esto resuelve el caso frecuente con
  * lo que ya está cargado en memoria.
  *
+ * Los bloqueos sí los mira, y no es una excepción a lo anterior: un bloqueo no
+ * es agenda, es horario. El día que el local cierra entero por un feriado tiene
+ * exactamente la misma cara que el domingo —no se puede llegar a él— y ofrecerlo
+ * para después contestar "no quedan horarios" es el problema que esta función
+ * existe para evitar.
+ *
  * Con `notBefore` cubre además un tercer motivo, que es de reloj y no de
  * calendario: el día que ya terminó.
  */
@@ -134,6 +168,14 @@ export const datesWithCoverage = (input: {
   businessHours: WeeklyTimeRange[];
   staff: Array<{ id: string; usesCustomSchedule: boolean }>;
   schedulesByStaff: Record<string, WeeklyTimeRange[]>;
+  /**
+   * Bloqueos por `staffId`, cubriendo todas las fechas consultadas.
+   *
+   * Una sola lista plana alcanza para el rango entero: los bloqueos son
+   * instantes absolutos, así que los que no caen en una fecha simplemente no se
+   * solapan con su jornada. No hace falta agruparlos por día.
+   */
+  blocksByStaff?: Record<string, SlotRange[]>;
   /**
    * Instante antes del cual una jornada ya no sirve.
    *
@@ -155,6 +197,7 @@ export const datesWithCoverage = (input: {
       businessHours: input.businessHours,
       staff: input.staff,
       schedulesByStaff: input.schedulesByStaff,
+      blocksByStaff: input.blocksByStaff,
     });
 
     const { notBefore } = input;
@@ -235,6 +278,61 @@ export const mergeRanges = (ranges: SlotRange[]): SlotRange[] => {
   }
 
   return merged;
+};
+
+/**
+ * Le saca huecos a un conjunto de franjas.
+ *
+ * Es lo contrario de `intersectRanges` y la operación que necesita la capa de
+ * excepciones: un bloqueo no acota la jornada por los bordes —para eso serviría
+ * una intersección— sino que la **parte**. Bloquear el mediodía de una jornada
+ * de 09:00 a 18:00 devuelve dos franjas, y tiene que devolver dos: con una sola
+ * de 09:00 a 18:00 con una marca adentro, `generateCandidateSlots` seguiría
+ * ofreciendo un servicio de dos horas que arranca a las 12:30.
+ *
+ * Los huecos se fusionan antes de restar. Dos bloqueos que se pisan no son un
+ * dato roto —son alguien anotando dos motivos para el mismo rato— y sin
+ * fusionarlos el segundo cortaría un pedazo que el primero ya se llevó.
+ *
+ * `base` se asume ordenada y sin solapamientos, que es como sale de `mergeRanges`
+ * y de `intersectRanges`. El resultado hereda esa propiedad: restar puede partir
+ * una franja en varias, nunca unir dos.
+ */
+export const subtractRanges = (
+  base: SlotRange[],
+  holes: SlotRange[],
+): SlotRange[] => {
+  if (holes.length === 0) return base.map((range) => ({ ...range }));
+
+  const merged = mergeRanges(holes);
+  const result: SlotRange[] = [];
+
+  for (const range of base) {
+    // Por dónde va la franja: lo que quedó a la izquierda ya se emitió o se
+    // descartó.
+    let startTime = range.startTime;
+
+    for (const hole of merged) {
+      // El hueco termina antes de donde vamos: no le saca nada a lo que queda.
+      if (hole.endTime <= startTime) continue;
+
+      // Los huecos vienen ordenados, así que desde acá ninguno la toca.
+      if (hole.startTime >= range.endTime) break;
+
+      if (hole.startTime > startTime) {
+        result.push({ startTime, endTime: hole.startTime });
+      }
+
+      startTime = hole.endTime;
+      if (startTime >= range.endTime) break;
+    }
+
+    if (startTime < range.endTime) {
+      result.push({ startTime, endTime: range.endTime });
+    }
+  }
+
+  return result;
 };
 
 const toAbsoluteRanges = (
