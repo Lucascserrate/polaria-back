@@ -10,6 +10,16 @@ import {
 import { Tenant } from '../../tenants/entities/tenant.entity';
 
 /**
+ * Los dos usos que puede tener una foto.
+ *
+ * `gallery` es el local: la fachada, la recepción, la sala. `portfolio` son los
+ * trabajos terminados. Se separan porque responden preguntas distintas —"cómo
+ * es el lugar" y "cómo cortan"— y por eso se muestran en distinto lado de la
+ * página y tienen topes distintos.
+ */
+export type BusinessPhotoKind = 'gallery' | 'portfolio';
+
+/**
  * Una foto del local, de las que se ven en la página pública del negocio.
  *
  * Tabla propia y no una columna JSON en `tenants`: son varias, tienen orden, se
@@ -23,7 +33,7 @@ import { Tenant } from '../../tenants/entities/tenant.entity';
  * distinto en cada foto— así que se guarda: sin él no habría con qué borrar el
  * archivo, y quedaría ocupando la cuota para siempre.
  */
-@Index(['tenantId', 'position'])
+@Index(['tenantId', 'kind', 'position'])
 @Entity('business_photos')
 export class BusinessPhoto {
   @PrimaryGeneratedColumn('uuid')
@@ -41,6 +51,17 @@ export class BusinessPhoto {
   @ManyToOne(() => Tenant, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'tenantId' })
   tenant!: Tenant;
+
+  /**
+   * Para qué se subió: la galería del local o el portfolio de trabajos.
+   *
+   * Son dos colecciones en una tabla porque todo lo mecánico es igual —el
+   * archivo, el orden, el renumerado— y lo que cambia es dónde se muestran y
+   * cuántas entran. Cada consulta acota por este campo **siempre**: sin eso, una
+   * foto de un corte podría terminar como portada del local.
+   */
+  @Column({ type: 'varchar', length: 16, default: 'gallery' })
+  kind!: BusinessPhotoKind;
 
   /** URL de entrega, con versión. Ver `tenants.logoUrl` para el porqué. */
   @Column({ type: 'varchar', length: 512 })

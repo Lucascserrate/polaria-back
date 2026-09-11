@@ -6,7 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { In, Repository } from 'typeorm';
-import { BusinessPhoto } from './entities/business-photo.entity';
+import {
+  BusinessPhoto,
+  type BusinessPhotoKind,
+} from './entities/business-photo.entity';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { tenantAssetPath } from '../cloudinary/asset-path';
 import {
@@ -23,6 +26,31 @@ import {
  * lo que se busca antes de ir por primera vez.
  */
 export const MAX_BUSINESS_PHOTOS = 10;
+
+/**
+ * Cuántos trabajos puede mostrar un negocio.
+ *
+ * Más alto que la galería del local porque responde otra pregunta: el local se
+ * muestra con cuatro o cinco fotos y no cambia, y los trabajos se acumulan. Y
+ * más bajo de lo que un negocio subiría si no hubiera tope, a propósito: treinta
+ * obliga a elegir, y un portfolio elegido vende más que uno exhaustivo. También
+ * es lo que mantiene acotado el almacenamiento, que se paga por cuenta.
+ */
+export const MAX_PORTFOLIO_PHOTOS = 30;
+
+/** El tope que rige según para qué se sube la foto. */
+export const maxPhotosOf = (kind: BusinessPhotoKind): number =>
+  kind === 'portfolio' ? MAX_PORTFOLIO_PHOTOS : MAX_BUSINESS_PHOTOS;
+
+/**
+ * La carpeta de Cloudinary de cada uso.
+ *
+ * Separadas para que se puedan auditar y borrar por su cuenta, y porque el día
+ * que el portfolio necesite otra transformación —recortes verticales, digamos—
+ * no haya que distinguir archivos dentro de la misma carpeta.
+ */
+const folderOf = (kind: BusinessPhotoKind): string =>
+  kind === 'portfolio' ? 'portfolio' : 'photos';
 
 /** Lo que viaja al panel y a la página pública. */
 export interface BusinessPhotoView {
@@ -73,17 +101,29 @@ export class BusinessPhotosService {
    * pidiendo el arreglo pelado, y así hay un solo lugar donde se decide el
    * orden de las fotos.
    */
-  async gallery(tenantId: string): Promise<BusinessGalleryResponse> {
+  async gallery(
+    tenantId: string,
+    kind: BusinessPhotoKind,
+  ): Promise<BusinessGalleryResponse> {
     return {
-      photos: await this.list(tenantId),
-      maxPhotos: MAX_BUSINESS_PHOTOS,
+      photos: await this.list(tenantId, kind),
+      maxPhotos: maxPhotosOf(kind),
     };
   }
 
-  /** La galería del negocio, en orden. La primera es la portada. */
-  async list(tenantId: string): Promise<BusinessPhotoView[]> {
+  /**
+   * Las fotos de un uso, en orden. En la galería, la primera es la portada.
+   *
+   * `kind` no tiene valor por omisión a propósito: es lo único que separa las
+   * fotos del local de las de trabajos, y un llamador que se lo olvidara
+   * mezclaría las dos colecciones sin que nada fallara.
+   */
+  async list(
+    tenantId: string,
+    kind: BusinessPhotoKind,
+  ): Promise<BusinessPhotoView[]> {
     const photos = await this.photosRepository.find({
-      where: { tenantId },
+      where: { tenantId, kind },
       order: { position: 'ASC' },
     });
 
@@ -107,7 +147,8 @@ export class BusinessPhotosService {
     if (tenantIds.length === 0) return new Map();
 
     const photos = await this.photosRepository.find({
-      where: { tenantId: In(tenantIds), position: 0 },
+      // Acotado a la galería: la miniatura del buscador es el local, no un corte.
+      where: { tenantId: In(tenantIds), kind: 'gallery', position: 0 },
     });
 
     return new Map(photos.map((photo) => [photo.tenantId, toView(photo)]));
@@ -128,17 +169,20 @@ export class BusinessPhotosService {
    */
   async addMany(
     tenantId: string,
+    kind: BusinessPhotoKind,
     files: UploadedImageFile[] | undefined,
   ): Promise<BusinessGalleryResponse> {
     if (!files?.length) {
       throw new BadRequestException('No se recibió ninguna imagen.');
     }
 
+    const maxPhotos = maxPhotosOf(kind);
+
     const existing = await this.photosRepository.count({
-      where: { tenantId },
+      where: { tenantId, kind },
     });
 
-    const remaining = MAX_BUSINESS_PHOTOS - existing;
+    const remaining = maxPhotos - existing;
 
     /*
      * Se rechaza el lote completo en lugar de guardar las que entran y descartar
@@ -148,8 +192,8 @@ export class BusinessPhotosService {
     if (files.length > remaining) {
       throw new BadRequestException(
         remaining === 0
-          ? `Ya tenés el máximo de ${MAX_BUSINESS_PHOTOS} fotos. Borrá alguna para subir otra.`
-          : `Podés subir ${remaining} foto${remaining === 1 ? '' : 's'} más: el máximo es ${MAX_BUSINESS_PHOTOS}.`,
+          ? `Ya tenés el máximo de ${maxPhotos} fotos. Borrá alguna para subir otra.`
+          : `Podés subir ${remaining} foto${remaining === 1 ? '' : 's'} más: el máximo es ${maxPhotos}.`,
       );
     }
 
@@ -164,7 +208,7 @@ export class BusinessPhotosService {
 
     for (const file of files) {
       const image = await this.cloudinaryService.uploadImage(file, {
-        folder: tenantAssetPath(tenantId, 'photos'),
+        folder: tenantAssetPath(tenantId, folderOf(kind)),
 
         /**
          * 1600px de lado alcanza para la foto grande de la galería en una
@@ -177,6 +221,7 @@ export class BusinessPhotosService {
       await this.photosRepository.save(
         this.photosRepository.create({
           tenantId,
+          kind,
           url: image.url,
           publicId: image.publicId,
           width: image.width,
@@ -189,10 +234,10 @@ export class BusinessPhotosService {
     }
 
     this.logger.log(
-      `Fotos agregadas tenantId=${tenantId} cantidad=${files.length} total=${position}`,
+      `Fotos agregadas tenantId=${tenantId} kind=${kind} cantidad=${files.length} total=${position}`,
     );
 
-    return this.gallery(tenantId);
+    return this.gallery(tenantId, kind);
   }
 
   /**
@@ -204,25 +249,33 @@ export class BusinessPhotosService {
    */
   async remove(
     tenantId: string,
+    kind: BusinessPhotoKind,
     photoId: string,
   ): Promise<BusinessGalleryResponse> {
     const photo = await this.photosRepository.findOne({
-      where: { id: photoId, tenantId },
+      where: { id: photoId, tenantId, kind },
     });
 
-    // Filtrado por `tenantId` y no solo por `id`: sin eso, el id de una foto de
-    // otro negocio alcanzaría para borrarla.
+    /*
+     * Filtrado por `tenantId` y no solo por `id`: sin eso, el id de una foto de
+     * otro negocio alcanzaría para borrarla.
+     *
+     * Y por `kind`, para que cada endpoint sólo alcance su propia colección: el
+     * del portfolio no puede borrar una foto del local aunque le pasen su id.
+     */
     if (!photo) {
       throw new NotFoundException('La foto no existe.');
     }
 
     await this.cloudinaryService.deleteImage(photo.publicId);
     await this.photosRepository.delete({ id: photo.id });
-    await this.reindex(tenantId);
+    await this.reindex(tenantId, kind);
 
-    this.logger.log(`Foto borrada tenantId=${tenantId} photoId=${photoId}`);
+    this.logger.log(
+      `Foto borrada tenantId=${tenantId} kind=${kind} photoId=${photoId}`,
+    );
 
-    return this.gallery(tenantId);
+    return this.gallery(tenantId, kind);
   }
 
   /**
@@ -237,8 +290,12 @@ export class BusinessPhotosService {
     tenantId: string,
     photoId: string,
   ): Promise<BusinessGalleryResponse> {
+    /*
+     * Solo la galería tiene portada. El portfolio no: ahí no hay una foto que
+     * represente al resto, son treinta trabajos y ninguno es "el principal".
+     */
     const photos = await this.photosRepository.find({
-      where: { tenantId },
+      where: { tenantId, kind: 'gallery' },
       order: { position: 'ASC' },
     });
 
@@ -261,7 +318,7 @@ export class BusinessPhotosService {
 
     this.logger.log(`Portada cambiada tenantId=${tenantId} photoId=${photoId}`);
 
-    return this.gallery(tenantId);
+    return this.gallery(tenantId, 'gallery');
   }
 
   /**
@@ -272,9 +329,14 @@ export class BusinessPhotosService {
    * generaría una posición repetida, con lo cual el orden de la galería pasaría
    * a depender de cómo MySQL desempata. La portada dejaría de ser estable.
    */
-  private async reindex(tenantId: string): Promise<void> {
+  private async reindex(
+    tenantId: string,
+    kind: BusinessPhotoKind,
+  ): Promise<void> {
     const photos = await this.photosRepository.find({
-      where: { tenantId },
+      // Por uso: renumerar las dos colecciones juntas les daría posiciones
+      // entremezcladas y la galería se quedaría sin su `position: 0`.
+      where: { tenantId, kind },
       order: { position: 'ASC' },
       select: { id: true },
     });

@@ -32,6 +32,17 @@ export type PublicBusinessProfile = {
    * imagen cargue.
    */
   photos: PublicPhoto[];
+  /**
+   * Trabajos terminados, en orden de carga.
+   *
+   * Aparte de `photos` y no mezclado con ellas porque contestan preguntas
+   * distintas: aquéllas muestran cómo es el lugar y éstas cómo cortan. En la
+   * página van en secciones separadas, y quien decide cuál mirar es el cliente.
+   *
+   * Vacío es el caso normal y significa que el negocio no subió trabajos: la
+   * sección no se dibuja, igual que la galería.
+   */
+  portfolio: PublicPhoto[];
   team: PublicStaff[];
   timezone: string;
   /** ISO 4217, para formatear los precios con la moneda del negocio. */

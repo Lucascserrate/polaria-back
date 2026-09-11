@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { CloudinaryModule } from '../cloudinary/cloudinary.module';
 import { BusinessPhoto } from './entities/business-photo.entity';
 import { BusinessPhotosController } from './business-photos.controller';
+import { BusinessPortfolioController } from './business-portfolio.controller';
 import { BusinessPhotosService } from './business-photos.service';
 
 /**
@@ -13,7 +14,7 @@ import { BusinessPhotosService } from './business-photos.service';
  */
 @Module({
   imports: [TypeOrmModule.forFeature([BusinessPhoto]), CloudinaryModule],
-  controllers: [BusinessPhotosController],
+  controllers: [BusinessPhotosController, BusinessPortfolioController],
   providers: [BusinessPhotosService],
   exports: [BusinessPhotosService],
 })

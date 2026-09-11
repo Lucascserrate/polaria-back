@@ -43,7 +43,7 @@ export class BusinessPhotosController {
 
   @Get()
   list(@Actor() actor: AuthenticatedActor) {
-    return this.photosService.gallery(actor.tenantId);
+    return this.photosService.gallery(actor.tenantId, 'gallery');
   }
 
   /**
@@ -82,7 +82,7 @@ export class BusinessPhotosController {
     @Actor() actor: AuthenticatedActor,
     @UploadedFiles() files: UploadedImageFile[] | undefined,
   ) {
-    return this.photosService.addMany(actor.tenantId, files);
+    return this.photosService.addMany(actor.tenantId, 'gallery', files);
   }
 
   /**
@@ -106,6 +106,6 @@ export class BusinessPhotosController {
     @Actor() actor: AuthenticatedActor,
     @Param('photoId') photoId: string,
   ) {
-    return this.photosService.remove(actor.tenantId, photoId);
+    return this.photosService.remove(actor.tenantId, 'gallery', photoId);
   }
 }

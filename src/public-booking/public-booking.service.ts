@@ -80,12 +80,16 @@ export class PublicBookingService {
   async getProfile(slug: string): Promise<PublicBusinessProfile> {
     const tenant = await this.resolveTenant(slug);
 
-    const [services, businessHours, photos, team] = await Promise.all([
-      this.servicesService.findActiveByTenant(tenant.id),
-      this.businessHoursService.getTenantSchedule(tenant.id),
-      this.businessPhotosService.list(tenant.id),
-      this.bookingAvailabilityService.getBookableStaff({ tenantId: tenant.id }),
-    ]);
+    const [services, businessHours, photos, portfolio, team] =
+      await Promise.all([
+        this.servicesService.findActiveByTenant(tenant.id),
+        this.businessHoursService.getTenantSchedule(tenant.id),
+        this.businessPhotosService.list(tenant.id, 'gallery'),
+        this.businessPhotosService.list(tenant.id, 'portfolio'),
+        this.bookingAvailabilityService.getBookableStaff({
+          tenantId: tenant.id,
+        }),
+      ]);
 
     return {
       slug: tenant.slug as string,
@@ -93,6 +97,7 @@ export class PublicBookingService {
       businessType: tenant.businessType ?? null,
       logoUrl: tenant.logoUrl,
       photos,
+      portfolio,
       team: team.map(toPublicStaff),
       timezone: tenant.timezone,
       currency: tenant.currency,
