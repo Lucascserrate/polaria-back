@@ -61,7 +61,7 @@ export class Tenant {
   slug!: string | null;
 
   @Column({ nullable: true })
-  businessType?: string;
+  businessType!: string | null;
 
   /**
    * Dirección del local en texto, tal como la diría alguien que da indicaciones.
@@ -192,7 +192,7 @@ export class Tenant {
   logoUrl!: string | null;
 
   @Column({ nullable: true })
-  email?: string;
+  email!: string | null;
 
   @Column({ nullable: true })
   googleId?: string;

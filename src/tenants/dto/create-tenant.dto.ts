@@ -19,7 +19,7 @@ export class CreateTenantDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  businessType?: string;
+  businessType?: string | null;
 
   /**
    * Dirección del local en texto, para la página pública de reservas. `null` la
@@ -97,10 +97,11 @@ export class CreateTenantDto {
   @Length(3, 3)
   currency?: string;
 
+  /** Correo de contacto del negocio. `null` lo borra, igual que `businessType`. */
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
-  email?: string;
+  email?: string | null;
 
   @ApiPropertyOptional()
   @IsOptional()
