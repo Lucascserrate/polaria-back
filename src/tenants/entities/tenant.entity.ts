@@ -60,7 +60,19 @@ export class Tenant {
   @Column({ type: 'varchar', length: 60, nullable: true })
   slug!: string | null;
 
-  @Column({ nullable: true })
+  /**
+   * Nulable de forma explícita, como `address` y `logoUrl`: la columna ya
+   * admitía NULL y lo que faltaba era que el tipo lo dijera, porque TypeORM no
+   * escribe un `null` sobre una propiedad declarada opcional y así el campo no
+   * se podía borrar.
+   *
+   * El `type` va escrito y no inferido, y no es opcional: TypeORM deduce la
+   * columna del tipo de TypeScript, y de una unión `string | null` lo que
+   * reflexiona es `Object`, que MySQL no sabe qué es. Sin esto la aplicación no
+   * arranca: falla al construir los metadatos, antes de atender nada. Es el
+   * motivo de que todas las columnas nulables de esta entidad lo declaren.
+   */
+  @Column({ type: 'varchar', length: 255, nullable: true })
   businessType!: string | null;
 
   /**
@@ -191,7 +203,8 @@ export class Tenant {
   @Column({ type: 'varchar', length: 512, nullable: true })
   logoUrl!: string | null;
 
-  @Column({ nullable: true })
+  /** Nulable y con tipo escrito, por lo mismo que `businessType`. */
+  @Column({ type: 'varchar', length: 255, nullable: true })
   email!: string | null;
 
   @Column({ nullable: true })
