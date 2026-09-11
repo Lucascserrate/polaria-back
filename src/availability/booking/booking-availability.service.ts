@@ -370,7 +370,7 @@ export class BookingAvailabilityService {
 
     const staffIds = [...new Set(segments.map((segment) => segment.staffId))];
 
-    const [businessHours, schedulesByStaff, staffList, busyByStaff] =
+    const [businessHours, schedulesByStaff, staffList, busyByStaff, blocks] =
       await Promise.all([
         this.availabilityRepository.getBusinessHours(tenantId),
         this.availabilityRepository.getStaffSchedules(staffIds),
@@ -381,6 +381,16 @@ export class BookingAvailabilityService {
           timeZone,
           staffIds,
           input.excludeAppointmentId,
+        ),
+        /*
+         * Sin repartir entre profesionales: acá el bloqueo no se resta, se
+         * cuenta, y para contarlo hay que saber de quién es y por qué.
+         */
+        this.availabilityRepository.getScheduleBlocks(
+          tenantId,
+          timeZone,
+          staffIds,
+          date,
         ),
       ]);
 
@@ -430,6 +440,7 @@ export class BookingAvailabilityService {
       businessRanges,
       workingRangesByStaff,
       busyByStaff,
+      blocks,
     });
   }
 

@@ -1,6 +1,7 @@
 import {
   BookingWarningCode,
   collectBookingWarnings,
+  type BlockedRange,
   type RequestedSegment,
 } from './booking-warnings';
 
@@ -27,7 +28,19 @@ const segment = (
   endTime: at(end),
 });
 
-const collect = (input: {
+/** Una franja marcada como no disponible. Sin `staffId` es de todo el negocio. */
+const blocked = (
+  start: string,
+  end: string,
+  options: { staffId?: string | null; reason?: string | null } = {},
+): BlockedRange => ({
+  staffId: options.staffId ?? null,
+  reason: options.reason,
+  startTime: at(start),
+  endTime: at(end),
+});
+
+interface CollectInput {
   segments: RequestedSegment[];
   businessRanges?: Array<{ startTime: Date; endTime: Date }>;
   workingRangesByStaff?: Record<
@@ -35,8 +48,12 @@ const collect = (input: {
     Array<{ startTime: Date; endTime: Date }>
   >;
   busyByStaff?: Record<string, Array<{ startTime: Date; endTime: Date }>>;
+  blocks?: BlockedRange[];
   now?: Date;
-}) =>
+}
+
+/** Las advertencias enteras, para poder mirar también lo que dicen. */
+const collectFull = (input: CollectInput) =>
   collectBookingWarnings({
     now: input.now ?? NOW,
     segments: input.segments,
@@ -46,7 +63,11 @@ const collect = (input: {
       carlos: BUSINESS,
     },
     busyByStaff: input.busyByStaff,
-  }).map((warning) => warning.code);
+    blocks: input.blocks,
+  });
+
+const collect = (input: CollectInput) =>
+  collectFull(input).map((warning) => warning.code);
 
 describe('collectBookingWarnings', () => {
   it('no advierte nada de una reserva normal', () => {
@@ -297,5 +318,206 @@ describe('collectBookingWarnings · pisarse con otra cita', () => {
 
   it('sin agenda ocupada no cambia nada', () => {
     expect(collect({ segments: [segment('16:00', '16:30')] })).toEqual([]);
+  });
+});
+
+describe('collectBookingWarnings, horarios bloqueados', () => {
+  it('advierte cuando la reserva cae en un bloqueo del negocio', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30')],
+        blocks: [blocked('15:00', '17:00')],
+      }),
+    ).toEqual([BookingWarningCode.TIME_BLOCKED]);
+  });
+
+  it('no advierte cuando el bloqueo no toca la reserva', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30')],
+        blocks: [blocked('10:00', '11:00')],
+      }),
+    ).toEqual([]);
+  });
+
+  it('no advierte cuando el bloqueo termina justo donde empieza la cita', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30')],
+        blocks: [blocked('15:00', '16:00')],
+      }),
+    ).toEqual([]);
+  });
+
+  it('advierte aunque la cita solo roce el bloqueo por un minuto', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30')],
+        blocks: [blocked('16:29', '17:00')],
+      }),
+    ).toEqual([BookingWarningCode.TIME_BLOCKED]);
+  });
+
+  /* El bloqueo de una persona no le tapa el horario a otra. */
+  it('ignora el bloqueo de otro profesional', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30', 'diego', 'Diego')],
+        blocks: [blocked('15:00', '17:00', { staffId: 'carlos' })],
+      }),
+    ).toEqual([]);
+  });
+
+  it('advierte el bloqueo del profesional que atiende', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30', 'diego', 'Diego')],
+        blocks: [blocked('15:00', '17:00', { staffId: 'diego' })],
+      }),
+    ).toEqual([BookingWarningCode.TIME_BLOCKED]);
+  });
+
+  it('el bloqueo del negocio alcanza a cualquiera', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30', 'carlos', 'Carlos')],
+        blocks: [blocked('15:00', '17:00')],
+      }),
+    ).toEqual([BookingWarningCode.TIME_BLOCKED]);
+  });
+
+  /* Una reserva de dos servicios adentro del mismo bloqueo es un solo problema. */
+  it('lo dice una vez por bloqueo, no una por tramo', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30'), segment('16:30', '17:00')],
+        blocks: [blocked('15:00', '18:00')],
+      }),
+    ).toEqual([BookingWarningCode.TIME_BLOCKED]);
+  });
+
+  it('avisa por cada bloqueo distinto que se pisa', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '17:00')],
+        blocks: [blocked('15:00', '16:30'), blocked('16:45', '18:00')],
+      }),
+    ).toEqual([
+      BookingWarningCode.TIME_BLOCKED,
+      BookingWarningCode.TIME_BLOCKED,
+    ]);
+  });
+
+  /*
+   * Igual que pisarse con otra cita: un bloqueo no es consecuencia de la forma
+   * del calendario, así que no se calla por lo que digan las otras.
+   */
+  it('no se calla porque además el día esté cerrado', () => {
+    expect(
+      collect({
+        segments: [segment('16:00', '16:30')],
+        businessRanges: [],
+        blocks: [blocked('15:00', '17:00')],
+      }),
+    ).toEqual([BookingWarningCode.TIME_BLOCKED, BookingWarningCode.CLOSED_DAY]);
+  });
+
+  it('no se calla porque además esté fuera de horario', () => {
+    expect(
+      collect({
+        segments: [segment('20:00', '20:30')],
+        blocks: [blocked('19:30', '21:00')],
+      }),
+    ).toEqual([
+      BookingWarningCode.TIME_BLOCKED,
+      BookingWarningCode.OUTSIDE_BUSINESS_HOURS,
+    ]);
+  });
+
+  it('sin bloqueos no cambia nada', () => {
+    expect(collect({ segments: [segment('16:00', '16:30')] })).toEqual([]);
+  });
+});
+
+describe('collectBookingWarnings, qué dice un bloqueo', () => {
+  const messageOf = (input: Parameters<typeof collectFull>[0]) =>
+    collectFull(input)[0].message;
+
+  it('nombra al profesional cuando el bloqueo es suyo', () => {
+    expect(
+      messageOf({
+        segments: [segment('16:00', '16:30', 'diego', 'Diego')],
+        blocks: [blocked('15:00', '17:00', { staffId: 'diego' })],
+      }),
+    ).toBe('Diego tiene ese horario marcado como no disponible.');
+  });
+
+  it('no nombra a nadie cuando el bloqueo es del negocio', () => {
+    expect(
+      messageOf({
+        segments: [segment('16:00', '16:30')],
+        blocks: [blocked('15:00', '17:00')],
+      }),
+    ).toBe('Ese horario está marcado como no disponible.');
+  });
+
+  it('suma el motivo cuando lo hay', () => {
+    expect(
+      messageOf({
+        segments: [segment('16:00', '16:30')],
+        blocks: [blocked('15:00', '17:00', { reason: 'Corte de luz' })],
+      }),
+    ).toBe('Ese horario está marcado como no disponible: Corte de luz.');
+  });
+
+  it('junta el nombre y el motivo', () => {
+    expect(
+      messageOf({
+        segments: [segment('16:00', '16:30', 'diego', 'Diego')],
+        blocks: [
+          blocked('15:00', '17:00', {
+            staffId: 'diego',
+            reason: 'Turno médico',
+          }),
+        ],
+      }),
+    ).toBe('Diego tiene ese horario marcado como no disponible: Turno médico.');
+  });
+
+  /* El motivo es texto que escribió una persona: puede venir vacío. */
+  it('ignora un motivo en blanco', () => {
+    expect(
+      messageOf({
+        segments: [segment('16:00', '16:30')],
+        blocks: [blocked('15:00', '17:00', { reason: '   ' })],
+      }),
+    ).toBe('Ese horario está marcado como no disponible.');
+  });
+
+  it('sobrevive a un profesional sin nombre', () => {
+    expect(
+      messageOf({
+        segments: [segment('16:00', '16:30', 'diego', null)],
+        blocks: [blocked('15:00', '17:00', { staffId: 'diego' })],
+      }),
+    ).toBe('El profesional tiene ese horario marcado como no disponible.');
+  });
+
+  it('lleva el staffId del bloqueo de un profesional', () => {
+    const [warning] = collectFull({
+      segments: [segment('16:00', '16:30', 'diego', 'Diego')],
+      blocks: [blocked('15:00', '17:00', { staffId: 'diego' })],
+    });
+
+    expect(warning.staffId).toBe('diego');
+  });
+
+  it('el bloqueo del negocio no lleva staffId', () => {
+    const [warning] = collectFull({
+      segments: [segment('16:00', '16:30')],
+      blocks: [blocked('15:00', '17:00')],
+    });
+
+    expect(warning.staffId).toBeUndefined();
   });
 });

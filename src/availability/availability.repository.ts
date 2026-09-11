@@ -135,9 +135,37 @@ export class AvailabilityRepository {
     const uniqueStaffIds = Array.from(new Set(staffIds)).filter(Boolean);
     if (!uniqueStaffIds.length) return {};
 
+    const blocks = await this.getScheduleBlocks(
+      tenantId,
+      timeZone,
+      uniqueStaffIds,
+      fromDate,
+      toDate,
+    );
+
+    return groupBlocksByStaff(blocks, uniqueStaffIds);
+  }
+
+  /**
+   * Los mismos bloqueos, pero sin repartir: cada fila conserva de quién es.
+   *
+   * Lo que necesitan las advertencias del panel, que no restan el bloqueo sino
+   * que lo explican y para eso tienen que poder nombrarlo. Ver
+   * `collectBookingWarnings`.
+   */
+  async getScheduleBlocks(
+    tenantId: string,
+    timeZone: string,
+    staffIds: string[],
+    fromDate: string,
+    toDate?: string,
+  ): Promise<ScheduleBlock[]> {
+    const uniqueStaffIds = Array.from(new Set(staffIds)).filter(Boolean);
+    if (!uniqueStaffIds.length) return [];
+
     const from = parseCalendarDate(fromDate);
     const to = parseCalendarDate(toDate ?? fromDate);
-    if (!from || !to) return groupBlocksByStaff([], uniqueStaffIds);
+    if (!from || !to) return [];
 
     /*
      * La ventana sale de `rangeWindow` y no de sumarle 24 horas al primer día:
@@ -157,15 +185,13 @@ export class AvailabilityRepository {
       endTime: MoreThan(startUtc),
     };
 
-    const blocks = await this.scheduleBlockRepository.find({
+    return this.scheduleBlockRepository.find({
       where: [
         { ...overlapping, staffId: In(uniqueStaffIds) },
         { ...overlapping, staffId: IsNull() },
       ],
       order: { startTime: 'ASC' },
     });
-
-    return groupBlocksByStaff(blocks, uniqueStaffIds);
   }
 
   async getStaffList(

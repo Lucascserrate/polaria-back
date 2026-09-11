@@ -31,6 +31,8 @@ export enum BookingWarningCode {
   STAFF_OFF_SHIFT = 'STAFF_OFF_SHIFT',
   /** Ese profesional ya tiene otra cita que se pisa con esta. */
   STAFF_BUSY = 'STAFF_BUSY',
+  /** Alguien marcó esa franja como no disponible. */
+  TIME_BLOCKED = 'TIME_BLOCKED',
 }
 
 export interface BookingWarning {
@@ -53,6 +55,20 @@ export interface RequestedSegment extends SlotRange {
   staffName?: string | null;
 }
 
+/**
+ * Una franja marcada como no disponible, tal como está guardada.
+ *
+ * Llega **sin repartir** entre profesionales, al revés de lo que recibe el
+ * motor de disponibilidad. Es la diferencia entre restar y explicar: al motor le
+ * alcanza con saber que hay un hueco, y acá hay que poder decir de quién es el
+ * bloqueo y por qué, que es justamente lo que el reparto borra.
+ */
+export interface BlockedRange extends SlotRange {
+  /** `null` = el bloqueo es del negocio entero. */
+  staffId: string | null;
+  reason?: string | null;
+}
+
 export interface CollectBookingWarningsInput {
   now: Date;
   /** En orden de ejecución. Se asume al menos uno. */
@@ -68,11 +84,33 @@ export interface CollectBookingWarningsInput {
    * pisan consigo misma.
    */
   busyByStaff?: Record<string, SlotRange[]>;
+  /** Las franjas marcadas como no disponibles ese día, de cualquier alcance. */
+  blocks?: BlockedRange[];
 }
 
 /** Dos tramos se pisan si comparten aunque sea un minuto. */
 const overlaps = (a: SlotRange, b: SlotRange): boolean =>
   a.startTime < b.endTime && a.endTime > b.startTime;
+
+/**
+ * Cómo se cuenta un bloqueo que se pisa con la reserva.
+ *
+ * El motivo va al final y no reemplaza a la frase: es texto que escribió una
+ * persona, puede decir cualquier cosa —o nada—, y la advertencia tiene que
+ * seguir siendo legible sin él.
+ */
+const blockedMessage = (
+  block: BlockedRange,
+  affected: RequestedSegment,
+): string => {
+  const who = block.staffId
+    ? `${affected.staffName ?? 'El profesional'} tiene ese horario marcado como no disponible`
+    : 'Ese horario está marcado como no disponible';
+
+  const reason = block.reason?.trim();
+
+  return reason ? `${who}: ${reason}.` : `${who}.`;
+};
 
 /**
  * Las advertencias de una reserva pedida, sin repetir la misma en tres formas.
@@ -123,6 +161,34 @@ export const collectBookingWarnings = (
       message: segment.staffName
         ? `${segment.staffName} ya tiene otra cita en ese horario.`
         : 'El profesional ya tiene otra cita en ese horario.',
+    });
+  }
+
+  /*
+   * Los bloqueos se avisan siempre, por el mismo motivo que pisarse con otra
+   * cita: no son consecuencia de la forma del calendario.
+   *
+   * Un bloqueo es una decisión que alguien tomó sobre ese rato en particular
+   * —y que muchas veces trae escrito por qué—, así que callarlo porque además
+   * el día está cerrado sería tapar el único aviso que explica algo que no se
+   * deduce del horario.
+   *
+   * Uno por bloqueo y no uno por tramo: una reserva de corte y barba que cae
+   * entera adentro del mismo bloqueo es un solo problema.
+   */
+  for (const block of input.blocks ?? []) {
+    const affected = segments.find(
+      (segment) =>
+        overlaps(segment, block) &&
+        (block.staffId === null || block.staffId === segment.staffId),
+    );
+
+    if (!affected) continue;
+
+    warnings.push({
+      code: BookingWarningCode.TIME_BLOCKED,
+      ...(block.staffId ? { staffId: block.staffId } : {}),
+      message: blockedMessage(block, affected),
     });
   }
 
