@@ -3,6 +3,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   UploadedFiles,
   UseGuards,
@@ -32,9 +33,10 @@ import {
  * local, o para borrar a través del endpoint equivocado. Acá el uso lo fija el
  * servidor y no hay forma de pedir otro.
  *
- * No tiene `cover`: en el portfolio ninguna foto representa al resto, así que
- * el orden es el de carga y no hay nada que elegir. Es la única operación que
- * la galería tiene y esto no.
+ * La operación que la galería llama `cover` acá se llama `featured`: es la misma
+ * —mandar una foto al frente— pero significa otra cosa. En el local es la
+ * portada; acá es el trabajo que encabeza el mosaico. La ruta dice lo que
+ * significa en esta colección, no cómo está implementada.
  */
 @ApiTags('settings')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -74,6 +76,21 @@ export class BusinessPortfolioController {
     @UploadedFiles() files: UploadedImageFile[] | undefined,
   ) {
     return this.photosService.addMany(actor.tenantId, 'portfolio', files);
+  }
+
+  /**
+   * Destaca un trabajo: lo manda al frente del mosaico, en la baldosa grande.
+   *
+   * Mientras nadie destaque nada, ese lugar lo ocupa el más reciente —las fotos
+   * nuevas del portfolio entran adelante—, así que esto es para fijar una
+   * excepción, no para tener que elegir siempre.
+   */
+  @Patch(':photoId/featured')
+  setFeatured(
+    @Actor() actor: AuthenticatedActor,
+    @Param('photoId') photoId: string,
+  ) {
+    return this.photosService.moveToFront(actor.tenantId, 'portfolio', photoId);
   }
 
   @Delete(':photoId')

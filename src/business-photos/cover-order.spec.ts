@@ -60,13 +60,13 @@ describe('setCover, orden resultante', () => {
   it('mueve la elegida al frente, tres veces seguidas', async () => {
     const { service, order } = setup(['A', 'B', 'C']);
 
-    await service.setCover('t1', 'B');
+    await service.moveToFront('t1', 'gallery', 'B');
     expect(order()).toEqual(['B', 'A', 'C']);
 
-    await service.setCover('t1', 'C');
+    await service.moveToFront('t1', 'gallery', 'C');
     expect(order()).toEqual(['C', 'B', 'A']);
 
-    await service.setCover('t1', 'A');
+    await service.moveToFront('t1', 'gallery', 'A');
     expect(order()).toEqual(['A', 'C', 'B']);
   });
 });

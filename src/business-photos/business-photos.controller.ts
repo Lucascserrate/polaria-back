@@ -98,7 +98,7 @@ export class BusinessPhotosController {
     @Actor() actor: AuthenticatedActor,
     @Param('photoId') photoId: string,
   ) {
-    return this.photosService.setCover(actor.tenantId, photoId);
+    return this.photosService.moveToFront(actor.tenantId, 'gallery', photoId);
   }
 
   @Delete(':photoId')

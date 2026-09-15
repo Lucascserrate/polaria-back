@@ -124,6 +124,11 @@ export class BusinessPhotosService {
   ): Promise<BusinessPhotoView[]> {
     const photos = await this.photosRepository.find({
       where: { tenantId, kind },
+      /*
+       * Ascendente en las dos: `position: 0` es siempre la que encabeza —la
+       * portada del local, la destacada del portfolio—. Una sola regla, y por
+       * eso `moveToFront` sirve para las dos sin preguntar de cuál se trata.
+       */
       order: { position: 'ASC' },
     });
 
@@ -204,7 +209,30 @@ export class BusinessPhotosService {
      */
     files.forEach((file) => assertUploadedImage(file));
 
-    let position = existing;
+    /*
+     * En el portfolio lo nuevo va adelante; en la galería, al final.
+     *
+     * No es una preferencia estética. En la galería `position: 0` es la portada
+     * que alguien eligió, y una foto nueva no puede desplazarla por el solo
+     * hecho de haberse subido después. En el portfolio la primera es la
+     * destacada, pero mientras nadie elija ninguna conviene que sea la más
+     * reciente: un portfolio encabezado por el trabajo más viejo es lo contrario
+     * de lo que un negocio quiere mostrar, y así no hay nada que administrar.
+     *
+     * Se corre a las que ya estaban **antes** de subir, y no se reordena al
+     * final, para que valga lo mismo que dice el comentario de arriba: si la
+     * tercera falla, las dos primeras quedan guardadas —y adelante, que es donde
+     * corresponden— en lugar de en un orden que dependió de dónde se cortó.
+     */
+    if (kind === 'portfolio' && existing > 0) {
+      await this.photosRepository.increment(
+        { tenantId, kind },
+        'position',
+        files.length,
+      );
+    }
+
+    let position = kind === 'portfolio' ? 0 : existing;
 
     for (const file of files) {
       const image = await this.cloudinaryService.uploadImage(file, {
@@ -279,23 +307,24 @@ export class BusinessPhotosService {
   }
 
   /**
-   * Pone una foto como portada, es decir, primera.
+   * Manda una foto al frente de su colección.
+   *
+   * Una sola operación para dos nombres: en la galería eso significa "hacerla
+   * portada" y en el portfolio "destacarla". Lo que cambia es cómo se llama en
+   * cada pantalla, no lo que hace, y por eso el método no habla de portadas.
    *
    * Es lo mínimo para elegir qué se ve grande en la página sin arrastrar y
    * soltar, que en un teléfono es la interacción más difícil de acertar. El
    * resto conserva su orden relativo: mover una foto al frente no reordena las
    * demás entre sí.
    */
-  async setCover(
+  async moveToFront(
     tenantId: string,
+    kind: BusinessPhotoKind,
     photoId: string,
   ): Promise<BusinessGalleryResponse> {
-    /*
-     * Solo la galería tiene portada. El portfolio no: ahí no hay una foto que
-     * represente al resto, son treinta trabajos y ninguno es "el principal".
-     */
     const photos = await this.photosRepository.find({
-      where: { tenantId, kind: 'gallery' },
+      where: { tenantId, kind },
       order: { position: 'ASC' },
     });
 
@@ -316,9 +345,11 @@ export class BusinessPhotosService {
       }
     });
 
-    this.logger.log(`Portada cambiada tenantId=${tenantId} photoId=${photoId}`);
+    this.logger.log(
+      `Foto al frente tenantId=${tenantId} kind=${kind} photoId=${photoId}`,
+    );
 
-    return this.gallery(tenantId, 'gallery');
+    return this.gallery(tenantId, kind);
   }
 
   /**
