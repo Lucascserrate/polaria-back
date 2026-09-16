@@ -13,6 +13,7 @@ import {
 import { Type } from 'class-transformer';
 import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
 import { BUSINESS_TYPES } from '../../tenants/business-type';
+import { CURRENCIES } from '../../tenants/currency';
 import { WELCOME_MESSAGE_MAX_LENGTH } from '../../conversations/welcome-menu';
 import { SUPPORTED_REMINDER_OFFSETS } from '../../reminders/reminder-offsets';
 
@@ -94,6 +95,20 @@ export class UpdateSettingsDto {
   @IsOptional()
   @IsString()
   timezone?: string;
+
+  /**
+   * Moneda del negocio, en ISO 4217.
+   *
+   * Se edita desde el precio del servicio y no desde una pantalla de
+   * configuración: una moneda equivocada sólo se ve al lado de un precio, así que
+   * ese es el único lugar donde alguien la va a corregir.
+   *
+   * La lista es cerrada —ver `CURRENCIES`— porque cada código necesita su locale
+   * para imprimirse con el símbolo que el cliente espera.
+   */
+  @IsOptional()
+  @IsIn(CURRENCIES)
+  currency?: string;
 
   /**
    * Coordenadas del local. Ambas o ninguna: media coordenada no ubica nada.

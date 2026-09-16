@@ -2,14 +2,15 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
   IsBoolean,
+  IsIn,
   IsInt,
   IsLatitude,
   IsLongitude,
   IsOptional,
   IsString,
-  Length,
   MaxLength,
 } from 'class-validator';
+import { CURRENCIES } from '../currency';
 
 export class CreateTenantDto {
   @ApiProperty()
@@ -88,13 +89,19 @@ export class CreateTenantDto {
   @IsString()
   timezone!: string;
 
+  /**
+   * Moneda del negocio, en ISO 4217.
+   *
+   * Ausente se deduce de la zona horaria —ver `currencyForTimeZone`—, que ya
+   * viene en este mismo alta. La lista es cerrada porque cada código necesita su
+   * locale para imprimirse con el símbolo que el cliente espera.
+   */
   @ApiPropertyOptional({
     description: 'Moneda del negocio en ISO 4217: BOB, ARS, USD…',
     example: 'BOB',
   })
   @IsOptional()
-  @IsString()
-  @Length(3, 3)
+  @IsIn(CURRENCIES)
   currency?: string;
 
   /** Correo de contacto del negocio. `null` lo borra, igual que `businessType`. */

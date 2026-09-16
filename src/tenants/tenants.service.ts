@@ -18,6 +18,7 @@ import {
 } from '../subscriptions/subscription.rules';
 import { DEFAULT_REMINDER_OFFSETS } from '../reminders/reminder-offsets';
 import { buildUniqueSlug } from './slug.util';
+import { currencyForTimeZone } from './currency';
 
 /**
  * Zona horaria con la que nace un negocio creado desde el registro.
@@ -108,6 +109,12 @@ export class TenantsService {
       // y así los dos caminos de alta —registro y soporte— lo comparten.
       reminderOffsets:
         createTenantDto.reminderOffsets ?? DEFAULT_REMINDER_OFFSETS,
+      // La moneda se deduce de la zona, que en este alta ya viene. El default de
+      // la columna es boliviano, así que sin esto un negocio dado de alta por
+      // soporte con zona de Bogotá publicaba sus precios en bolivianos.
+      currency:
+        createTenantDto.currency ??
+        currencyForTimeZone(createTenantDto.timezone),
     });
     return this.tenantRepository.save(tenant);
   }

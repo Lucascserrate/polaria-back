@@ -11,6 +11,7 @@ import { ConfigService } from '@nestjs/config';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { currencyForTimeZone } from '../tenants/currency';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { UpdateSettingsDto } from './dto/update-settings.dto';
 import { BookingSessionService } from '../booking-flow/booking-session.service';
@@ -477,15 +478,36 @@ export class SettingsService {
       );
     }
 
+    /*
+     * La moneda sigue a la zona horaria mientras el negocio se está creando.
+     *
+     * La configuración inicial manda la zona del dispositivo pero no pregunta la
+     * moneda, así que sin esto todo negocio se quedaba con el valor por defecto
+     * de la columna: uno colombiano publicaba sus precios en bolivianos.
+     *
+     * Se deduce **sólo mientras el rubro está vacío**, que es la marca de que
+     * todavía no pasó por la configuración inicial: el rubro lo escribe ese
+     * formulario y después no se vuelve a tocar. Corregir la zona meses más tarde
+     * no le cambia la moneda a un negocio que ya está cobrando, y un boliviano
+     * que cobra en dólares no la pierde por mudar de zona.
+     */
+    const inferredCurrency =
+      dto.currency ??
+      (dto.timezone && !tenant.businessType
+        ? currencyForTimeZone(dto.timezone)
+        : undefined);
+
     if (
       dto.businessType ||
       dto.timezone ||
+      inferredCurrency ||
       dto.location !== undefined ||
       dto.address !== undefined
     ) {
       await this.tenantsService.update(tenantId, {
         businessType: dto.businessType ?? tenant.businessType ?? undefined,
         timezone: dto.timezone ?? tenant.timezone,
+        currency: inferredCurrency ?? tenant.currency,
         // `null` explícito borra la ubicación; ausente la deja como está.
         latitude:
           dto.location === null ? null : (dto.location?.latitude ?? undefined),

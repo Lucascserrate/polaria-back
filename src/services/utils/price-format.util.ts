@@ -5,28 +5,10 @@
  * dos piezas siempre viajan juntas hasta acá.
  */
 
-/** Moneda de reserva cuando el tenant no tiene una configurada. */
-const FALLBACK_CURRENCY = 'BOB';
+import { CURRENCY_LOCALES, DEFAULT_CURRENCY } from '../../tenants/currency';
 
-/**
- * Locale con el que se formatea cada moneda.
- *
- * El símbolo lo elige el locale, no la moneda: `es-AR` con BOB imprime
- * "BOB 8.000", mientras que `es-BO` imprime "Bs 8.000". Formatear cada moneda con
- * el locale de su país es lo que hace que el precio se vea como el cliente espera.
- */
-const CURRENCY_LOCALES: Record<string, string> = {
-  BOB: 'es-BO',
-  ARS: 'es-AR',
-  CLP: 'es-CL',
-  COP: 'es-CO',
-  MXN: 'es-MX',
-  PEN: 'es-PE',
-  UYU: 'es-UY',
-  PYG: 'es-PY',
-  USD: 'en-US',
-  EUR: 'es-ES',
-};
+/** Moneda de reserva cuando el tenant no tiene una configurada. */
+const FALLBACK_CURRENCY: string = DEFAULT_CURRENCY;
 
 const FALLBACK_LOCALE = 'es';
 
