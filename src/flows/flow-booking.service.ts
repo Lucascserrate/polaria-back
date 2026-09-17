@@ -280,7 +280,6 @@ export class FlowBookingService {
     }
 
     const timezone = await this.resolveTimezone(session.tenantId);
-    const currency = await this.resolveCurrency(session.tenantId);
     const staffName = await this.resolveStaffName(payload.staff);
 
     const lines = [
@@ -289,7 +288,7 @@ export class FlowBookingService {
       formatTimeLabel(new Date(slot), timezone),
     ];
 
-    const price = formatPrice(service.price, currency);
+    const price = formatPrice(service.price, service.currency);
     if (price) lines.push(price);
 
     // Con "Sin preferencia" no se nombra a nadie: el profesional se decide por
@@ -395,14 +394,11 @@ export class FlowBookingService {
 
   /** El precio va en el título: el `data-source` de un `Dropdown` solo lleva id y título. */
   private async serviceOptions(tenantId: string): Promise<FlowOption[]> {
-    const [services, currency] = await Promise.all([
-      // Solo los reservables por el cliente: el Flow es un canal suyo.
-      this.servicesService.findSelfBookableByTenant(tenantId),
-      this.resolveCurrency(tenantId),
-    ]);
+    const services =
+      await this.servicesService.findSelfBookableByTenant(tenantId);
 
     return services.map((service) => {
-      const price = formatPrice(service.price, currency);
+      const price = formatPrice(service.price, service.currency);
       return {
         id: service.id,
         title: price ? `${service.name} — ${price}` : service.name,
@@ -537,10 +533,5 @@ export class FlowBookingService {
   private async resolveTimezone(tenantId: string): Promise<string> {
     const tenant = await this.tenantsService.findOne(tenantId);
     return tenant?.timezone ?? DEFAULT_TIMEZONE;
-  }
-
-  private async resolveCurrency(tenantId: string): Promise<string | null> {
-    const tenant = await this.tenantsService.findOne(tenantId);
-    return tenant?.currency ?? null;
   }
 }

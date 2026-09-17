@@ -1,4 +1,8 @@
 import { currentCalendarDate } from '../../appointments/appointment-window';
+import {
+  sumByCurrency,
+  type MoneyTotal,
+} from '../../services/utils/money-total.util';
 
 /**
  * Cómo evolucionó la facturación dentro del período.
@@ -17,9 +21,15 @@ import { currentCalendarDate } from '../../appointments/appointment-window';
 export type TimelineGranularity = 'day' | 'month';
 
 export interface TimelineBucket {
-  /** `YYYY-MM-DD` por día, `YYYY-MM` por mes. */
   key: string;
-  revenue: number;
+  /**
+   * Lo facturado en el tramo, una entrada por moneda.
+   *
+   * Es una lista por lo mismo que el resumen: un catálogo puede cobrar en dos
+   * monedas y sumarlas daría una curva que no mide nada. Casi siempre trae un
+   * elemento, y un tramo sin facturación trae cero.
+   */
+  revenue: MoneyTotal[];
   /** Citas distintas atendidas en el tramo, no servicios prestados. */
   completed: number;
 }
@@ -34,6 +44,7 @@ export interface TimelineEntry {
   appointmentId: string;
   startTime: Date;
   price: number;
+  currency: string;
 }
 
 /**
@@ -103,12 +114,12 @@ export const buildReportTimeline = (input: {
   // Los tramos se arman primero, en orden, para que los vacíos existan.
   const buckets = new Map<
     string,
-    { revenue: number; appointments: Set<string> }
+    { entries: TimelineEntry[]; appointments: Set<string> }
   >();
   for (const day of days) {
     const key = keyOf(day);
     if (!buckets.has(key)) {
-      buckets.set(key, { revenue: 0, appointments: new Set() });
+      buckets.set(key, { entries: [], appointments: new Set() });
     }
   }
 
@@ -121,7 +132,7 @@ export const buildReportTimeline = (input: {
     // lugar de inventarle un tramo que el eje no tiene.
     if (!bucket) continue;
 
-    bucket.revenue += entry.price;
+    bucket.entries.push(entry);
     bucket.appointments.add(entry.appointmentId);
   }
 
@@ -129,8 +140,11 @@ export const buildReportTimeline = (input: {
     granularity,
     buckets: [...buckets.entries()].map(([key, value]) => ({
       key,
-      // Dos decimales: es plata, y sumar flotantes deja colas de centésimas.
-      revenue: Math.round(value.revenue * 100) / 100,
+      revenue: sumByCurrency(value.entries).map((total) => ({
+        ...total,
+        // Dos decimales: es plata, y sumar flotantes deja colas de centésimas.
+        amount: Math.round(total.amount * 100) / 100,
+      })),
       completed: value.appointments.size,
     })),
   };

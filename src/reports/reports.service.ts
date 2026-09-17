@@ -27,6 +27,8 @@ import {
   type ReportTimeline,
 } from './utils/report-timeline.util';
 import {
+  CurrencyEarnings,
+  CurrencyRevenue,
   ReportSummary,
   ServiceRankingEntry,
   StaffRankingEntry,
@@ -59,6 +61,7 @@ interface StaffRankingRow {
   deletedAt: Date | null;
   completedAppointments: string;
   revenue: string | null;
+  currency: string;
 }
 
 interface ServiceRankingRow {
@@ -66,6 +69,21 @@ interface ServiceRankingRow {
   serviceName: string;
   timesPerformed: string;
   revenue: string | null;
+  currency: string;
+}
+
+/**
+ * Lo facturado en una moneda: el agregado que devuelven todas las consultas de
+ * plata desde que la moneda es del servicio y no del negocio.
+ *
+ * `appointments` son las citas **distintas** que tocaron esa moneda, y es el
+ * divisor del promedio: dividir los dólares entre todas las citas del período
+ * daría un promedio que no corresponde a nada.
+ */
+interface RevenueByCurrencyRow {
+  currency: string;
+  revenue: string | null;
+  appointments: string | null;
 }
 
 /**
@@ -165,11 +183,55 @@ export class ReportsService {
       .andWhere('appointment.startTime < :endUtc', { endUtc: range.endUtc });
   }
 
+  /**
+   * Lo facturado en el período, una fila por moneda.
+   *
+   * Agrupa por `currencyAtBooking` —la congelada al reservar— y no por la moneda
+   * que el servicio tiene hoy: cambiarle la moneda a un servicio no puede
+   * reescribir lo que ya se cobró.
+   */
+  private revenueByCurrency(
+    query: SelectQueryBuilder<AppointmentSegment>,
+  ): Promise<RevenueByCurrencyRow[]> {
+    return query
+      .select('segment.currencyAtBooking', 'currency')
+      .addSelect('SUM(segment.priceAtBooking)', 'revenue')
+      .addSelect('COUNT(DISTINCT appointment.id)', 'appointments')
+      .groupBy('segment.currencyAtBooking')
+      .orderBy('revenue', 'DESC')
+      .getRawMany<RevenueByCurrencyRow>();
+  }
+
+  /** Las filas crudas por moneda, ya con el promedio hecho. */
+  private toCurrencyRevenue(rows: RevenueByCurrencyRow[]): CurrencyRevenue[] {
+    return rows.map((row) => {
+      const amount = toNumber(row.revenue);
+      const appointments = toNumber(row.appointments);
+
+      return {
+        currency: row.currency,
+        amount: toMoney(amount),
+        averageTicket: appointments ? toMoney(amount / appointments) : 0,
+      };
+    });
+  }
+
+  /** Lo mismo, con la parte del profesional agregada a cada moneda. */
+  private toCurrencyEarnings(
+    rows: RevenueByCurrencyRow[],
+    commissionRate: number | null,
+  ): CurrencyEarnings[] {
+    return this.toCurrencyRevenue(rows).map((entry) => ({
+      ...entry,
+      estimatedCommission: estimateCommission(entry.amount, commissionRate),
+    }));
+  }
+
   private async getSummary(
     tenantId: string,
     range: ReportRange,
   ): Promise<ReportSummary> {
-    const [counts, revenueRow] = await Promise.all([
+    const [counts, revenueRows] = await Promise.all([
       this.appointmentsInRange(tenantId, range)
         .select(
           'SUM(CASE WHEN appointment.status = :pending THEN 1 ELSE 0 END)',
@@ -195,9 +257,7 @@ export class ReportsService {
         })
         .getRawOne<StatusCountRow>(),
 
-      this.billedSegments(tenantId, range)
-        .select('SUM(segment.priceAtBooking)', 'revenue')
-        .getRawOne<{ revenue: string | null }>(),
+      this.revenueByCurrency(this.billedSegments(tenantId, range)),
     ]);
 
     const byStatus: Record<AppointmentStatus, number> = {
@@ -207,20 +267,14 @@ export class ReportsService {
       [AppointmentStatus.CANCELLED]: toNumber(counts?.cancelled),
     };
 
-    const revenueTotal = toNumber(revenueRow?.revenue);
-    const completedCount = byStatus[AppointmentStatus.COMPLETED];
-
     return {
-      revenueTotal: toMoney(revenueTotal),
-      completedCount,
+      revenue: this.toCurrencyRevenue(revenueRows),
+      completedCount: byStatus[AppointmentStatus.COMPLETED],
       cancelledCount: byStatus[AppointmentStatus.CANCELLED],
       pendingCount: OPEN_APPOINTMENT_STATUSES.reduce(
         (sum, status) => sum + byStatus[status],
         0,
       ),
-      averageTicket: completedCount
-        ? toMoney(revenueTotal / completedCount)
-        : 0,
       byStatus,
     };
   }
@@ -243,10 +297,12 @@ export class ReportsService {
       .select('appointment.id', 'appointmentId')
       .addSelect('appointment.startTime', 'startTime')
       .addSelect('segment.priceAtBooking', 'price')
+      .addSelect('segment.currencyAtBooking', 'currency')
       .getRawMany<{
         appointmentId: string;
         startTime: Date | string;
         price: string | number;
+        currency: string;
       }>();
 
     return buildReportTimeline({
@@ -257,6 +313,7 @@ export class ReportsService {
         appointmentId: row.appointmentId,
         startTime: new Date(row.startTime),
         price: toNumber(row.price),
+        currency: row.currency,
       })),
     });
   }
@@ -278,27 +335,58 @@ export class ReportsService {
       // sola cita atendida, aunque sean dos segmentos.
       .addSelect('COUNT(DISTINCT appointment.id)', 'completedAppointments')
       .addSelect('SUM(segment.priceAtBooking)', 'revenue')
+      // La moneda entra al agrupamiento: quien cobra en dos monedas produce dos
+      // filas, que después se juntan en un solo profesional del ranking.
+      .addSelect('segment.currencyAtBooking', 'currency')
       .groupBy('staff.id')
       .addGroupBy('staff.name')
       .addGroupBy('staff.commissionRate')
       .addGroupBy('staff.deletedAt')
+      .addGroupBy('segment.currencyAtBooking')
       .orderBy('revenue', 'DESC')
       .getRawMany<StaffRankingRow>();
 
-    return rows.map((row) => {
-      const revenue = toNumber(row.revenue);
-      const commissionRate = parseCommissionRate(row.commissionRate);
+    /*
+     * Una entrada por profesional, con sus monedas adentro.
+     *
+     * El `GROUP BY` devuelve una fila por profesional **y** moneda; el ranking se
+     * lee por persona. Se junta acá, conservando el orden de llegada, que ya
+     * viene por facturación descendente: el primero en aparecer es el que más
+     * factura en su moneda principal.
+     */
+    const byStaff = new Map<string, StaffRankingEntry>();
 
-      return {
+    for (const row of rows) {
+      const commissionRate = parseCommissionRate(row.commissionRate);
+      const entry = byStaff.get(row.staffId) ?? {
         staffId: row.staffId,
         staffName: row.staffName,
-        completedAppointments: toNumber(row.completedAppointments),
-        revenue: toMoney(revenue),
+        completedAppointments: 0,
+        earnings: [],
         commissionRate,
-        estimatedCommission: estimateCommission(revenue, commissionRate),
         isFormer: row.deletedAt !== null,
       };
-    });
+
+      const amount = toMoney(toNumber(row.revenue));
+      const appointments = toNumber(row.completedAppointments);
+
+      /*
+       * Las citas se suman entre monedas y el promedio se calcula por moneda.
+       * Una cita que mezcla dos monedas se cuenta en las dos: es una cita que el
+       * profesional atendió, y no hay forma de partirla en media.
+       */
+      entry.completedAppointments += appointments;
+      entry.earnings.push({
+        currency: row.currency,
+        amount,
+        averageTicket: appointments ? toMoney(amount / appointments) : 0,
+        estimatedCommission: estimateCommission(amount, commissionRate),
+      });
+
+      byStaff.set(row.staffId, entry);
+    }
+
+    return [...byStaff.values()];
   }
 
   private async getServiceRanking(
@@ -311,8 +399,13 @@ export class ReportsService {
       .addSelect('service.name', 'serviceName')
       .addSelect('COUNT(*)', 'timesPerformed')
       .addSelect('SUM(segment.priceAtBooking)', 'revenue')
+      // Por moneda además de por servicio: un servicio que cambió de moneda a
+      // mitad del período produce una fila por cada una, que es lo que
+      // realmente se cobró.
+      .addSelect('segment.currencyAtBooking', 'currency')
       .groupBy('service.id')
       .addGroupBy('service.name')
+      .addGroupBy('segment.currencyAtBooking')
       .orderBy('revenue', 'DESC')
       .getRawMany<ServiceRankingRow>();
 
@@ -321,6 +414,7 @@ export class ReportsService {
       serviceName: row.serviceName,
       timesPerformed: toNumber(row.timesPerformed),
       revenue: toMoney(toNumber(row.revenue)),
+      currency: row.currency,
     }));
   }
 
@@ -428,7 +522,7 @@ export class ReportsService {
     range: ReportRange,
     commissionRate: number | null,
   ): Promise<StaffSummary> {
-    const [counts, billed] = await Promise.all([
+    const [counts, revenueRows, billed] = await Promise.all([
       /*
        * Los estados se cuentan sobre citas **distintas** en las que tenga algún
        * segmento. Sin el `DISTINCT`, una cita en la que presta dos servicios se
@@ -465,27 +559,24 @@ export class ReportsService {
         })
         .getRawOne<StaffCountRow>(),
 
-      // El grano acá sí es el segmento: cada uno es un servicio prestado.
+      this.revenueByCurrency(
+        this.billedSegmentsForStaff(tenantId, staffId, range),
+      ),
+
+      // El grano acá sí es el segmento: cada uno es un servicio prestado. Va
+      // aparte de la plata porque contar trabajo no se parte por moneda.
       this.billedSegmentsForStaff(tenantId, staffId, range)
-        .select('SUM(segment.priceAtBooking)', 'revenue')
-        .addSelect('COUNT(*)', 'services')
-        .getRawOne<{ revenue: string | null; services: string | null }>(),
+        .select('COUNT(*)', 'services')
+        .getRawOne<{ services: string | null }>(),
     ]);
 
-    const revenueTotal = toNumber(billed?.revenue);
-    const completedCount = toNumber(counts?.completed);
-
     return {
-      revenueTotal: toMoney(revenueTotal),
-      estimatedCommission: estimateCommission(revenueTotal, commissionRate),
-      completedCount,
+      earnings: this.toCurrencyEarnings(revenueRows, commissionRate),
+      completedCount: toNumber(counts?.completed),
       cancelledCount: toNumber(counts?.cancelled),
       pendingCount: toNumber(counts?.pending),
       clientsServed: toNumber(counts?.clients),
       servicesPerformed: toNumber(billed?.services),
-      averageTicket: completedCount
-        ? toMoney(revenueTotal / completedCount)
-        : 0,
     };
   }
 
@@ -505,16 +596,11 @@ export class ReportsService {
     commissionRate: number | null,
   ): Promise<StaffReport['currentMonth']> {
     const range = resolveReportRange({ preset: 'month' }, timezone, now);
-    const row = await this.billedSegmentsForStaff(tenantId, staffId, range)
-      .select('SUM(segment.priceAtBooking)', 'revenue')
-      .getRawOne<{ revenue: string | null }>();
+    const rows = await this.revenueByCurrency(
+      this.billedSegmentsForStaff(tenantId, staffId, range),
+    );
 
-    const revenue = toNumber(row?.revenue);
-
-    return {
-      revenue: toMoney(revenue),
-      estimatedCommission: estimateCommission(revenue, commissionRate),
-    };
+    return { earnings: this.toCurrencyEarnings(rows, commissionRate) };
   }
 
   private async getStaffTimeline(
@@ -527,10 +613,12 @@ export class ReportsService {
       .select('appointment.id', 'appointmentId')
       .addSelect('appointment.startTime', 'startTime')
       .addSelect('segment.priceAtBooking', 'price')
+      .addSelect('segment.currencyAtBooking', 'currency')
       .getRawMany<{
         appointmentId: string;
         startTime: Date | string;
         price: string | number;
+        currency: string;
       }>();
 
     return buildReportTimeline({
@@ -541,6 +629,7 @@ export class ReportsService {
         appointmentId: row.appointmentId,
         startTime: new Date(row.startTime),
         price: toNumber(row.price),
+        currency: row.currency,
       })),
     });
   }
@@ -556,8 +645,13 @@ export class ReportsService {
       .addSelect('service.name', 'serviceName')
       .addSelect('COUNT(*)', 'timesPerformed')
       .addSelect('SUM(segment.priceAtBooking)', 'revenue')
+      // Por moneda además de por servicio: un servicio que cambió de moneda a
+      // mitad del período produce una fila por cada una, que es lo que
+      // realmente se cobró.
+      .addSelect('segment.currencyAtBooking', 'currency')
       .groupBy('service.id')
       .addGroupBy('service.name')
+      .addGroupBy('segment.currencyAtBooking')
       .orderBy('revenue', 'DESC')
       .getRawMany<ServiceRankingRow>();
 
@@ -566,6 +660,7 @@ export class ReportsService {
       serviceName: row.serviceName,
       timesPerformed: toNumber(row.timesPerformed),
       revenue: toMoney(toNumber(row.revenue)),
+      currency: row.currency,
     }));
   }
 }

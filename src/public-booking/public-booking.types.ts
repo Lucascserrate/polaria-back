@@ -45,7 +45,6 @@ export type PublicBusinessProfile = {
   portfolio: PublicPhoto[];
   team: PublicStaff[];
   timezone: string;
-  /** ISO 4217, para formatear los precios con la moneda del negocio. */
   currency: string;
   /** Prefijo telefónico sugerido en el formulario. Ver `dialCodeForTimeZone`. */
   dialCode: string;
@@ -62,8 +61,8 @@ export type PublicService = {
   id: string;
   name: string;
   description: string | null;
-  /** Ya convertido a número: MySQL devuelve `decimal` como cadena. */
   price: number;
+  currency: string;
   durationMinutes: number;
   /**
    * Si el cliente puede reservarlo por su cuenta.
@@ -122,5 +121,6 @@ export type PublicBookingConfirmation = {
   serviceName: string;
   staffName: string | null;
   price: number;
+  currency: string;
   durationMinutes: number;
 };

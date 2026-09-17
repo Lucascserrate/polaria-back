@@ -3,9 +3,11 @@ import { planBookingSegments } from './booking-plan';
 const START = new Date('2026-08-24T13:00:00.000Z');
 
 const services = new Map([
-  ['corte', { durationMinutes: 30, price: 50 }],
-  ['barba', { durationMinutes: 30, price: 40 }],
-  ['cejas', { durationMinutes: 20, price: 25 }],
+  ['corte', { durationMinutes: 30, price: 50, currency: 'BOB' }],
+  ['barba', { durationMinutes: 30, price: 40, currency: 'BOB' }],
+  // En dólares a propósito: un catálogo puede cobrar en dos monedas.
+  ['online', { durationMinutes: 20, price: 25, currency: 'USD' }],
+  ['cejas', { durationMinutes: 20, price: 25, currency: 'BOB' }],
 ]);
 
 describe('planBookingSegments', () => {
@@ -86,7 +88,7 @@ describe('planBookingSegments', () => {
       startTime: START,
       items: [{ serviceId: 'corte', staffId: 'diego' }],
       services,
-      agreedPrices: new Map([['corte', 45]]),
+      agreedPrices: new Map([['corte', { price: 45, currency: 'BOB' }]]),
     });
 
     if (!plan.ok) throw new Error('debía planificar');
@@ -101,11 +103,42 @@ describe('planBookingSegments', () => {
         { serviceId: 'barba', staffId: 'diego' },
       ],
       services,
-      agreedPrices: new Map([['corte', 45]]),
+      agreedPrices: new Map([['corte', { price: 45, currency: 'BOB' }]]),
     });
 
     if (!plan.ok) throw new Error('debía planificar');
     expect(plan.segments.map((s) => s.price)).toEqual([45, 40]);
+  });
+
+  it('cada tramo lleva la moneda de su servicio', () => {
+    // Un precio sin su moneda no es un precio: la psicóloga cobra la presencial
+    // en bolivianos y la online en dólares, en la misma reserva si hace falta.
+    const plan = planBookingSegments({
+      startTime: START,
+      items: [
+        { serviceId: 'corte', staffId: 'diego' },
+        { serviceId: 'online', staffId: 'diego' },
+      ],
+      services,
+    });
+
+    if (!plan.ok) throw new Error('debía planificar');
+    expect(plan.segments.map((s) => s.currency)).toEqual(['BOB', 'USD']);
+  });
+
+  it('conserva la moneda pactada aunque el servicio haya cambiado de moneda', () => {
+    // Pasar un servicio de bolivianos a dólares no puede reescribir lo que un
+    // cliente ya tenía acordado: eso convertiría Bs 300 en USD 300.
+    const plan = planBookingSegments({
+      startTime: START,
+      items: [{ serviceId: 'online', staffId: 'diego' }],
+      services,
+      agreedPrices: new Map([['online', { price: 300, currency: 'BOB' }]]),
+    });
+
+    if (!plan.ok) throw new Error('debía planificar');
+    expect(plan.segments[0].price).toBe(300);
+    expect(plan.segments[0].currency).toBe('BOB');
   });
 
   it('usa siempre la duración vigente, incluso con precio conservado', () => {
@@ -114,8 +147,10 @@ describe('planBookingSegments', () => {
     const plan = planBookingSegments({
       startTime: START,
       items: [{ serviceId: 'corte', staffId: 'diego' }],
-      services: new Map([['corte', { durationMinutes: 45, price: 60 }]]),
-      agreedPrices: new Map([['corte', 50]]),
+      services: new Map([
+        ['corte', { durationMinutes: 45, price: 60, currency: 'BOB' }],
+      ]),
+      agreedPrices: new Map([['corte', { price: 50, currency: 'BOB' }]]),
     });
 
     if (!plan.ok) throw new Error('debía planificar');
@@ -143,7 +178,9 @@ describe('planBookingSegments', () => {
     const plan = planBookingSegments({
       startTime: START,
       items: [{ serviceId: 'roto', staffId: 'diego' }],
-      services: new Map([['roto', { durationMinutes: 0, price: 10 }]]),
+      services: new Map([
+        ['roto', { durationMinutes: 0, price: 10, currency: 'BOB' }],
+      ]),
     });
 
     expect(plan).toEqual({ ok: false, missingServiceIds: ['roto'] });

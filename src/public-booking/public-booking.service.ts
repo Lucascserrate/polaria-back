@@ -125,8 +125,8 @@ export class PublicBookingService {
         id: service.id,
         name: service.name,
         description: service.description ?? null,
-        // MySQL devuelve `decimal` como cadena; la página recibe un número.
         price: Number(service.price),
+        currency: service.currency,
         durationMinutes: service.durationMinutes,
         selfBookable: isSelfBookable(service.bookingPolicy),
       })),
@@ -337,6 +337,7 @@ export class PublicBookingService {
           confirmation.staffId,
         ),
         price: Number(service.price),
+        currency: service.currency,
         durationMinutes: service.durationMinutes,
       };
     } catch (error: unknown) {

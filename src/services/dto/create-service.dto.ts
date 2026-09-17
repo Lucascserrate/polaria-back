@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
   IsEnum,
+  IsIn,
   IsInt,
   IsNumber,
   IsOptional,
@@ -11,6 +12,7 @@ import {
 } from 'class-validator';
 
 import { ServiceBookingPolicy } from '../booking-policy';
+import { CURRENCIES } from '../../tenants/currency';
 
 /**
  * Lo que aguanta la columna, que es `varchar(255)` en las dos.
@@ -50,6 +52,18 @@ export class CreateServiceDto {
   @ApiProperty()
   @IsNumber()
   price: number;
+
+  /**
+   * Moneda de este precio, en ISO 4217.
+   *
+   * Ausente hereda la del negocio, que es la que sirve para el catálogo de una
+   * sola moneda. Se manda cuando este servicio cobra en otra: presencial en
+   * bolivianos, online para el exterior en dólares.
+   */
+  @ApiPropertyOptional({ enum: CURRENCIES })
+  @IsOptional()
+  @IsIn(CURRENCIES)
+  currency?: string;
 
   @ApiProperty()
   @IsString()

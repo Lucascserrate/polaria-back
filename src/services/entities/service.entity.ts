@@ -34,6 +34,20 @@ export class Service {
   @Column('decimal', { precision: 10, scale: 2 })
   price!: number;
 
+  /**
+   * Moneda de este precio, en ISO 4217.
+   *
+   * Va con el precio y no en el negocio porque un catálogo puede tener las dos
+   * cosas: sesiones presenciales en bolivianos y online para el exterior en
+   * dólares. `tenants.currency` quedó como el valor por defecto de un servicio
+   * nuevo, no como la moneda de todos.
+   *
+   * Sin `NULL`: un precio sin unidad no se puede mostrar ni sumar. El servicio
+   * que no elige nada nace con la del negocio, que se resuelve al crearlo.
+   */
+  @Column({ type: 'varchar', length: 3, default: 'BOB' })
+  currency!: string;
+
   @Column()
   timezone!: string;
 

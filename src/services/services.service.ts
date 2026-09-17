@@ -3,6 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { Service } from './entities/service.entity';
+import { Tenant } from '../tenants/entities/tenant.entity';
+import { DEFAULT_CURRENCY } from '../tenants/currency';
 import { isSelfBookable } from './booking-policy';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
@@ -12,11 +14,44 @@ export class ServicesService {
   constructor(
     @InjectRepository(Service)
     private serviceRepository: Repository<Service>,
+    /*
+     * Sólo para leer la moneda por defecto del negocio. Va el repositorio y no
+     * `TenantsService` porque tenants ya depende de servicios en otras ramas, y
+     * un módulo no debería importar al otro para resolver un valor por defecto.
+     */
+    @InjectRepository(Tenant)
+    private tenantRepository: Repository<Tenant>,
   ) {}
 
-  create(createServiceDto: CreateServiceDto): Promise<Service> {
-    const service = this.serviceRepository.create(createServiceDto);
+  async create(createServiceDto: CreateServiceDto): Promise<Service> {
+    const service = this.serviceRepository.create({
+      ...createServiceDto,
+      // La moneda del negocio es el valor por defecto de un servicio nuevo, no
+      // la moneda de todos: quien cobra en dos monedas la cambia en este mismo
+      // formulario, servicio por servicio.
+      currency:
+        createServiceDto.currency ??
+        (await this.defaultCurrency(createServiceDto.tenantId)),
+    });
     return this.serviceRepository.save(service);
+  }
+
+  /**
+   * La moneda con la que nace un servicio si nadie eligió otra.
+   *
+   * Sale del negocio, donde se dedujo de la zona horaria al registrarse. Un
+   * negocio que no aparezca —no debería, el alta valida el dueño— cae al mismo
+   * valor por defecto que la columna, que es preferible a un precio sin unidad.
+   */
+  private async defaultCurrency(tenantId?: string): Promise<string> {
+    if (!tenantId) return DEFAULT_CURRENCY;
+
+    const tenant = await this.tenantRepository.findOne({
+      where: { id: tenantId },
+      select: { currency: true },
+    });
+
+    return tenant?.currency ?? DEFAULT_CURRENCY;
   }
 
   /**

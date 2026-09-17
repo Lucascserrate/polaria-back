@@ -2,9 +2,45 @@ import { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import { ReportPreset } from './utils/report-range.util';
 import type { ReportTimeline } from './utils/report-timeline.util';
 
+/**
+ * Lo facturado en una moneda, dentro de un período.
+ *
+ * Los totales son una lista y no un número porque un catálogo puede cobrar en
+ * dos monedas: la psicóloga cobra las presenciales en bolivianos y las online en
+ * dólares. Sumarlas daría un número que no significa nada.
+ *
+ * Casi todos los negocios usan una sola y reciben una lista de un elemento, que
+ * se dibuja igual que antes de que esto existiera.
+ */
+export interface CurrencyRevenue {
+  currency: string;
+  amount: number;
+  /**
+   * Ingreso promedio por cita facturada **en esta moneda**.
+   *
+   * El divisor son las citas que tocaron esta moneda, no todas las del período:
+   * dividir los dólares entre las citas en bolivianos daría un promedio que no
+   * corresponde a nada.
+   */
+  averageTicket: number;
+}
+
+/** Lo facturado en una moneda, más la parte que le toca al profesional. */
+export interface CurrencyEarnings extends CurrencyRevenue {
+  /**
+   * `amount * commissionRate / 100`, o `null` si el negocio no definió comisión
+   * —distinto de una comisión de cero—.
+   *
+   * Se calcula por moneda porque el porcentaje es el mismo pero la base no: el
+   * 30% de 300 bolivianos y el 30% de 40 dólares son dos cifras, y no hay tipo de
+   * cambio que las junte sin inventar uno.
+   */
+  estimatedCommission: number | null;
+}
+
 export interface ReportSummary {
-  /** Suma de `priceAtBooking` de los servicios de citas completadas. */
-  revenueTotal: number;
+  /** Lo facturado en citas completadas, una entrada por moneda. */
+  revenue: CurrencyRevenue[];
   completedCount: number;
   cancelledCount: number;
   /**
@@ -12,8 +48,6 @@ export interface ReportSummary {
    * `OPEN_APPOINTMENT_STATUSES`. El desglose exacto está en `byStatus`.
    */
   pendingCount: number;
-  /** Ingreso promedio por cita completada. */
-  averageTicket: number;
   byStatus: Record<AppointmentStatus, number>;
 }
 
@@ -21,11 +55,10 @@ export interface StaffRankingEntry {
   staffId: string;
   staffName: string;
   completedAppointments: number;
-  revenue: number;
+  /** Lo facturado y su parte, una entrada por moneda. */
+  earnings: CurrencyEarnings[];
   /** Porcentaje configurado, o `null` si el negocio no definió comisión. */
   commissionRate: number | null;
-  /** `revenue * commissionRate / 100`, o `null` si no hay tasa configurada. */
-  estimatedCommission: number | null;
   /** `true` si el profesional ya no trabaja en el negocio. */
   isFormer: boolean;
 }
@@ -35,6 +68,14 @@ export interface ServiceRankingEntry {
   serviceName: string;
   timesPerformed: number;
   revenue: number;
+  /**
+   * La moneda de `revenue`.
+   *
+   * Un servicio tiene una sola moneda, así que acá no hace falta una lista. Sale
+   * de `currencyAtBooking` y no del servicio: si cambió de moneda, aparece una
+   * fila por cada una, que es la única lectura honesta de lo que se cobró.
+   */
+  currency: string;
 }
 
 export interface TenantReport {
@@ -44,7 +85,13 @@ export interface TenantReport {
     to: string;
     timezone: string;
   };
-  /** Moneda del negocio en ISO 4217, para que el cliente formatee los montos. */
+  /**
+   * Moneda por defecto del negocio, en ISO 4217.
+   *
+   * No es la moneda de los montos —cada uno trae la suya— sino la que se usa
+   * para escribir un cero: un período sin facturación no tiene moneda propia y
+   * "Bs 0" se lee mejor que un cero pelado.
+   */
   currency: string;
   summary: ReportSummary;
   /**
@@ -105,9 +152,8 @@ export interface StaffReport {
    * período que se está mirando.
    */
   currentMonth: {
-    revenue: number;
-    /** Su parte, o `null` si el negocio no configuró comisión. */
-    estimatedCommission: number | null;
+    /** Lo generado y su parte, una entrada por moneda. */
+    earnings: CurrencyEarnings[];
   };
   summary: StaffSummary;
   /**
@@ -140,17 +186,16 @@ export interface StaffReport {
  * formas que pueden divergir es comparar peras con manzanas.
  */
 export interface StaffSummary {
-  /** Suma de `priceAtBooking` de **sus** segmentos en citas completadas. */
-  revenueTotal: number;
   /**
-   * Lo que le corresponde de `revenueTotal`, o `null` si el negocio no configuró
-   * comisión —distinto de una comisión de cero—.
+   * Lo facturado con **sus** segmentos en citas completadas, y su parte, una
+   * entrada por moneda.
    *
-   * Es **estimado** y hay que mostrarlo como tal: sale de la tasa vigente hoy, no
-   * de la que regía el día de cada servicio, y no existe registro de pagos, así
-   * que no sabe nada de lo que ya se liquidó. Ver `estimateCommission`.
+   * La comisión es **estimada** y hay que mostrarla como tal: sale de la tasa
+   * vigente hoy, no de la que regía el día de cada servicio, y no existe registro
+   * de pagos, así que no sabe nada de lo que ya se liquidó. Ver
+   * `estimateCommission`.
    */
-  estimatedCommission: number | null;
+  earnings: CurrencyEarnings[];
   /** Citas completadas en las que participó. Distintas, no segmentos. */
   completedCount: number;
   cancelledCount: number;
@@ -160,6 +205,4 @@ export interface StaffSummary {
   clientsServed: number;
   /** Servicios prestados. Acá sí el grano es el segmento: son unidades de trabajo. */
   servicesPerformed: number;
-  /** Ingreso promedio por cita completada. */
-  averageTicket: number;
 }

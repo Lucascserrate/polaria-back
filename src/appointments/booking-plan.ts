@@ -21,6 +21,7 @@ export interface PlannedSegment extends BookingItem {
   endTime: Date;
   durationMinutes: number;
   price: number;
+  currency: string;
   sequenceOrder: number;
 }
 
@@ -32,17 +33,11 @@ export interface PlanBookingInput {
   startTime: Date;
   /** En orden de ejecución: el primero arranca en `startTime`. */
   items: BookingItem[];
-  /** Duración y precio vigentes de cada servicio, por id. */
-  services: Map<string, { durationMinutes: number; price: number }>;
-  /**
-   * Precio ya pactado de los servicios que la reserva **ya tenía**, por id.
-   *
-   * Se conserva a propósito. La columna se llama `priceAtBooking` y eso es
-   * literal: corregir la hora de una cita no puede re-cotizar un servicio que el
-   * cliente ya tenía acordado a otro precio. Un servicio que se agrega ahora sí
-   * entra con el precio de hoy.
-   */
-  agreedPrices?: Map<string, number>;
+  services: Map<
+    string,
+    { durationMinutes: number; price: number; currency: string }
+  >;
+  agreedPrices?: Map<string, { price: number; currency: string }>;
 }
 
 /**
@@ -75,12 +70,15 @@ export const planBookingSegments = (input: PlanBookingInput): BookingPlan => {
     );
     cursor = endTime;
 
+    const agreed = input.agreedPrices?.get(item.serviceId);
+
     return {
       ...item,
       startTime,
       endTime,
       durationMinutes: service.durationMinutes,
-      price: input.agreedPrices?.get(item.serviceId) ?? service.price,
+      price: agreed?.price ?? service.price,
+      currency: agreed?.currency ?? service.currency,
       sequenceOrder: index,
     };
   });

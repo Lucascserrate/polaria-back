@@ -129,6 +129,7 @@ export class AppointmentsService {
           {
             durationMinutes: service.durationMinutes,
             price: Number(service.price),
+            currency: service.currency,
           },
         ]),
       ),
@@ -247,6 +248,7 @@ export class AppointmentsService {
                 endTime: segment.endTime,
                 activeStartTime: claimsSlot ? segment.startTime : null,
                 priceAtBooking: segment.price,
+                currencyAtBooking: segment.currency,
                 durationAtBooking: segment.durationMinutes,
                 sequenceOrder: segment.sequenceOrder,
               }),
@@ -892,6 +894,7 @@ export class AppointmentsService {
           activeStartTime: input.startTime,
           endTime: input.endTime,
           priceAtBooking: service.price,
+          currencyAtBooking: service.currency,
           durationAtBooking: service.durationMinutes,
           sequenceOrder: 0,
         }),
@@ -1090,6 +1093,7 @@ export class AppointmentsService {
           {
             durationMinutes: service.durationMinutes,
             price: Number(service.price),
+            currency: service.currency,
           },
         ]),
       ),
@@ -1097,7 +1101,10 @@ export class AppointmentsService {
       agreedPrices: new Map(
         (appointment.services ?? []).map((segment) => [
           segment.serviceId,
-          Number(segment.priceAtBooking),
+          {
+            price: Number(segment.priceAtBooking),
+            currency: segment.currencyAtBooking,
+          },
         ]),
       ),
     });
@@ -1209,6 +1216,7 @@ export class AppointmentsService {
           // reservas tomen el mismo horario del mismo profesional.
           activeStartTime: claimsSlot ? segment.startTime : null,
           priceAtBooking: segment.price,
+          currencyAtBooking: segment.currency,
           durationAtBooking: segment.durationMinutes,
           sequenceOrder: segment.sequenceOrder,
         }),

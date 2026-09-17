@@ -835,8 +835,6 @@ export class BookingFlowService {
 
     // La descripción muestra el precio y no la duración: los minutos son un dato
     // nuestro, el precio es lo que el cliente necesita para elegir.
-    const currency = await this.resolveCurrency(session.tenantId);
-
     return {
       kind: 'ASK_SERVICE',
       date,
@@ -847,7 +845,7 @@ export class BookingFlowService {
             session,
             service.id,
             service.name,
-            formatPrice(service.price, currency) ?? undefined,
+            formatPrice(service.price, service.currency) ?? undefined,
           ),
         ),
         limits,
@@ -1151,11 +1149,6 @@ export class BookingFlowService {
   private async resolveTimezone(tenantId: string): Promise<string> {
     const tenant = await this.tenantsService.findOne(tenantId);
     return tenant?.timezone ?? DEFAULT_TIMEZONE;
-  }
-
-  private async resolveCurrency(tenantId: string): Promise<string | null> {
-    const tenant = await this.tenantsService.findOne(tenantId);
-    return tenant?.currency ?? null;
   }
 }
 

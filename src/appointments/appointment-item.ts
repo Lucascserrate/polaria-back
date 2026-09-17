@@ -1,4 +1,8 @@
 import { pickReminderToShow } from '../reminders/appointment-reminders.rules';
+import {
+  sumByCurrency,
+  type MoneyTotal,
+} from '../services/utils/money-total.util';
 import type { Appointment } from './entities/appointment.entity';
 import type { AppointmentStatus } from './entities/appointment.entity';
 
@@ -40,8 +44,8 @@ export interface AppointmentSegmentItem {
   serviceName: string | null;
   startTime: string;
   endTime: string;
-  /** Lo pactado al reservar, no lo que el servicio cuesta hoy. */
   price: number;
+  currency: string;
   durationMinutes: number;
 }
 
@@ -122,6 +126,7 @@ export const toAppointmentItem = (
       startTime: s.startTime.toISOString(),
       endTime: s.endTime.toISOString(),
       price: Number(s.priceAtBooking),
+      currency: s.currencyAtBooking,
       durationMinutes: s.durationAtBooking,
     }))
     .sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -177,8 +182,7 @@ export const toAppointmentItem = (
  */
 export interface AppointmentDetail extends AppointmentItem {
   client: { id: string; name: string | null; phone: string | null } | null;
-  /** Suma de lo pactado en cada tramo. */
-  totalPrice: number;
+  totals: MoneyTotal[];
 }
 
 export const toAppointmentDetail = (
@@ -196,6 +200,6 @@ export const toAppointmentDetail = (
           phone: appointment.client.phone ?? null,
         }
       : null,
-    totalPrice: item.segments.reduce((sum, segment) => sum + segment.price, 0),
+    totals: sumByCurrency(item.segments),
   };
 };

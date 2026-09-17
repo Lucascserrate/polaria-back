@@ -11,6 +11,7 @@ const entry = (
   localTime: string,
   price: number,
   appointmentId = `appt-${day}-${localTime}`,
+  currency = 'BOB',
 ): TimelineEntry => {
   const [year, month, date] = day.split('-').map(Number);
   const [hours, minutes] = localTime.split(':').map(Number);
@@ -20,6 +21,7 @@ const entry = (
     // La Paz está cuatro horas detrás de UTC.
     startTime: new Date(Date.UTC(year, month - 1, date, hours + 4, minutes)),
     price,
+    currency,
   };
 };
 
@@ -63,7 +65,12 @@ describe('buildReportTimeline', () => {
       '2026-08-25',
       '2026-08-26',
     ]);
-    expect(timeline?.buckets.map((b) => b.revenue)).toEqual([100, 0, 50]);
+    expect(timeline?.buckets.map((b) => b.revenue)).toEqual([
+      [{ currency: 'BOB', amount: 100 }],
+      // Un día sin facturar no tiene moneda: es una lista vacía, no un cero.
+      [],
+      [{ currency: 'BOB', amount: 50 }],
+    ]);
   });
 
   it('incluye los días vacíos', () => {
@@ -71,7 +78,7 @@ describe('buildReportTimeline', () => {
     const timeline = build({ from: '2026-08-24', to: '2026-08-27' });
 
     expect(timeline?.buckets).toHaveLength(4);
-    expect(timeline?.buckets.every((b) => b.revenue === 0)).toBe(true);
+    expect(timeline?.buckets.every((b) => b.revenue.length === 0)).toBe(true);
   });
 
   it('cuenta citas distintas, no servicios prestados', () => {
@@ -88,7 +95,7 @@ describe('buildReportTimeline', () => {
 
     expect(timeline?.buckets[0]).toEqual({
       key: '2026-08-24',
-      revenue: 140,
+      revenue: [{ currency: 'BOB', amount: 140 }],
       completed: 2,
     });
   });
@@ -102,8 +109,10 @@ describe('buildReportTimeline', () => {
       entries: [entry('2026-08-24', '22:00', 90)],
     });
 
-    expect(timeline?.buckets[0].revenue).toBe(90);
-    expect(timeline?.buckets[1].revenue).toBe(0);
+    expect(timeline?.buckets[0].revenue).toEqual([
+      { currency: 'BOB', amount: 90 },
+    ]);
+    expect(timeline?.buckets[1].revenue).toEqual([]);
   });
 
   it('pasa a meses cuando el rango es largo', () => {
@@ -127,7 +136,30 @@ describe('buildReportTimeline', () => {
     });
 
     const marzo = timeline?.buckets.find((b) => b.key === '2026-03');
-    expect(marzo).toEqual({ key: '2026-03', revenue: 300, completed: 2 });
+    expect(marzo).toEqual({
+      key: '2026-03',
+      revenue: [{ currency: 'BOB', amount: 300 }],
+      completed: 2,
+    });
+  });
+
+  it('separa las monedas dentro de un mismo tramo', () => {
+    // Una psicóloga que cobra presenciales en bolivianos y online en dólares:
+    // sumar las dos daría una curva que no mide nada.
+    const timeline = build({
+      from: '2026-08-24',
+      to: '2026-08-26',
+      entries: [
+        entry('2026-08-24', '10:00', 300, 'a'),
+        entry('2026-08-24', '11:00', 40, 'b', 'USD'),
+        entry('2026-08-24', '12:00', 100, 'c'),
+      ],
+    });
+
+    expect(timeline?.buckets[0].revenue).toEqual([
+      { currency: 'BOB', amount: 400 },
+      { currency: 'USD', amount: 40 },
+    ]);
   });
 
   it('el límite diario son dos meses', () => {
@@ -151,7 +183,9 @@ describe('buildReportTimeline', () => {
     });
 
     // 0.1 + 0.2 en punto flotante es 0.30000000000000004.
-    expect(timeline?.buckets[0].revenue).toBe(0.3);
+    expect(timeline?.buckets[0].revenue).toEqual([
+      { currency: 'BOB', amount: 0.3 },
+    ]);
   });
 
   it('ignora lo que cae fuera del rango en lugar de inventarle un tramo', () => {
@@ -161,7 +195,7 @@ describe('buildReportTimeline', () => {
       entries: [entry('2026-09-01', '10:00', 500)],
     });
 
-    expect(timeline?.buckets.every((b) => b.revenue === 0)).toBe(true);
+    expect(timeline?.buckets.every((b) => b.revenue.length === 0)).toBe(true);
   });
 
   it('cruza el fin de mes sin saltearse días', () => {

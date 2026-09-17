@@ -74,6 +74,9 @@ export class AppointmentService {
   @Column('decimal', { precision: 10, scale: 2 })
   priceAtBooking!: number;
 
+  @Column({ type: 'varchar', length: 3, default: 'BOB' })
+  currencyAtBooking!: string;
+
   @Column('int')
   durationAtBooking!: number;
 
