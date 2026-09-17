@@ -43,3 +43,37 @@ export const setImpersonationCookie = (res: Response, token: string) => {
 export const clearImpersonationCookie = (res: Response) => {
   res.clearCookie(IMPERSONATION_COOKIE, AUTH_COOKIE_OPTIONS);
 };
+
+/**
+ * La cookie de quien se identificó con Google y todavía no tiene negocio.
+ *
+ * Aparte de `accessToken` por el mismo motivo que la de soporte, pero al revés:
+ * no conviene que **gane**, conviene que ni se vea. `JwtStrategy` no la lee, así
+ * que un token de alta no puede hacerse pasar por una sesión; lo único que
+ * autoriza es la pantalla de alta, a través de `SignupGuard`.
+ *
+ * No hay `refreshToken` que la acompañe: es un trámite de un rato, no una
+ * sesión. Si vence, se vuelve a entrar con Google y nada se perdió, porque
+ * todavía no había nada.
+ */
+export const SIGNUP_COOKIE = 'signupToken';
+
+/**
+ * Cuánto dura el trámite de alta.
+ *
+ * Media hora alcanza para leer dos opciones, buscar el negocio y escribir el
+ * nombre; y es poco para que quede dando vueltas en una computadora compartida
+ * del local, que es el equipo donde esto va a pasar más de una vez.
+ */
+export const SIGNUP_TTL_SECONDS = 30 * 60;
+
+export const setSignupCookie = (res: Response, token: string) => {
+  res.cookie(SIGNUP_COOKIE, token, {
+    ...AUTH_COOKIE_OPTIONS,
+    maxAge: SIGNUP_TTL_SECONDS * 1000,
+  });
+};
+
+export const clearSignupCookie = (res: Response) => {
+  res.clearCookie(SIGNUP_COOKIE, AUTH_COOKIE_OPTIONS);
+};

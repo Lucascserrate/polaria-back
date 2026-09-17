@@ -3,7 +3,10 @@ import { Tenant } from '../../tenants/entities/tenant.entity';
 import { Staff } from '../../staff/entities/staff.entity';
 import { StaffAccessRole } from '../../staff/staff-role';
 import type { JwtPayload } from '../actor';
-import { IMPERSONATION_TTL_SECONDS } from './auth-cookies.util';
+import {
+  IMPERSONATION_TTL_SECONDS,
+  SIGNUP_TTL_SECONDS,
+} from './auth-cookies.util';
 
 const jwtSecret = process.env.SECRET_JWT ?? '';
 
@@ -84,4 +87,39 @@ export const createImpersonationToken = (
       act: superAdminEmail,
     },
     { expiresIn: IMPERSONATION_TTL_SECONDS, secret: jwtSecret },
+  );
+
+/**
+ * Lo que lleva el token de alta: quién es, y nada más.
+ *
+ * No tiene `sub`, y eso no es una omisión: `sub` significa "el negocio de esta
+ * sesión", y el punto de este token es que todavía no hay ninguno. `kind` lo
+ * marca de forma explícita para que nada lo confunda con una sesión ni por
+ * accidente ni a mano.
+ */
+export interface SignupPayload {
+  kind: 'signup';
+  googleId: string;
+  email: string | null;
+  name: string | null;
+}
+
+/**
+ * El token del trámite de alta.
+ *
+ * Corto y sin refresco: autoriza elegir entre crear un negocio o pedir unirse a
+ * uno, y se descarta en cuanto eso pasa. Ver `SIGNUP_COOKIE`.
+ */
+export const createSignupToken = (
+  identity: { googleId: string; email?: string; displayName?: string },
+  jwtService: JwtService,
+): string =>
+  jwtService.sign(
+    {
+      kind: 'signup',
+      googleId: identity.googleId,
+      email: identity.email ?? null,
+      name: identity.displayName?.trim() || null,
+    } satisfies SignupPayload,
+    { expiresIn: SIGNUP_TTL_SECONDS, secret: jwtSecret },
   );

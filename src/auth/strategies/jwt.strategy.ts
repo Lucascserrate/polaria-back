@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import type { Request } from 'express';
@@ -47,7 +47,22 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     });
   }
 
+  /**
+   * Un token bien firmado todavía puede no ser una sesión.
+   *
+   * Se exige `sub` porque es el negocio de la sesión y de ahí sale el `tenantId`
+   * con el que filtra medio backend: un payload sin él llegaba igual a los
+   * controladores y las consultas salían con `tenantId: undefined`, que no es un
+   * error sino una consulta distinta. Y se rechaza `kind` porque el token de
+   * alta se firma con el mismo secreto —lo único que lo mantenía afuera era
+   * viajar en otra cookie—, así que copiarlo a mano a `accessToken` alcanzaba
+   * para entrar sin negocio. Dos líneas que cierran las dos puertas.
+   */
   validate(payload: JwtPayload) {
+    if (!payload?.sub || 'kind' in payload) {
+      throw new UnauthorizedException();
+    }
+
     return payload;
   }
 }

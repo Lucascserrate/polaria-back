@@ -43,24 +43,29 @@ export class TenantsService {
   ) {}
 
   /**
-   * Encuentra el negocio de una cuenta de Google, o lo crea.
+   * El negocio de una cuenta de Google, si ya tiene uno.
    *
-   * Es el registro self-service: antes, una cuenta que no existía como tenant
-   * quedaba afuera —la whitelist no era una tabla, era justamente eso—. Ahora el
-   * primer login crea el negocio con lo poco que informa Google, y el resto se
-   * completa en la configuración inicial.
+   * Busca y **no crea**, y esa separación es el arreglo de un incidente: antes
+   * esto creaba el negocio cuando no encontraba ninguno, así que un empleado
+   * cuya invitación todavía no estaba cargada entraba con Google y se iba con
+   * una peluquería vacía a su nombre. Peor: ese negocio fantasma se quedaba con
+   * su correo, y `grantAccess` lo rechaza como "ya es de una cuenta de Polaria",
+   * con lo cual el dueño tampoco podía invitarlo después.
    *
-   * El orden de búsqueda importa y se conserva del flujo anterior: primero por
-   * `googleId`, después por correo. Ese segundo paso es lo que permite que un
-   * negocio dado de alta por soporte —con su correo cargado y sin cuenta
-   * asociada— quede vinculado al entrar por primera vez, en lugar de recibir un
-   * segundo negocio vacío.
+   * Ahora "no encontré nada" es una respuesta y no una orden de crear: quien
+   * decide es la persona, en la pantalla de alta. Crear sigue disponible en
+   * `create`, que es lo que llama esa pantalla cuando efectivamente es un
+   * negocio nuevo.
+   *
+   * El orden de búsqueda importa y se conserva: primero por `googleId`, después
+   * por correo. Ese segundo paso es lo que permite que un negocio dado de alta
+   * por soporte —con su correo cargado y sin cuenta asociada— quede vinculado al
+   * entrar por primera vez, en lugar de recibir un segundo negocio vacío.
    */
-  async findOrCreateByGoogleAccount(params: {
+  async findByGoogleAccount(params: {
     googleId: string;
     email?: string;
-    displayName?: string;
-  }): Promise<Tenant> {
+  }): Promise<Tenant | null> {
     const existing = await this.findByGoogleId(params.googleId);
     if (existing) return existing;
 
@@ -72,6 +77,24 @@ export class TenantsService {
           : ((await this.setGoogleId(byEmail.id, params.googleId)) ?? byEmail);
       }
     }
+
+    return null;
+  }
+
+  /**
+   * Crea el negocio de una cuenta de Google que eligió crearlo.
+   *
+   * Vuelve a buscar antes de crear porque entre la pantalla de alta y este
+   * llamado pasa tiempo: alguien con dos pestañas abiertas podría apretar
+   * "crear" dos veces, y el índice único sobre `googleId` deja pasar una sola.
+   */
+  async createForGoogleAccount(params: {
+    googleId: string;
+    email?: string;
+    displayName?: string;
+  }): Promise<Tenant> {
+    const existing = await this.findByGoogleAccount(params);
+    if (existing) return existing;
 
     try {
       const tenant = await this.create({

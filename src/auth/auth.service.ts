@@ -4,13 +4,21 @@ import { Response } from 'express';
 import { TenantsService } from '../tenants/tenants.service';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { GoogleUserDto } from './dto/google-user.dto';
-import { createJwtToken, createStaffJwtToken } from './utils/jwt-token.util';
+import {
+  createJwtToken,
+  createSignupToken,
+  createStaffJwtToken,
+} from './utils/jwt-token.util';
 import { StaffService } from '../staff/staff.service';
 import { Staff } from '../staff/entities/staff.entity';
 import { actorFrom, type AuthenticatedActor } from './actor';
 import { accessStateOf, StaffAccessState } from '../staff/staff-access';
 import { StaffAccessRole } from '../staff/staff-role';
-import { AUTH_COOKIE_OPTIONS, setAuthCookies } from './utils/auth-cookies.util';
+import {
+  AUTH_COOKIE_OPTIONS,
+  setAuthCookies,
+  setSignupCookie,
+} from './utils/auth-cookies.util';
 import { AuthError } from './domain/enums/auth.enum';
 import { TenantError } from '../tenants/enums/tenant.enum';
 
@@ -56,19 +64,50 @@ export class AuthService {
 
       if (staff) return this.createStaffSession(staff, user.googleId);
 
-      const tenant = await this.tenantsService.findOrCreateByGoogleAccount({
+      const tenant = await this.tenantsService.findByGoogleAccount({
         googleId: user.googleId,
         email: user.email,
-        displayName: user.displayName,
       });
 
-      return this.createSession(tenant);
+      if (tenant) return this.createSession(tenant);
+
+      /*
+       * Ni equipo ni negocio: no se sabe qué quiere hacer, así que no se decide
+       * por ella.
+       *
+       * Acá se creaba el negocio, y era el bug: un empleado cuya invitación
+       * todavía no estaba cargada terminaba con una peluquería vacía a su
+       * nombre. Ahora se emite el token de alta y la pantalla pregunta.
+       */
+      return this.createSignupSession(user);
     } catch {
       throw new HttpException(
         AuthError.LOGIN_FAILED,
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  /**
+   * Identificado con Google, sin negocio todavía.
+   *
+   * No es una sesión: es un trámite. Por eso no lleva los tokens de siempre sino
+   * el de alta, que solo autoriza elegir. Ver `SignupController`.
+   */
+  private createSignupSession(user: GoogleUserDto) {
+    return {
+      statusCode: HttpStatus.OK,
+      data: {
+        signupToken: createSignupToken(
+          {
+            googleId: user.googleId,
+            email: user.email,
+            displayName: user.displayName,
+          },
+          this.jwtService,
+        ),
+      },
+    };
   }
 
   private createSession(tenant: Tenant) {
@@ -107,6 +146,24 @@ export class AuthService {
   async OAuthCallback(user: GoogleUserDto, res: Response) {
     try {
       const { data } = await this.oauthLogin(user);
+
+      /*
+       * Sin negocio no hay sesión que abrir: se manda al alta a elegir.
+       *
+       * La cookie es otra —`SIGNUP_COOKIE`— y no autoriza nada del panel, así
+       * que quien cierre acá no queda a medio entrar: queda afuera, igual que
+       * antes de apretar el botón de Google.
+       */
+      if ('signupToken' in data) {
+        this.logger.log(
+          `OAuthCallback sin negocio, va al alta user=${user.email ?? 'unknown'} googleId=${user.googleId ?? 'missing'}`,
+        );
+
+        setSignupCookie(res, data.signupToken);
+        res.redirect(`${CLIENT_BASE_URL}/welcome`);
+        return;
+      }
+
       this.logger.log(
         `OAuthCallback user=${user.email ?? 'unknown'} googleId=${user.googleId ?? 'missing'} tokensReady=${Boolean(data?.tokens?.accessToken && data?.tokens?.refreshToken)}`,
       );

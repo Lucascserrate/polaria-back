@@ -8,6 +8,8 @@ import { JwtStrategy } from './strategies/jwt.strategy';
 import { TenantsModule } from '../tenants/tenants.module';
 import { StaffModule } from '../staff/staff.module';
 import { RolesGuard } from './guards/roles.guard';
+import { SignupController } from './signup/signup.controller';
+import { SignupGuard } from './signup/signup.guard';
 
 const jwtSecret = process.env.SECRET_JWT ?? '';
 
@@ -22,8 +24,14 @@ const jwtSecret = process.env.SECRET_JWT ?? '';
       signOptions: { expiresIn: '30d' },
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, GoogleStrategy, JwtStrategy, RolesGuard],
+  controllers: [AuthController, SignupController],
+  providers: [
+    AuthService,
+    GoogleStrategy,
+    JwtStrategy,
+    RolesGuard,
+    SignupGuard,
+  ],
   exports: [AuthService, RolesGuard],
 })
 export class AuthModule {}
