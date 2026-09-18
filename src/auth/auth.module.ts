@@ -32,6 +32,11 @@ const jwtSecret = process.env.SECRET_JWT ?? '';
     RolesGuard,
     SignupGuard,
   ],
-  exports: [AuthService, RolesGuard],
+  /*
+   * `SignupGuard` se exporta porque lo monta otro módulo: los pedidos de acceso
+   * son parte del alta, pero viven con su propia tabla. Sin exportarlo, Nest no
+   * puede resolverlo donde se usa y eso falla al arrancar, no al compilar.
+   */
+  exports: [AuthService, RolesGuard, SignupGuard],
 })
 export class AuthModule {}

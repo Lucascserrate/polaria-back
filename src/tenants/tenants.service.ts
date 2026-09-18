@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, Not, Repository } from 'typeorm';
+import { IsNull, Like, Not, Repository } from 'typeorm';
 
 import { Tenant } from './entities/tenant.entity';
 import { CreateTenantDto } from './dto/create-tenant.dto';
@@ -179,6 +179,35 @@ export class TenantsService {
   listPublic(limit: number): Promise<Tenant[]> {
     return this.tenantRepository.find({
       where: { slug: Not(IsNull()), status: 'active' },
+      order: { name: 'ASC' },
+      take: limit,
+    });
+  }
+
+  /**
+   * Negocios que alguien podría reclamar como su lugar de trabajo.
+   *
+   * Criterio propio, y **no** el de `listPublic`. Aquél pide slug porque una
+   * tarjeta del buscador tiene que llevar a algún lado, y el directorio además
+   * exige catálogo. Acá eso sobra y estorba: una peluquería recién registrada
+   * todavía no tiene slug ni servicios, y es exactamente la que está sumando
+   * gente. Filtrar por publicación dejaría afuera al único negocio que un
+   * empleado nuevo necesita encontrar.
+   *
+   * Lo que sí se exige es que la cuenta esté activa y tenga nombre propio: un
+   * negocio que todavía se llama como la persona que lo creó no es reconocible,
+   * y ofrecerlo sería invitar a pedir acceso al lugar equivocado.
+   *
+   * Nunca lista sin buscar y pide un mínimo de letras. No es rendimiento: este
+   * es el único lugar de Polaria donde una cuenta cualquiera puede preguntar
+   * qué negocios existen, y sin mínimo sería un volcado del padrón.
+   */
+  searchJoinable(query: string, limit: number): Promise<Tenant[]> {
+    return this.tenantRepository.find({
+      where: {
+        status: 'active',
+        name: Like(`%${query}%`),
+      },
       order: { name: 'ASC' },
       take: limit,
     });
