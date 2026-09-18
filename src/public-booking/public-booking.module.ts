@@ -4,6 +4,7 @@ import { AppointmentsModule } from '../appointments/appointments.module';
 import { AvailabilityModule } from '../availability/availability.module';
 import { BusinessHoursModule } from '../business_hours/business_hours.module';
 import { ClientsModule } from '../clients/clients.module';
+import { ServiceCategoriesModule } from '../service-categories/service-categories.module';
 import { ServicesModule } from '../services/services.module';
 import { BusinessPhotosModule } from '../business-photos/business-photos.module';
 import { CustomerAccountsModule } from '../customer-accounts/customer-accounts.module';
@@ -24,6 +25,7 @@ import { PublicBookingService } from './public-booking.service';
   imports: [
     TenantsModule,
     ServicesModule,
+    ServiceCategoriesModule,
     BusinessHoursModule,
     AvailabilityModule,
     ClientsModule,

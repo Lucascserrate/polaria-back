@@ -14,6 +14,7 @@ import { resolveBusinessStatus } from '../business_hours/business-status';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { ClientsService } from '../clients/clients.service';
 import { ClientSource } from '../clients/entities/client.entity';
+import { ServiceCategoriesService } from '../service-categories/service-categories.service';
 import { ServicesService } from '../services/services.service';
 import { BusinessPhotosService } from '../business-photos/business-photos.service';
 import { CustomerAccountsService } from '../customer-accounts/customer-accounts.service';
@@ -70,6 +71,7 @@ export class PublicBookingService {
   constructor(
     private readonly tenantsService: TenantsService,
     private readonly servicesService: ServicesService,
+    private readonly serviceCategoriesService: ServiceCategoriesService,
     private readonly businessPhotosService: BusinessPhotosService,
     private readonly customerAccountsService: CustomerAccountsService,
     private readonly businessHoursService: BusinessHoursService,
@@ -81,9 +83,10 @@ export class PublicBookingService {
   async getProfile(slug: string): Promise<PublicBusinessProfile> {
     const tenant = await this.resolveTenant(slug);
 
-    const [services, businessHours, photos, portfolio, team] =
+    const [services, categories, businessHours, photos, portfolio, team] =
       await Promise.all([
         this.servicesService.findActiveByTenant(tenant.id),
+        this.serviceCategoriesService.findByTenant(tenant.id),
         this.businessHoursService.getTenantSchedule(tenant.id),
         this.businessPhotosService.list(tenant.id, 'gallery'),
         this.businessPhotosService.list(tenant.id, 'portfolio'),
@@ -122,9 +125,24 @@ export class PublicBookingService {
        * sería una segunda regla sobre qué se puede reservar, distinta de la que
        * ya rige en el otro canal.
        */
+      /*
+       * Solo las categorías que tienen algo adentro. Una vacía sería un filtro
+       * que lleva a una lista sin servicios: en el panel se muestra a propósito
+       * —es la que hay que llenar—, pero acá el que mira es el cliente.
+       */
+      categories: categories
+        .filter((category) =>
+          services.some((service) => service.categoryId === category.id),
+        )
+        .map((category) => ({
+          id: category.id,
+          name: category.name,
+          description: category.description ?? null,
+        })),
       services: services.map((service) => ({
         id: service.id,
         name: service.name,
+        categoryId: service.categoryId ?? null,
         description: service.description ?? null,
         price: toPrice(service.price),
         currency: service.currency,

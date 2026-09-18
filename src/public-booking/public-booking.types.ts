@@ -55,11 +55,19 @@ export type PublicBusinessProfile = {
   /** Horario semanal completo, para la sección de horarios. */
   businessHours: WeeklyScheduleRange[];
   services: PublicService[];
+  categories: PublicServiceCategory[];
+};
+
+export type PublicServiceCategory = {
+  id: string;
+  name: string;
+  description: string | null;
 };
 
 export type PublicService = {
   id: string;
   name: string;
+  categoryId: string | null;
   description: string | null;
   /**
    * `null` si el servicio se cotiza después de ver a la persona: la página
