@@ -51,6 +51,22 @@ export class CreateServiceDto {
   description?: string;
 
   /**
+   * En qué grupo del catálogo cae, o `null` en ninguno.
+   *
+   * El `null` explícito es el que saca un servicio de su categoría, y por eso el
+   * tipo lo admite: al editar, no mandar el campo es "dejala como está" y
+   * mandar `null` es "sacalo". `@IsOptional` deja pasar los dos —ignora tanto
+   * `undefined` como `null`—; distinguirlos es trabajo del update, no del DTO.
+   *
+   * Que la categoría sea *de este negocio* no se puede validar acá: eso necesita
+   * la base. Lo hace `ServicesService` antes de guardar.
+   */
+  @ApiPropertyOptional({ type: String, nullable: true })
+  @IsOptional()
+  @IsUUID()
+  categoryId?: string | null;
+
+  /**
    * Cuánto cuesta, o `null` si se cotiza después de ver a la persona.
    *
    * El campo sigue siendo obligatorio: lo que se acepta es un `null` explícito,

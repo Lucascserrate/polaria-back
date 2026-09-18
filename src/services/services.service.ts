@@ -4,6 +4,7 @@ import { Repository } from 'typeorm';
 
 import { Service } from './entities/service.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
+import { ServiceCategoriesService } from '../service-categories/service-categories.service';
 import { DEFAULT_CURRENCY } from '../tenants/currency';
 import { isSelfBookable } from './booking-policy';
 import { CreateServiceDto } from './dto/create-service.dto';
@@ -21,9 +22,15 @@ export class ServicesService {
      */
     @InjectRepository(Tenant)
     private tenantRepository: Repository<Tenant>,
+    private readonly categoriesService: ServiceCategoriesService,
   ) {}
 
   async create(createServiceDto: CreateServiceDto): Promise<Service> {
+    await this.assertCategoryIsOwn(
+      createServiceDto.categoryId,
+      createServiceDto.tenantId,
+    );
+
     const service = this.serviceRepository.create({
       ...createServiceDto,
       // La moneda del negocio es el valor por defecto de un servicio nuevo, no
@@ -125,8 +132,30 @@ export class ServicesService {
     tenantId: string,
     updateServiceDto: UpdateServiceDto,
   ) {
+    await this.assertCategoryIsOwn(updateServiceDto.categoryId, tenantId);
+
     await this.serviceRepository.update({ id, tenantId }, updateServiceDto);
     return this.findOneByTenant(id, tenantId);
+  }
+
+  /**
+   * Que la categoría que llegó sea de este negocio.
+   *
+   * La foreign key sola no alcanza: un id de la categoría de otro negocio existe
+   * y entra sin protestar, y el servicio termina agrupado bajo un nombre que su
+   * dueño no puso y no ve. Es la misma frontera que el resto de los métodos
+   * cruzan con `tenantId` en el `where`.
+   *
+   * `null` y `undefined` pasan de largo: son "sin categoría" y "no la toques",
+   * y ninguno de los dos apunta a una fila que haya que comprobar.
+   */
+  private async assertCategoryIsOwn(
+    categoryId: string | null | undefined,
+    tenantId: string | undefined,
+  ): Promise<void> {
+    if (!categoryId || !tenantId) return;
+
+    await this.categoriesService.assertBelongsToTenant(categoryId, tenantId);
   }
 
   async removeByTenant(id: string, tenantId: string) {

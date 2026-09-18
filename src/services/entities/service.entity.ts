@@ -12,6 +12,7 @@ import {
 import { Tenant } from '../../tenants/entities/tenant.entity';
 import { AppointmentService } from '../../appointments/entities/appointment_service.entity';
 import { Staff } from '../../staff/entities/staff.entity';
+import { ServiceCategory } from '../../service-categories/entities/service-category.entity';
 
 @Entity('services')
 export class Service {
@@ -27,6 +28,33 @@ export class Service {
 
   @Column()
   name!: string;
+
+  /**
+   * En qué grupo del catálogo cae, o `NULL` si en ninguno.
+   *
+   * `NULL` es un estado válido y permanente, no un dato a medio cargar: es lo
+   * que tienen todos los servicios que existían antes de las categorías, y lo
+   * que va a seguir teniendo el negocio de cinco servicios que no necesita
+   * agruparlos. Se muestran juntos al final y se reservan igual.
+   *
+   * Borrar la categoría no borra el servicio: la foreign key es `SET NULL`, así
+   * que vuelve a ese mismo grupo.
+   */
+  /*
+   * El `type` explícito es obligatorio: de una unión `string | null` TypeORM
+   * reflexiona `Object` y la app no arranca. Ver `entity-metadata.spec.ts`. El
+   * largo es el del uuid al que apunta, no el `varchar(255)` de los demás `id`
+   * del esquema: acá la columna nace con la tabla y puede ser exacta.
+   */
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  categoryId?: string | null;
+
+  @ManyToOne(() => ServiceCategory, (category) => category.services, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'categoryId' })
+  category?: ServiceCategory | null;
 
   @Column({ nullable: true })
   description?: string;

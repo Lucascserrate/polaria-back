@@ -9,6 +9,7 @@ import { join } from 'path';
 import { TenantsModule } from './tenants/tenants.module';
 import { StaffModule } from './staff/staff.module';
 import { ServicesModule } from './services/services.module';
+import { ServiceCategoriesModule } from './service-categories/service-categories.module';
 import { AppointmentsModule } from './appointments/appointments.module';
 import { ClientsModule } from './clients/clients.module';
 import { ConversationsModule } from './conversations/conversations.module';
@@ -61,6 +62,7 @@ import { ImpersonationInterceptor } from './auth/impersonation.interceptor';
     TenantsModule,
     StaffModule,
     ServicesModule,
+    ServiceCategoriesModule,
     AppointmentsModule,
     ClientsModule,
     ConversationsModule,
