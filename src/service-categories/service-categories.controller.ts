@@ -20,6 +20,7 @@ import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 import { ServiceCategoriesService } from './service-categories.service';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
+import { MoveServiceCategoryDto } from './dto/move-service-category.dto';
 
 @ApiTags('service-categories')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
@@ -45,6 +46,25 @@ export class ServiceCategoriesController {
     @Body() dto: UpdateServiceCategoryDto,
   ) {
     return this.categoriesService.updateByTenant(id, this.tenantId(req), dto);
+  }
+
+  /**
+   * Un lugar arriba o abajo. Devuelve la lista completa ya reordenada.
+   *
+   * El orden de las categorías es el del menú de WhatsApp, así que esto no es
+   * una preferencia estética del panel: decide qué ve primero el cliente.
+   */
+  @Patch(':id/move')
+  move(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() dto: MoveServiceCategoryDto,
+  ) {
+    return this.categoriesService.moveByTenant(
+      id,
+      this.tenantId(req),
+      dto.direction,
+    );
   }
 
   /**

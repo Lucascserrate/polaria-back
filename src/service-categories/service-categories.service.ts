@@ -7,6 +7,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 
 import { ServiceCategory } from './entities/service-category.entity';
+import { MoveDirection } from './dto/move-service-category.dto';
 import { isDuplicateEntryError } from '../database/duplicate-entry.util';
 import { CreateServiceCategoryDto } from './dto/create-service-category.dto';
 import { UpdateServiceCategoryDto } from './dto/update-service-category.dto';
@@ -93,6 +94,69 @@ export class ServiceCategoriesService {
     }
 
     return this.findOneOrFail(id, tenantId);
+  }
+
+  /**
+   * Mueve una categoría un lugar arriba o abajo.
+   *
+   * De a un paso y no arrastrando, por lo mismo que el reordenado de fotos: el
+   * arrastre es la interacción más difícil de acertar en un teléfono, y además
+   * hay negocios usando el panel sin rueda de mouse. Dos botones se tocan igual
+   * en cualquier lado.
+   *
+   * El orden lo calcula el servidor sobre la lista que tiene, no el cliente
+   * mandando posiciones: así dos pestañas abiertas no pueden escribir un orden
+   * hecho sobre una lista que ya cambió.
+   *
+   * Llegar al borde no es un error. El botón está deshabilitado en la punta,
+   * pero entre que se dibuja y se toca la lista puede haber cambiado, y devolver
+   * un 400 por eso sería contestarle al usuario que hizo algo mal cuando no lo
+   * hizo: se devuelve la lista como está.
+   *
+   * Devuelve el catálogo entero de categorías porque un movimiento renumera a
+   * todas: pedirle al cliente que deduzca el resultado sería pedirle que repita
+   * esta misma cuenta.
+   */
+  async moveByTenant(
+    id: string,
+    tenantId: string,
+    direction: MoveDirection,
+  ): Promise<ServiceCategory[]> {
+    const categories = await this.findByTenant(tenantId);
+
+    const from = categories.findIndex((category) => category.id === id);
+    if (from === -1) {
+      throw new NotFoundException('Esa categoría no existe.');
+    }
+
+    const to = direction === MoveDirection.UP ? from - 1 : from + 1;
+    if (to < 0 || to >= categories.length) return categories;
+
+    const ordered = [...categories];
+    [ordered[from], ordered[to]] = [ordered[to], ordered[from]];
+
+    await this.renumber(ordered);
+
+    return this.findByTenant(tenantId);
+  }
+
+  /**
+   * Escribe las posiciones 0..n-1 en el orden recibido, todas o ninguna.
+   *
+   * Contiguas y sin huecos porque `nextPosition` calcula el final sumando uno a
+   * la última: con un hueco, una categoría nueva podría nacer con la posición de
+   * otra y el orden pasaría a depender del desempate por nombre.
+   */
+  private renumber(ordered: ServiceCategory[]): Promise<void> {
+    return this.categoryRepository.manager.transaction(async (manager) => {
+      for (const [position, category] of ordered.entries()) {
+        await manager.update(
+          ServiceCategory,
+          { id: category.id },
+          { position },
+        );
+      }
+    });
   }
 
   /**

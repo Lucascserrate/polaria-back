@@ -2,6 +2,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { Repository } from 'typeorm';
 
 import { ServiceCategoriesService } from './service-categories.service';
+import { MoveDirection } from './dto/move-service-category.dto';
 import type { ServiceCategory } from './entities/service-category.entity';
 
 const TENANT = 'tenant-1';
@@ -51,7 +52,13 @@ const setup = (seed: Array<Partial<ServiceCategory>> = []) => {
     }),
 
     find: jest.fn(({ where }: { where: Partial<ServiceCategory> }) =>
-      Promise.resolve(rows.filter((row) => matches(row, where))),
+      Promise.resolve(
+        rows
+          .filter((row) => matches(row, where))
+          .sort(
+            (a, b) => a.position - b.position || a.name.localeCompare(b.name),
+          ),
+      ),
     ),
 
     findOne: jest.fn(
@@ -87,6 +94,22 @@ const setup = (seed: Array<Partial<ServiceCategory>> = []) => {
         return Promise.resolve({ affected: 1 });
       },
     ),
+
+    /** Lo que usa `renumber`: escribe todas las posiciones o ninguna. */
+    manager: {
+      transaction: (run: (m: unknown) => Promise<void>) =>
+        run({
+          update: (
+            _entity: unknown,
+            where: { id: string },
+            changes: { position: number },
+          ) => {
+            const row = rows.find((candidate) => candidate.id === where.id);
+            if (row) row.position = changes.position;
+            return Promise.resolve({ affected: row ? 1 : 0 });
+          },
+        }),
+    },
 
     delete: jest.fn((where: Partial<ServiceCategory>) => {
       const index = rows.findIndex((row) => matches(row, where));
@@ -187,5 +210,76 @@ describe('ServiceCategoriesService', () => {
     await expect(
       service.assertBelongsToTenant('cat-1', TENANT),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  describe('reordenar', () => {
+    const catalogo = () => [
+      { id: 'a', name: 'Cabello', position: 0 },
+      { id: 'b', name: 'Uñas', position: 1 },
+      { id: 'c', name: 'Barbería', position: 2 },
+    ];
+
+    const nombres = (categories: Array<{ name: string }>) =>
+      categories.map((category) => category.name);
+
+    it('subir una categoría la pone antes de la que tenía encima', async () => {
+      const { service } = setup(catalogo());
+
+      const result = await service.moveByTenant('c', TENANT, MoveDirection.UP);
+
+      expect(nombres(result)).toEqual(['Cabello', 'Barbería', 'Uñas']);
+    });
+
+    it('bajar una categoría la pone después de la siguiente', async () => {
+      const { service } = setup(catalogo());
+
+      const result = await service.moveByTenant(
+        'a',
+        TENANT,
+        MoveDirection.DOWN,
+      );
+
+      expect(nombres(result)).toEqual(['Uñas', 'Cabello', 'Barbería']);
+    });
+
+    it('las posiciones quedan contiguas desde cero', async () => {
+      // Con huecos, `nextPosition` puede repetir una posición y el orden pasaría
+      // a depender del desempate por nombre.
+      const { rows, service } = setup(catalogo());
+
+      await service.moveByTenant('c', TENANT, MoveDirection.UP);
+
+      expect(rows.map((row) => row.position).sort()).toEqual([0, 1, 2]);
+    });
+
+    it('subir la primera no es un error: devuelve la lista como está', async () => {
+      // El botón está deshabilitado en la punta, pero entre que se dibuja y se
+      // toca la lista pudo cambiar. Eso no es culpa de quien tocó.
+      const { service } = setup(catalogo());
+
+      const result = await service.moveByTenant('a', TENANT, MoveDirection.UP);
+
+      expect(nombres(result)).toEqual(['Cabello', 'Uñas', 'Barbería']);
+    });
+
+    it('bajar la última tampoco', async () => {
+      const { service } = setup(catalogo());
+
+      const result = await service.moveByTenant(
+        'c',
+        TENANT,
+        MoveDirection.DOWN,
+      );
+
+      expect(nombres(result)).toEqual(['Cabello', 'Uñas', 'Barbería']);
+    });
+
+    it('no se puede mover la categoría de otro negocio', async () => {
+      const { service } = setup([{ id: 'x', tenantId: OTHER_TENANT }]);
+
+      await expect(
+        service.moveByTenant('x', TENANT, MoveDirection.UP),
+      ).rejects.toThrow(NotFoundException);
+    });
   });
 });
