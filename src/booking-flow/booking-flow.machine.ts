@@ -126,8 +126,15 @@ export function isValueValidForState(
     case BookingSessionState.ASK_DATE:
       return isIsoDate(value);
 
+    case BookingSessionState.ASK_CATEGORY:
+      // "Otros servicios" es una fila legítima de este paso: agrupa a los que no
+      // están en ninguna categoría.
+      return value === RESERVED_VALUES.UNCATEGORIZED || value.length > 0;
+
     case BookingSessionState.ASK_SERVICE:
-      return value.length > 0;
+      // "Volver" es una respuesta legítima de este paso cuando hubo categorías:
+      // no elige servicio, rehace la pregunta anterior.
+      return value === RESERVED_VALUES.BACK || value.length > 0;
 
     case BookingSessionState.ASK_STAFF:
       return value === RESERVED_VALUES.ANY_STAFF || value.length > 0;
@@ -149,6 +156,7 @@ export function isValueValidForState(
 export function isPaginatedState(state: BookingSessionState): boolean {
   return (
     state === BookingSessionState.ASK_DATE ||
+    state === BookingSessionState.ASK_CATEGORY ||
     state === BookingSessionState.ASK_SERVICE ||
     state === BookingSessionState.ASK_STAFF ||
     state === BookingSessionState.ASK_SLOT
@@ -170,6 +178,12 @@ export function nextStateAfter(
     // fecha de la sesión y devuelve al paso donde estaba el cliente.
     case BookingSessionState.ASK_DATE:
       return BookingSessionState.ASK_SLOT;
+
+    // Elegir categoría no avanza el recorrido: acota el catálogo y lleva al mismo
+    // paso de servicio al que se habría ido directo si hubiera entrado en una
+    // sola lista.
+    case BookingSessionState.ASK_CATEGORY:
+      return BookingSessionState.ASK_SERVICE;
 
     case BookingSessionState.ASK_SERVICE:
       return options.skipStaffStep

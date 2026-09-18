@@ -8,11 +8,14 @@ import {
   BookingSessionState,
   StaffPreference,
   TERMINAL_STATES,
+  type CategorySelection,
 } from './booking-flow.types';
 import { BookingSession } from './entities/booking-session.entity';
 
 export type BookingSelectionPatch = {
   selectedDate?: string | null;
+  categorySelection?: CategorySelection | null;
+  selectedCategoryId?: string | null;
   selectedServiceId?: string | null;
   staffPreference?: StaffPreference | null;
   selectedStaffId?: string | null;

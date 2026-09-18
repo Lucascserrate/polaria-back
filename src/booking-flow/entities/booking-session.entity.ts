@@ -11,7 +11,11 @@ import {
 
 import { Client } from '../../clients/entities/client.entity';
 import { Tenant } from '../../tenants/entities/tenant.entity';
-import { BookingSessionState, StaffPreference } from '../booking-flow.types';
+import {
+  BookingSessionState,
+  CategorySelection,
+  StaffPreference,
+} from '../booking-flow.types';
 
 /**
  * Sesión de un flujo guiado de reserva.
@@ -91,6 +95,25 @@ export class BookingSession {
   /** Fecha elegida, `YYYY-MM-DD` en la zona horaria del negocio. */
   @Column({ type: 'varchar', length: 10, nullable: true })
   selectedDate?: string | null;
+
+  /**
+   * Qué parte del catálogo está mirando, o `NULL` si no hubo paso de categorías.
+   *
+   * Ver `CategorySelection`: sin este discriminador, `selectedCategoryId` nulo no
+   * distingue "eligió Otros servicios" de "el catálogo entraba en una lista".
+   */
+  @Column({ type: 'enum', enum: CategorySelection, nullable: true })
+  categorySelection?: CategorySelection | null;
+
+  /**
+   * Solo se completa cuando `categorySelection` es `SPECIFIC`.
+   *
+   * Sin foreign key a `service_categories`, a diferencia del catálogo: esto es el
+   * registro de lo que el cliente tocó, y que el negocio borre la categoría en
+   * mitad de una reserva no puede romper la sesión ni borrarle el dato.
+   */
+  @Column({ type: 'varchar', length: 36, nullable: true })
+  selectedCategoryId?: string | null;
 
   /** Exactamente un servicio por reserva. */
   @Column({ type: 'varchar', length: 36, nullable: true })

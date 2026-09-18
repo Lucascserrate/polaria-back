@@ -8,6 +8,8 @@ import {
 import { SlotAlreadyTakenError } from '../appointments/slot-already-taken.error';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import type { BookingSlot } from '../availability/booking/booking-slot.type';
+import { ServiceCategoriesService } from '../service-categories/service-categories.service';
+import type { Service } from '../services/entities/service.entity';
 import { ServicesService } from '../services/services.service';
 import { formatServicePrice } from '../services/utils/price-format.util';
 import { StaffService } from '../staff/staff.service';
@@ -20,6 +22,7 @@ import {
 import {
   BOOKING_DATE_HORIZON_DAYS,
   BookingSessionState,
+  CategorySelection,
   hasOptions,
   isTerminalState,
   RESERVED_VALUES,
@@ -34,6 +37,11 @@ import { BookingSessionService } from './booking-session.service';
 import type { BookingSession } from './entities/booking-session.entity';
 import { computeOptionWindow } from './option-window';
 import {
+  groupServices,
+  planServiceStep,
+  type ServiceGroup,
+} from './service-grouping';
+import {
   addDaysToIsoDate,
   formatDateLabel,
   formatTimeLabel,
@@ -44,6 +52,15 @@ const DEFAULT_TIMEZONE = 'America/La_Paz';
 
 /** `Cancelar` está siempre presente y por lo tanto siempre ocupa una opción. */
 const RESERVED_OPTION_COUNT = 1;
+
+/** Cómo se llama, para el cliente, el grupo de los que no tienen categoría. */
+const UNCATEGORIZED_LABEL = 'Otros servicios';
+
+const BACK_LABEL = 'Volver a las categorías';
+
+/** "3 servicios", cuando la categoría no trae una descripción propia. */
+const countLabel = (count: number): string =>
+  count === 1 ? '1 servicio' : `${count} servicios`;
 
 /**
  * Orquestador del flujo guiado de reservas.
@@ -64,6 +81,7 @@ export class BookingFlowService {
     private readonly bookingAvailabilityService: BookingAvailabilityService,
     private readonly appointmentsService: AppointmentsService,
     private readonly servicesService: ServicesService,
+    private readonly serviceCategoriesService: ServiceCategoriesService,
     private readonly staffService: StaffService,
     private readonly tenantsService: TenantsService,
   ) {}
@@ -110,16 +128,28 @@ export class BookingFlowService {
       now,
     });
 
+    /*
+     * El primer paso depende del tamaño del catálogo: con pocos servicios se va
+     * directo a elegirlo, y solo cuando no entran en una lista se pregunta la
+     * categoría primero. Ver `planServiceStep`.
+     */
+    const plan = await this.serviceStepPlan(params.tenantId, params.limits);
+
     const ready = await this.bookingSessionService.advance({
       session,
-      state: BookingSessionState.ASK_SERVICE,
+      state:
+        plan.kind === 'CATEGORIES'
+          ? BookingSessionState.ASK_CATEGORY
+          : BookingSessionState.ASK_SERVICE,
       selection: { selectedDate: today },
       now,
     });
 
     return this.emit(
       ready,
-      await this.askServicePrompt(ready, today, params.limits),
+      plan.kind === 'CATEGORIES'
+        ? this.categoryPrompt(ready, plan.groups, params.limits)
+        : this.servicePrompt(ready, today, plan.services, params.limits),
       now,
     );
   }
@@ -315,7 +345,22 @@ export class BookingFlowService {
           now,
         });
 
+      case BookingSessionState.ASK_CATEGORY:
+        return this.afterCategory({
+          session,
+          value,
+          metaMessageId,
+          limits,
+          now,
+        });
+
       case BookingSessionState.ASK_SERVICE:
+        // "Volver" no elige servicio: rehace la pregunta anterior con el catálogo
+        // entero otra vez a la vista.
+        if (value === RESERVED_VALUES.BACK) {
+          return this.backToCategories({ session, metaMessageId, limits, now });
+        }
+
         return this.afterService({
           session,
           serviceId: value,
@@ -353,7 +398,12 @@ export class BookingFlowService {
     const { session, metaMessageId, limits, now } = params;
 
     const total = await this.countCurrentStepOptions(session);
-    const window = this.window(total, session.pageOffset, limits);
+    const window = this.window(
+      total,
+      session.pageOffset,
+      limits,
+      this.extraOptionCount(session),
+    );
 
     const advanced = await this.bookingSessionService.advance({
       session,
@@ -385,6 +435,61 @@ export class BookingFlowService {
     });
 
     return this.askSlotPrompt(advanced, limits);
+  }
+
+  private async afterCategory(params: {
+    session: BookingSession;
+    value: string;
+    metaMessageId?: string | null;
+    limits?: BookingChannelLimits;
+    now: Date;
+  }): Promise<BookingPrompt> {
+    const { session, value, metaMessageId, limits, now } = params;
+
+    const advanced = await this.bookingSessionService.advance({
+      session,
+      state: nextStateAfter(BookingSessionState.ASK_CATEGORY),
+      selection:
+        value === RESERVED_VALUES.UNCATEGORIZED
+          ? {
+              categorySelection: CategorySelection.UNCATEGORIZED,
+              selectedCategoryId: null,
+            }
+          : {
+              categorySelection: CategorySelection.SPECIFIC,
+              selectedCategoryId: value,
+            },
+      metaMessageId,
+      now,
+    });
+
+    return this.askServicePrompt(advanced, advanced.selectedDate ?? '', limits);
+  }
+
+  /**
+   * Vuelve del paso de servicios al de categorias.
+   *
+   * Borra la categoria elegida antes de rehacer la pregunta: dejarla puesta haria
+   * que un texto libre en ese momento reenviara la lista de servicios filtrada,
+   * que es de lo que el cliente se estaba yendo.
+   */
+  private async backToCategories(params: {
+    session: BookingSession;
+    metaMessageId?: string | null;
+    limits?: BookingChannelLimits;
+    now: Date;
+  }): Promise<BookingPrompt> {
+    const { session, metaMessageId, limits, now } = params;
+
+    const advanced = await this.bookingSessionService.advance({
+      session,
+      state: BookingSessionState.ASK_CATEGORY,
+      selection: { categorySelection: null, selectedCategoryId: null },
+      metaMessageId,
+      now,
+    });
+
+    return this.askCategoryPrompt(advanced, limits);
   }
 
   private async afterService(params: {
@@ -758,6 +863,9 @@ export class BookingFlowService {
       case BookingSessionState.ASK_DATE:
         return this.askDatePrompt(session, limits, new Date());
 
+      case BookingSessionState.ASK_CATEGORY:
+        return this.askCategoryPrompt(session, limits);
+
       case BookingSessionState.ASK_SERVICE:
         return this.askServicePrompt(
           session,
@@ -804,7 +912,84 @@ export class BookingFlowService {
   }
 
   /**
-   * Catálogo del negocio.
+   * El catálogo que el cliente puede elegir, y cómo hay que mostrárselo.
+   *
+   * Solo los servicios que el cliente puede reservar solo. Uno con consulta
+   * previa no rinde horarios en este canal —lo corta `loadContext`—, así que
+   * ofrecerlo sería llevarlo a un paso que termina en "no hay horarios" sin
+   * explicar por qué. Por lo mismo, una categoría cuyos servicios son todos de
+   * consulta previa no aparece: no queda nada adentro.
+   */
+  private async serviceStepPlan(
+    tenantId: string,
+    limits?: BookingChannelLimits,
+  ) {
+    const [services, categories] = await Promise.all([
+      this.servicesService.findSelfBookableByTenant(tenantId),
+      this.serviceCategoriesService.findByTenant(tenantId),
+    ]);
+
+    return planServiceStep({
+      services,
+      categories,
+      maxOptionsPerPrompt: limits?.maxOptionsPerPrompt,
+      reservedOptions: RESERVED_OPTION_COUNT,
+    });
+  }
+
+  private async askCategoryPrompt(
+    session: BookingSession,
+    limits?: BookingChannelLimits,
+  ): Promise<BookingPrompt> {
+    const plan = await this.serviceStepPlan(session.tenantId, limits);
+
+    /*
+     * El catálogo encogió mientras la sesión estaba abierta y ya entra en una
+     * lista: se saltea la pregunta en vez de mostrar una con una sola respuesta
+     * posible.
+     */
+    if (plan.kind === 'SERVICES') {
+      return this.servicePrompt(
+        session,
+        session.selectedDate ?? '',
+        plan.services,
+        limits,
+      );
+    }
+
+    return this.categoryPrompt(session, plan.groups, limits);
+  }
+
+  private categoryPrompt(
+    session: BookingSession,
+    groups: Array<ServiceGroup<Service>>,
+    limits?: BookingChannelLimits,
+  ): BookingPrompt {
+    return {
+      kind: 'ASK_CATEGORY',
+      options: this.paginate(
+        session,
+        groups.map((group) =>
+          this.option(
+            session,
+            group.category?.id ?? RESERVED_VALUES.UNCATEGORIZED,
+            group.category?.name ?? UNCATEGORIZED_LABEL,
+            /*
+             * La descripción de la categoría si el negocio la escribió, y si no
+             * cuántos servicios tiene. Las dos contestan lo mismo —qué voy a
+             * encontrar acá adentro— y la escrita lo hace mejor, pero una lista
+             * de nombres a secas obliga a entrar para averiguarlo.
+             */
+            group.category?.description ?? countLabel(group.services.length),
+          ),
+        ),
+        limits,
+      ),
+    };
+  }
+
+  /**
+   * Catálogo del negocio, o la parte de él que el cliente pidió ver.
    *
    * Lista **todos** los servicios activos, sin filtrar por disponibilidad de la
    * fecha. Ese filtro existía cuando la fecha se elegía primero y servía para
@@ -819,16 +1004,20 @@ export class BookingFlowService {
     date: string,
     limits?: BookingChannelLimits,
   ): Promise<BookingPrompt> {
-    /*
-     * Solo los que el cliente puede elegir. Un servicio con consulta previa no
-     * rinde horarios en este canal —lo corta `loadContext`—, así que ofrecerlo
-     * sería llevarlo a un paso que termina en "no hay horarios" sin explicar por
-     * qué.
-     */
-    const services = await this.servicesService.findSelfBookableByTenant(
-      session.tenantId,
+    return this.servicePrompt(
+      session,
+      date,
+      await this.servicesForSession(session),
+      limits,
     );
+  }
 
+  private servicePrompt(
+    session: BookingSession,
+    date: string,
+    services: Service[],
+    limits?: BookingChannelLimits,
+  ): BookingPrompt {
     if (services.length === 0) {
       return { kind: 'NO_AVAILABILITY', scope: 'SETUP' };
     }
@@ -849,8 +1038,39 @@ export class BookingFlowService {
           ),
         ),
         limits,
+        // Solo cuando hubo categorías: sin ellas no hay a dónde volver.
+        session.categorySelection
+          ? [this.option(session, RESERVED_VALUES.BACK, BACK_LABEL)]
+          : [],
       ),
     };
+  }
+
+  /**
+   * Los servicios que corresponden a la categoría elegida, o todos.
+   *
+   * Si el filtro no deja nada se devuelve el catálogo entero. Pasa cuando el
+   * negocio borra una categoría, o pasa sus servicios a consulta previa, con una
+   * sesión abierta parada justo ahí: el cliente tocó una fila que ya no tiene
+   * contenido. Entre mostrarle todo y dejarlo sin nada que tocar, lo primero: la
+   * invariante del flujo es que una sesión abierta siempre ofrece salida.
+   */
+  private async servicesForSession(
+    session: BookingSession,
+  ): Promise<Service[]> {
+    const services = await this.servicesService.findSelfBookableByTenant(
+      session.tenantId,
+    );
+
+    if (!session.categorySelection) return services;
+
+    const filtered = services.filter((service) =>
+      session.categorySelection === CategorySelection.UNCATEGORIZED
+        ? !service.categoryId
+        : service.categoryId === session.selectedCategoryId,
+    );
+
+    return filtered.length > 0 ? filtered : services;
   }
 
   private askStaffPrompt(
@@ -975,6 +1195,30 @@ export class BookingFlowService {
   }
 
   /**
+   * Filas fijas que el paso actual agrega además de `Cancelar`.
+   *
+   * El salto de página tiene que descontarlas igual que las descontó el dibujo,
+   * porque las dos cuentas reparten el mismo presupuesto de filas. Sin esto, un
+   * paso con fila extra avanzaba el offset una opción más de las que llegó a
+   * mostrar y se salteaba un horario: la lista terminaba en el séptimo y la
+   * página siguiente arrancaba en el noveno.
+   */
+  private extraOptionCount(session: BookingSession): number {
+    switch (session.state) {
+      // "Ver otros días", en `askSlotPrompt`.
+      case BookingSessionState.ASK_SLOT:
+        return 1;
+
+      // "Volver a las categorías", solo cuando hubo paso de categorías.
+      case BookingSessionState.ASK_SERVICE:
+        return session.categorySelection ? 1 : 0;
+
+      default:
+        return 0;
+    }
+  }
+
+  /**
    * Cantidad de opciones de contenido del paso actual, para poder calcular el
    * salto de página sin volver a construir las etiquetas.
    */
@@ -985,14 +1229,19 @@ export class BookingFlowService {
       case BookingSessionState.ASK_DATE:
         return BOOKING_DATE_HORIZON_DAYS;
 
-      case BookingSessionState.ASK_SERVICE: {
-        // La misma lista que se ofreció: si contara todo el catálogo, un número
-        // válido para el cliente quedaría fuera de rango o al revés.
-        const services = await this.servicesService.findSelfBookableByTenant(
-          session.tenantId,
-        );
-        return services.length;
+      case BookingSessionState.ASK_CATEGORY: {
+        const [services, categories] = await Promise.all([
+          this.servicesService.findSelfBookableByTenant(session.tenantId),
+          this.serviceCategoriesService.findByTenant(session.tenantId),
+        ]);
+        return groupServices(services, categories).length;
       }
+
+      case BookingSessionState.ASK_SERVICE:
+        // La misma lista que se ofreció, con el filtro de categoría puesto: si
+        // contara todo el catálogo, un número válido para el cliente quedaría
+        // fuera de rango o al revés.
+        return (await this.servicesForSession(session)).length;
 
       case BookingSessionState.ASK_STAFF: {
         if (!session.selectedServiceId) return 0;

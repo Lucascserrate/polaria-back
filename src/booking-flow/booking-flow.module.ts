@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AppointmentsModule } from '../appointments/appointments.module';
 import { AvailabilityModule } from '../availability/availability.module';
+import { ServiceCategoriesModule } from '../service-categories/service-categories.module';
 import { ServicesModule } from '../services/services.module';
 import { StaffModule } from '../staff/staff.module';
 import { TenantsModule } from '../tenants/tenants.module';
@@ -21,6 +22,7 @@ import { BookingSession } from './entities/booking-session.entity';
     AvailabilityModule,
     AppointmentsModule,
     ServicesModule,
+    ServiceCategoriesModule,
     StaffModule,
     TenantsModule,
   ],

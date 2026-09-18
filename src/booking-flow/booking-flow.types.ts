@@ -14,8 +14,13 @@
  * hoy: la sesión arranca con la fecha puesta en hoy y va directo al servicio. El
  * cliente solo ve un selector de fecha si pide "Ver otros días" desde el paso de
  * horarios, así que `ASK_DATE` es un desvío opcional y no un paso obligatorio.
+ *
+ * `ASK_CATEGORY` tampoco es obligatorio: aparece solo cuando el catálogo no entra
+ * en una sola lista. Ver `planServiceStep`.
  */
 export enum BookingSessionState {
+  /** Desvío previo a `ASK_SERVICE` en catálogos que no entran en una lista. */
+  ASK_CATEGORY = 'ASK_CATEGORY',
   ASK_SERVICE = 'ASK_SERVICE',
   ASK_STAFF = 'ASK_STAFF',
   ASK_SLOT = 'ASK_SLOT',
@@ -48,6 +53,24 @@ export enum StaffPreference {
   SPECIFIC = 'SPECIFIC',
 }
 
+/**
+ * Qué parte del catálogo está mirando el cliente.
+ *
+ * Existe por lo mismo que `StaffPreference`: sin ella, un `selectedCategoryId`
+ * nulo sería ambiguo entre "eligió Otros servicios" y "no hubo paso de
+ * categorías", y el paso siguiente tendría que adivinar si filtrar por los que no
+ * tienen categoría o no filtrar nada.
+ *
+ * Ausente —la columna en `NULL`— es el tercer caso: el catálogo entra en una
+ * lista y el paso de categorías no ocurrió.
+ */
+export enum CategorySelection {
+  /** Una categoría concreta, en `selectedCategoryId`. */
+  SPECIFIC = 'SPECIFIC',
+  /** La fila "Otros servicios": los que no están en ninguna categoría. */
+  UNCATEGORIZED = 'UNCATEGORIZED',
+}
+
 /** Valores reservados que viajan en el `selectionId` en lugar de un uuid. */
 export const RESERVED_VALUES = {
   ANY_STAFF: 'any',
@@ -57,6 +80,10 @@ export const RESERVED_VALUES = {
   MORE: 'more',
   /** Abre el selector de fecha desde el paso de horarios. */
   OTHER_DAYS: 'otherdays',
+  /** La fila "Otros servicios" del paso de categorías. */
+  UNCATEGORIZED: 'nocategory',
+  /** Vuelve del paso de servicios al de categorías. */
+  BACK: 'back',
 } as const;
 
 /**
@@ -104,6 +131,7 @@ export type BookingSummary = {
 
 export type BookingPrompt =
   | { kind: 'ASK_DATE'; options: BookingOption[] }
+  | { kind: 'ASK_CATEGORY'; options: BookingOption[] }
   | { kind: 'ASK_SERVICE'; date: string; options: BookingOption[] }
   | { kind: 'ASK_STAFF'; options: BookingOption[] }
   /**
@@ -152,7 +180,13 @@ export type BookingPrompt =
 export type PendingBookingPrompt = Extract<
   BookingPrompt,
   {
-    kind: 'ASK_DATE' | 'ASK_SERVICE' | 'ASK_STAFF' | 'ASK_SLOT' | 'CONFIRM';
+    kind:
+      | 'ASK_DATE'
+      | 'ASK_CATEGORY'
+      | 'ASK_SERVICE'
+      | 'ASK_STAFF'
+      | 'ASK_SLOT'
+      | 'CONFIRM';
   }
 >;
 

@@ -237,6 +237,48 @@ describe('isValueValidForState', () => {
   });
 });
 
+describe('el paso de categorías', () => {
+  it('acepta "Otros servicios" como respuesta', () => {
+    expect(
+      isValueValidForState(
+        BookingSessionState.ASK_CATEGORY,
+        RESERVED_VALUES.UNCATEGORIZED,
+      ),
+    ).toBe(true);
+  });
+
+  it('acepta "Volver" en el paso de servicios, no en los demás', () => {
+    // Volver rehace la pregunta anterior. Fuera del paso de servicios no hay
+    // ninguna categoría a la que volver, así que es un valor imposible.
+    expect(
+      isValueValidForState(
+        BookingSessionState.ASK_SERVICE,
+        RESERVED_VALUES.BACK,
+      ),
+    ).toBe(true);
+    expect(
+      isValueValidForState(BookingSessionState.CONFIRM, RESERVED_VALUES.BACK),
+    ).toBe(false);
+  });
+
+  it('lleva al paso de servicios, no a uno nuevo del recorrido', () => {
+    // Elegir categoría acota el catálogo: deja al cliente en el mismo paso al que
+    // habría ido directo si el catálogo entrara en una lista.
+    expect(nextStateAfter(BookingSessionState.ASK_CATEGORY)).toBe(
+      BookingSessionState.ASK_SERVICE,
+    );
+  });
+
+  it('pagina, porque es una lista como las demás', () => {
+    expect(
+      isValueValidForState(
+        BookingSessionState.ASK_CATEGORY,
+        RESERVED_VALUES.MORE,
+      ),
+    ).toBe(true);
+  });
+});
+
 describe('nextStateAfter', () => {
   it('omite el paso de profesional cuando hay uno solo', () => {
     expect(

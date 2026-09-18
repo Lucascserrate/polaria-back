@@ -39,6 +39,19 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
         ),
       ];
 
+    case 'ASK_CATEGORY':
+      // El texto no nombra las categorías: dice qué se está eligiendo. "Elegí
+      // una categoría" es jerga del panel; el cliente está buscando un servicio
+      // y esto es el atajo para encontrarlo.
+      return [
+        list(
+          prompt.kind,
+          '¿Qué tipo de servicio buscás?',
+          'Ver opciones',
+          prompt.options,
+        ),
+      ];
+
     case 'ASK_SERVICE':
       return [
         list(

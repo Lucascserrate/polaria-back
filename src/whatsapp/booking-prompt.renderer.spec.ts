@@ -135,6 +135,31 @@ describe('BookingPromptRenderer', () => {
     expect(input.sections[0].rows[0].description).toBe('30 min');
   });
 
+  it('ASK_CATEGORY se envía como lista, igual que los demás pasos', async () => {
+    const { sender, sent } = fakeSender();
+
+    await new BookingPromptRenderer(sender).render({
+      credentials: CREDENTIALS,
+      to: TO,
+      prompt: {
+        kind: 'ASK_CATEGORY',
+        options: [
+          { ...option('cabello', 'Cabello'), description: '8 servicios' },
+          {
+            ...option('nocategory', 'Otros servicios'),
+            description: '2 servicios',
+          },
+          option('cancel', 'Cancelar'),
+        ],
+      },
+    });
+
+    expect(sent[0].kind).toBe('list');
+    const input = sent[0].input as SendListInput;
+    expect(input.sections[0].rows).toHaveLength(3);
+    expect(input.sections[0].rows[1].title).toBe('Otros servicios');
+  });
+
   it('SLOT_TAKEN avisa por texto antes de mandar la lista nueva', async () => {
     const { sender, sent } = fakeSender();
 
