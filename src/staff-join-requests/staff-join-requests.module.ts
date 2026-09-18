@@ -2,10 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { StaffJoinRequest } from './entities/staff-join-request.entity';
-import {
-  SignupJoinController,
-  StaffJoinRequestsController,
-} from './staff-join-requests.controller';
+import { SignupJoinController } from './signup-join.controller';
+import { StaffJoinRequestsController } from './staff-join-requests.controller';
 import { StaffJoinRequestsService } from './staff-join-requests.service';
 import { AuthModule } from '../auth/auth.module';
 import { StaffModule } from '../staff/staff.module';
