@@ -3,6 +3,7 @@ import {
   sumByCurrency,
   type MoneyTotal,
 } from '../services/utils/money-total.util';
+import { toPrice } from '../services/quoted-price';
 import type { Appointment } from './entities/appointment.entity';
 import type { AppointmentStatus } from './entities/appointment.entity';
 
@@ -44,7 +45,8 @@ export interface AppointmentSegmentItem {
   serviceName: string | null;
   startTime: string;
   endTime: string;
-  price: number;
+  /** `null` mientras el tramo no tenga precio. Ver `quoted-price.ts`. */
+  price: number | null;
   currency: string;
   durationMinutes: number;
 }
@@ -125,7 +127,7 @@ export const toAppointmentItem = (
       serviceName: s.service?.name ?? null,
       startTime: s.startTime.toISOString(),
       endTime: s.endTime.toISOString(),
-      price: Number(s.priceAtBooking),
+      price: toPrice(s.priceAtBooking),
       currency: s.currencyAtBooking,
       durationMinutes: s.durationAtBooking,
     }))

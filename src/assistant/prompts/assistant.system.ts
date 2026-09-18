@@ -11,7 +11,8 @@ export interface AssistantPromptContext {
   services: string[];
   servicesCatalog: Array<{
     name: string;
-    price: number;
+    /** `null` si el servicio se cotiza; el modelo no debe inventar un importe. */
+    price: number | null;
     durationMinutes: number;
     description?: string;
   }>;

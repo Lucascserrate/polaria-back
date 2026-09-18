@@ -9,7 +9,7 @@ import { SlotAlreadyTakenError } from '../appointments/slot-already-taken.error'
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import type { BookingSlot } from '../availability/booking/booking-slot.type';
 import { ServicesService } from '../services/services.service';
-import { formatPrice } from '../services/utils/price-format.util';
+import { formatServicePrice } from '../services/utils/price-format.util';
 import { StaffService } from '../staff/staff.service';
 import { TenantsService } from '../tenants/tenants.service';
 import {
@@ -845,7 +845,7 @@ export class BookingFlowService {
             session,
             service.id,
             service.name,
-            formatPrice(service.price, service.currency) ?? undefined,
+            formatServicePrice(service.price, service.currency),
           ),
         ),
         limits,

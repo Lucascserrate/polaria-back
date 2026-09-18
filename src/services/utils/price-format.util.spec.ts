@@ -1,4 +1,4 @@
-import { formatPrice } from './price-format.util';
+import { formatPrice, formatServicePrice } from './price-format.util';
 
 describe('formatPrice', () => {
   it('formatea con la moneda del negocio', () => {
@@ -45,5 +45,21 @@ describe('formatPrice', () => {
 
   it('no lanza con un código de tres letras inexistente', () => {
     expect(formatPrice(80, 'XYZ')).toContain('80');
+  });
+});
+
+describe('formatServicePrice', () => {
+  it('escribe el importe cuando lo hay', () => {
+    expect(formatServicePrice(80, 'BOB')).toBe(formatPrice(80, 'BOB'));
+  });
+
+  it('avisa que se cotiza en lugar de dejar el hueco', () => {
+    // Una fila sin precio se lee como un error de la aplicación; el aviso dice
+    // que el precio existe y sale después de ver a la persona.
+    expect(formatServicePrice(null, 'BOB')).toBe('Requiere diagnóstico');
+  });
+
+  it('el precio cero es un precio: no se cotiza, es gratis', () => {
+    expect(formatServicePrice(0, 'BOB')).toContain('0');
   });
 });

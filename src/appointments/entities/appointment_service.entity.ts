@@ -71,8 +71,15 @@ export class AppointmentService {
   @Column({ type: 'timestamp', nullable: true })
   activeStartTime?: Date | null;
 
-  @Column('decimal', { precision: 10, scale: 2 })
-  priceAtBooking!: number;
+  /**
+   * Lo pactado al reservar, o `NULL` mientras no haya precio.
+   *
+   * Los servicios que se cotizan entran sin importe y lo reciben cuando el
+   * negocio lo escribe en la cita. Hasta entonces no suman a la facturación, que
+   * es lo correcto: esa plata no está acordada todavía.
+   */
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  priceAtBooking!: number | null;
 
   @Column({ type: 'varchar', length: 3, default: 'BOB' })
   currencyAtBooking!: string;

@@ -6,6 +6,7 @@
  */
 
 import { CURRENCY_LOCALES, DEFAULT_CURRENCY } from '../../tenants/currency';
+import { QUOTED_PRICE_LABEL, toPrice } from '../quoted-price';
 
 /** Moneda de reserva cuando el tenant no tiene una configurada. */
 const FALLBACK_CURRENCY: string = DEFAULT_CURRENCY;
@@ -23,8 +24,8 @@ export function formatPrice(
   value: number | string | null | undefined,
   currency?: string | null,
 ): string | null {
-  const amount = typeof value === 'string' ? Number(value) : value;
-  if (amount === null || amount === undefined || !Number.isFinite(amount)) {
+  const amount = toPrice(value);
+  if (amount === null) {
     return null;
   }
 
@@ -42,6 +43,22 @@ export function formatPrice(
     // Un código de moneda inválido no debe romper la lista de servicios.
     return `${code} ${Math.round(amount)}`;
   }
+}
+
+/**
+ * El precio de un servicio tal como se le muestra al cliente: el importe, o el
+ * aviso de que se cotiza.
+ *
+ * Es la forma que usan los canales —la lista de WhatsApp, el Flow, la página—,
+ * porque ahí no hay dónde poner un hueco: una fila sin precio se lee como un
+ * error de la aplicación, no como un servicio que se cotiza. `formatPrice` sigue
+ * devolviendo `null` para quien necesite decidir otra cosa.
+ */
+export function formatServicePrice(
+  value: number | string | null | undefined,
+  currency?: string | null,
+): string {
+  return formatPrice(value, currency) ?? QUOTED_PRICE_LABEL;
 }
 
 function normalizeCurrency(currency?: string | null): string {

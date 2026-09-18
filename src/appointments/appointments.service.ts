@@ -17,10 +17,12 @@ import {
 import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { EditBookingDto } from './dto/edit-booking.dto';
+import { SetSegmentPricesDto } from './dto/set-segment-prices.dto';
 import { planBookingSegments } from './booking-plan';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import { AppointmentService as AppointmentServiceEntity } from './entities/appointment_service.entity';
 import { Service } from '../services/entities/service.entity';
+import { toPrice } from '../services/quoted-price';
 import { AppointmentStatus } from './entities/appointment.entity';
 import { Tenant } from '../tenants/entities/tenant.entity';
 import { Staff } from '../staff/entities/staff.entity';
@@ -128,7 +130,7 @@ export class AppointmentsService {
           service.id,
           {
             durationMinutes: service.durationMinutes,
-            price: Number(service.price),
+            price: toPrice(service.price),
             currency: service.currency,
           },
         ]),
@@ -893,7 +895,7 @@ export class AppointmentsService {
           startTime: input.startTime,
           activeStartTime: input.startTime,
           endTime: input.endTime,
-          priceAtBooking: service.price,
+          priceAtBooking: toPrice(service.price),
           currencyAtBooking: service.currency,
           durationAtBooking: service.durationMinutes,
           sequenceOrder: 0,
@@ -979,6 +981,65 @@ export class AppointmentsService {
    * completo y lo escribe en una transacción. Mantener dos formas de reescribir
    * una reserva era garantizar que se separaran.
    */
+  /**
+   * Escribe lo que se cobra en una cita que ya existe.
+   *
+   * Es lo que le pone precio a un servicio que se cotiza: el catálogo no lo tiene
+   * y el importe aparece cuando se vio a la persona, casi siempre al finalizar la
+   * cita. Toca `priceAtBooking` y nada más —ni el horario, ni los tramos, ni el
+   * catálogo—, que es la diferencia con `editBookingByTenant`.
+   *
+   * Por servicio y no por tramo porque así se pacta: el mismo servicio dos veces
+   * en una cita se cobra una vez, y es lo que ya hacía `agreedPrices`.
+   *
+   * La moneda no viaja ni se toca: es la que se congeló al reservar. Cambiarla
+   * acá convertiría Bs 300 en USD 300 con un número escrito de apuro.
+   */
+  async setSegmentPricesByTenant(
+    id: string,
+    tenantId: string,
+    dto: SetSegmentPricesDto,
+  ): Promise<AppointmentDetail> {
+    // Por la cita y no por los tramos: sin esto se le podría poner precio a la
+    // cita de otro negocio sabiendo su id.
+    const appointment = await this.appointmentRepository.findOne({
+      where: { id, tenantId },
+      relations: { services: true },
+    });
+
+    if (!appointment) {
+      throw new NotFoundException('La cita no existe');
+    }
+
+    const byService = new Map(
+      dto.prices.map((entry) => [entry.serviceId, entry.price ?? null]),
+    );
+
+    const touched = (appointment.services ?? []).filter((segment) =>
+      byService.has(segment.serviceId),
+    );
+
+    /*
+     * Un servicio que no está en la cita es un pedido equivocado, no un cambio
+     * vacío: se avisa en lugar de contestar que todo salió bien sin haber escrito
+     * nada. Es lo que pasaría si la pantalla quedó vieja y el servicio ya no está.
+     */
+    if (touched.length === 0) {
+      throw new BadRequestException(
+        'Ninguno de esos servicios está en la cita',
+      );
+    }
+
+    await this.appointmentServiceRepository.save(
+      touched.map((segment) => ({
+        id: segment.id,
+        priceAtBooking: byService.get(segment.serviceId)!,
+      })),
+    );
+
+    return this.findDetailByTenant(id, tenantId);
+  }
+
   async updateByTenant(
     id: string,
     tenantId: string,
@@ -1092,7 +1153,7 @@ export class AppointmentsService {
           service.id,
           {
             durationMinutes: service.durationMinutes,
-            price: Number(service.price),
+            price: toPrice(service.price),
             currency: service.currency,
           },
         ]),
@@ -1102,7 +1163,7 @@ export class AppointmentsService {
         (appointment.services ?? []).map((segment) => [
           segment.serviceId,
           {
-            price: Number(segment.priceAtBooking),
+            price: toPrice(segment.priceAtBooking),
             currency: segment.currencyAtBooking,
           },
         ]),

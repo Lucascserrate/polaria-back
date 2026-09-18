@@ -19,6 +19,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { AppointmentsRangeQueryDto } from './dto/appointments-range-query.dto';
 import { EditBookingDto } from './dto/edit-booking.dto';
+import { SetSegmentPricesDto } from './dto/set-segment-prices.dto';
 import { Actor, canAdminister, type AuthenticatedActor } from '../auth/actor';
 import { AdminOnly, RolesGuard } from '../auth/guards/roles.guard';
 
@@ -182,6 +183,31 @@ export class AppointmentsController {
       id,
       tenantId,
       editBookingDto,
+    );
+  }
+
+  /**
+   * Escribe lo que se cobra en la cita, sin tocar nada más.
+   *
+   * Separado de `:id/booking` porque no cambia lo que ocupa la agenda: esa ruta
+   * reacomoda los tramos y los vuelve a insertar, y hacer eso para escribir un
+   * número expone una cita ya atendida a fallar por horario. Ver el DTO.
+   */
+  @AdminOnly()
+  @Patch(':id/prices')
+  setPrices(
+    @Req() req: Request,
+    @Param('id') id: string,
+    @Body() setSegmentPricesDto: SetSegmentPricesDto,
+  ) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+    return this.appointmentsService.setSegmentPricesByTenant(
+      id,
+      tenantId,
+      setSegmentPricesDto,
     );
   }
 

@@ -9,6 +9,7 @@ import {
   IsString,
   IsUUID,
   MaxLength,
+  ValidateIf,
 } from 'class-validator';
 
 import { ServiceBookingPolicy } from '../booking-policy';
@@ -49,9 +50,18 @@ export class CreateServiceDto {
   })
   description?: string;
 
-  @ApiProperty()
+  /**
+   * Cuánto cuesta, o `null` si se cotiza después de ver a la persona.
+   *
+   * El campo sigue siendo obligatorio: lo que se acepta es un `null` explícito,
+   * no su ausencia. Un precio que se olvidó de mandar y uno que no existe se
+   * escriben igual en la base y se leen distinto en la pantalla, así que el que
+   * no existe se dice. Ver `quoted-price.ts`.
+   */
+  @ApiProperty({ type: Number, nullable: true })
+  @ValidateIf((_, value) => value !== null)
   @IsNumber()
-  price: number;
+  price: number | null;
 
   /**
    * Moneda de este precio, en ISO 4217.

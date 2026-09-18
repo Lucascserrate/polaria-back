@@ -186,6 +186,36 @@ describe('planBookingSegments', () => {
     expect(plan).toEqual({ ok: false, missingServiceIds: ['roto'] });
   });
 
+  it('deja sin precio el servicio que se cotiza', () => {
+    const plan = planBookingSegments({
+      startTime: START,
+      items: [{ serviceId: 'color', staffId: 'diego' }],
+      services: new Map([
+        ['color', { durationMinutes: 60, price: null, currency: 'BOB' }],
+      ]),
+    });
+
+    if (!plan.ok) throw new Error('debía planificar');
+    // `null` y no `0`: el tramo no se cobró en cero, todavía no tiene precio.
+    expect(plan.segments[0].price).toBeNull();
+  });
+
+  it('un tramo que se guardó sin precio no hereda el del catálogo de hoy', () => {
+    // El negocio le puso precio a la carta después de agendar: la cita que se
+    // cotizó sigue sin precio hasta que alguien escriba el suyo.
+    const plan = planBookingSegments({
+      startTime: START,
+      items: [{ serviceId: 'color', staffId: 'diego' }],
+      services: new Map([
+        ['color', { durationMinutes: 60, price: 400, currency: 'BOB' }],
+      ]),
+      agreedPrices: new Map([['color', { price: null, currency: 'BOB' }]]),
+    });
+
+    if (!plan.ok) throw new Error('debía planificar');
+    expect(plan.segments[0].price).toBeNull();
+  });
+
   it('un solo servicio termina cuando termina su duración', () => {
     const plan = planBookingSegments({
       startTime: START,

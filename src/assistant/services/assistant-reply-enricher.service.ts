@@ -5,6 +5,7 @@ import type { AssistantPromptContext } from '../prompts/assistant.system';
 import { buildAssistantSystemPrompt } from '../prompts/assistant.system';
 import { ServicesService } from '../../services/services.service';
 import { isSelfBookable } from '../../services/booking-policy';
+import { QUOTED_PRICE_LABEL, toPrice } from '../../services/quoted-price';
 
 type EnrichmentNeeds = {
   prices?: boolean;
@@ -79,7 +80,11 @@ export class AssistantReplyEnricherService {
       const services = await this.servicesService.findActiveByTenant(tenantId);
       facts.services = services.map((s) => ({
         name: s.name,
-        price: s.price,
+        /*
+         * El que se cotiza viaja con el aviso escrito y no con un `null`: el
+         * modelo lee un hueco como un dato que le falta y lo completa solo.
+         */
+        price: toPrice(s.price) ?? QUOTED_PRICE_LABEL,
         durationMinutes: s.durationMinutes,
         selfBookable: isSelfBookable(s.bookingPolicy),
       }));

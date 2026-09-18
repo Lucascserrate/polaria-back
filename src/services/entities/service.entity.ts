@@ -31,8 +31,14 @@ export class Service {
   @Column({ nullable: true })
   description?: string;
 
-  @Column('decimal', { precision: 10, scale: 2 })
-  price!: number;
+  /**
+   * Cuánto cuesta, o `NULL` si se cotiza después de ver a la persona.
+   *
+   * `NULL` no es `0`: uno es "todavía no se sabe" y el otro es "no se cobra", y
+   * el cliente los lee distinto. Ver `quoted-price.ts`.
+   */
+  @Column('decimal', { precision: 10, scale: 2, nullable: true })
+  price!: number | null;
 
   /**
    * Moneda de este precio, en ISO 4217.

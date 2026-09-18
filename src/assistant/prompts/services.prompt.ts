@@ -1,8 +1,11 @@
+import { QUOTED_PRICE_LABEL } from '../../services/quoted-price';
+
 export const buildServicesPromptAddon = (params: {
   services: string[];
   servicesCatalog: Array<{
     name: string;
-    price: number;
+    /** `null` si se cotiza después de ver a la persona. */
+    price: number | null;
     durationMinutes: number;
     description?: string;
   }>;
@@ -14,8 +17,16 @@ export const buildServicesPromptAddon = (params: {
     ? servicesCatalog
         .slice(0, 30)
         .map((s) => {
-          const safePrice = Number.isFinite(s.price) ? s.price : 0;
-          return `- ${s.name} — $${safePrice} — ${s.durationMinutes} min`;
+          /*
+           * Sin precio se escribe el aviso y no un cero: `Number.isFinite(null)`
+           * es falso y el cero de antes le decía al modelo que el servicio era
+           * gratis, que es exactamente lo que después repetía al cliente.
+           */
+          const price =
+            s.price !== null && Number.isFinite(s.price)
+              ? `$${s.price}`
+              : QUOTED_PRICE_LABEL;
+          return `- ${s.name} — ${price} — ${s.durationMinutes} min`;
         })
         .join('\n')
     : '';
@@ -43,6 +54,7 @@ REGLAS ESPECIALES (precio/duración):
 - Si el usuario pregunta "cuánto vale" / "precio" / "cuánto cuesta" un servicio: responde con su precio y duración reales.
 - Si pregunta por el precio de UN servicio específico: responde SOLO ese servicio (precio + duración) y luego pregunta si desea agendar; NO enumeres todos los servicios a menos que el usuario lo pida.
 - Si pregunta por el "más barato" o el "más caro": responde con el servicio correspondiente y su precio/duración.
+- Si un servicio figura como "${QUOTED_PRICE_LABEL}": NO tiene precio y NO debes inventar uno ni estimarlo. Explicá que ese servicio se cotiza después de una consulta previa y ofrecé coordinarla.
 - Si pregunta por "mejor calidad": no inventes. Puedes sugerir el más completo por duración/precio o preguntar qué busca, usando solo el catálogo real.
 
 Contexto:

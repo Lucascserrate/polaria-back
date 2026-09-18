@@ -301,7 +301,7 @@ export class ReportsService {
       .getRawMany<{
         appointmentId: string;
         startTime: Date | string;
-        price: string | number;
+        price: string | number | null;
         currency: string;
       }>();
 
@@ -617,7 +617,7 @@ export class ReportsService {
       .getRawMany<{
         appointmentId: string;
         startTime: Date | string;
-        price: string | number;
+        price: string | number | null;
         currency: string;
       }>();
 

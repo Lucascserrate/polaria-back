@@ -17,7 +17,7 @@ import {
   todayIsoDateIn,
 } from '../booking-flow/utils/booking-date.util';
 import { ServicesService } from '../services/services.service';
-import { formatPrice } from '../services/utils/price-format.util';
+import { formatServicePrice } from '../services/utils/price-format.util';
 import { StaffService } from '../staff/staff.service';
 import { TenantsService } from '../tenants/tenants.service';
 import {
@@ -288,8 +288,7 @@ export class FlowBookingService {
       formatTimeLabel(new Date(slot), timezone),
     ];
 
-    const price = formatPrice(service.price, service.currency);
-    if (price) lines.push(price);
+    lines.push(formatServicePrice(service.price, service.currency));
 
     // Con "Sin preferencia" no se nombra a nadie: el profesional se decide por
     // menor carga recién al confirmar, y anticiparlo acá podría mentir.
@@ -398,10 +397,10 @@ export class FlowBookingService {
       await this.servicesService.findSelfBookableByTenant(tenantId);
 
     return services.map((service) => {
-      const price = formatPrice(service.price, service.currency);
+      const price = formatServicePrice(service.price, service.currency);
       return {
         id: service.id,
-        title: price ? `${service.name} — ${price}` : service.name,
+        title: `${service.name} — ${price}`,
       };
     });
   }

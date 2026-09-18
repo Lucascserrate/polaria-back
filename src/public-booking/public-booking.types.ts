@@ -61,7 +61,11 @@ export type PublicService = {
   id: string;
   name: string;
   description: string | null;
-  price: number;
+  /**
+   * `null` si el servicio se cotiza después de ver a la persona: la página
+   * escribe el aviso en lugar del importe. Ver `quoted-price.ts`.
+   */
+  price: number | null;
   currency: string;
   durationMinutes: number;
   /**
@@ -120,7 +124,8 @@ export type PublicBookingConfirmation = {
   endTime: string;
   serviceName: string;
   staffName: string | null;
-  price: number;
+  /** `null` si se cotiza: el comprobante lo dice en vez de mostrar un importe. */
+  price: number | null;
   currency: string;
   durationMinutes: number;
 };

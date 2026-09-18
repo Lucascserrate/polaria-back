@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { BusinessHoursService } from '../../business_hours/business_hours.service';
 import { ServicesService } from '../../services/services.service';
 import { isSelfBookable } from '../../services/booking-policy';
+import { toPrice } from '../../services/quoted-price';
 import { StaffService } from '../../staff/staff.service';
 import { TenantsService } from '../../tenants/tenants.service';
 import type { BusinessHour } from '../../business_hours/entities/business_hour.entity';
@@ -109,7 +110,7 @@ export class AssistantPromptContextService {
     );
     const servicesCatalog = services.map((item) => ({
       name: item.name,
-      price: Number(item.price),
+      price: toPrice(item.price),
       durationMinutes: item.durationMinutes,
       description: item.description,
     }));

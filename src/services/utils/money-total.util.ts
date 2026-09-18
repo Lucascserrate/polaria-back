@@ -16,7 +16,8 @@ export interface MoneyTotal {
 }
 
 interface PricedItem {
-  price: number;
+  /** `null` es un tramo sin precio, y no suma. Ver `quoted-price.ts`. */
+  price: number | null;
   currency: string;
 }
 
@@ -31,11 +32,18 @@ interface PricedItem {
  * Una lista vacía devuelve una lista vacía, no un cero: "no facturó nada" no
  * tiene moneda, y quien lo muestre sabe mejor que este módulo en cuál escribir
  * ese cero.
+ *
+ * Lo que no tiene precio no entra en la suma —no como cero, que lo daría por
+ * cobrado en cero—, y por eso una cita de un solo servicio que se cotiza devuelve
+ * lista vacía. Quien la muestre tiene que decir que falta un precio, no un total
+ * en cero; esa distinción la tiene sólo él, que ve cuántos tramos quedaron fuera.
  */
 export const sumByCurrency = (items: Iterable<PricedItem>): MoneyTotal[] => {
   const totals = new Map<string, number>();
 
   for (const item of items) {
+    if (item.price === null) continue;
+
     totals.set(item.currency, (totals.get(item.currency) ?? 0) + item.price);
   }
 

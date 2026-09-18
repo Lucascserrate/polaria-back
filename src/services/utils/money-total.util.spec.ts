@@ -38,4 +38,19 @@ describe('sumByCurrency', () => {
   it('sin importes devuelve vacío y no un cero sin moneda', () => {
     expect(sumByCurrency([])).toEqual([]);
   });
+
+  it('lo que no tiene precio no suma como cero: no suma', () => {
+    expect(
+      sumByCurrency([
+        { price: 50, currency: 'BOB' },
+        { price: null, currency: 'BOB' },
+      ]),
+    ).toEqual([{ currency: 'BOB', amount: 50 }]);
+  });
+
+  it('una cita entera sin precio devuelve vacío, no un total en cero', () => {
+    // Quien lo muestre tiene que decir que falta un precio; un "Bs 0" sería
+    // decir que la cita no se cobra.
+    expect(sumByCurrency([{ price: null, currency: 'BOB' }])).toEqual([]);
+  });
 });

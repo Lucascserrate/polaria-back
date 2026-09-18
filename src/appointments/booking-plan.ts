@@ -20,7 +20,8 @@ export interface PlannedSegment extends BookingItem {
   startTime: Date;
   endTime: Date;
   durationMinutes: number;
-  price: number;
+  /** `null` mientras el servicio no tenga precio. Ver `quoted-price.ts`. */
+  price: number | null;
   currency: string;
   sequenceOrder: number;
 }
@@ -35,9 +36,9 @@ export interface PlanBookingInput {
   items: BookingItem[];
   services: Map<
     string,
-    { durationMinutes: number; price: number; currency: string }
+    { durationMinutes: number; price: number | null; currency: string }
   >;
-  agreedPrices?: Map<string, { price: number; currency: string }>;
+  agreedPrices?: Map<string, { price: number | null; currency: string }>;
 }
 
 /**
@@ -72,12 +73,20 @@ export const planBookingSegments = (input: PlanBookingInput): BookingPlan => {
 
     const agreed = input.agreedPrices?.get(item.serviceId);
 
+    /*
+     * Se pregunta si el tramo **estaba**, no si su precio era un número: un
+     * servicio que se cotiza se guardó sin precio, y con `??` ese hueco se
+     * llenaría con el precio de hoy del catálogo. Lo pactado manda aunque lo
+     * pactado sea "todavía nada".
+     */
+    const booked = agreed ? agreed.price : service.price;
+
     return {
       ...item,
       startTime,
       endTime,
       durationMinutes: service.durationMinutes,
-      price: agreed?.price ?? service.price,
+      price: booked,
       currency: agreed?.currency ?? service.currency,
       sequenceOrder: index,
     };

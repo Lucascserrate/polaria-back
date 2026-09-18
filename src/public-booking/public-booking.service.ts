@@ -21,6 +21,7 @@ import {
   CONSULTATION_FIRST_NOTICE,
   isSelfBookable,
 } from '../services/booking-policy';
+import { toPrice } from '../services/quoted-price';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { TenantsService } from '../tenants/tenants.service';
 import type { Staff } from '../staff/entities/staff.entity';
@@ -125,7 +126,7 @@ export class PublicBookingService {
         id: service.id,
         name: service.name,
         description: service.description ?? null,
-        price: Number(service.price),
+        price: toPrice(service.price),
         currency: service.currency,
         durationMinutes: service.durationMinutes,
         selfBookable: isSelfBookable(service.bookingPolicy),
@@ -336,7 +337,7 @@ export class PublicBookingService {
           input.serviceId,
           confirmation.staffId,
         ),
-        price: Number(service.price),
+        price: toPrice(service.price),
         currency: service.currency,
         durationMinutes: service.durationMinutes,
       };

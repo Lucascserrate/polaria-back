@@ -9,15 +9,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-class BookingItemDto {
-  @ApiProperty()
-  @IsUUID()
-  serviceId!: string;
-
-  @ApiProperty({ description: 'Profesional de este servicio.' })
-  @IsUUID()
-  staffId!: string;
-}
+import { BookingItemDto } from './booking-item.dto';
 
 /**
  * Creación de una reserva desde el panel.
