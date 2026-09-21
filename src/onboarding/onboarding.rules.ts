@@ -3,7 +3,7 @@
  *
  * Se **deriva** de lo que existe en la base, no de un booleano guardado. Un
  * `isFullyConfigured` habría que mantener en cada alta y baja de servicio, de
- * profesional o de conexión, y basta olvidarse en un lugar para que el panel
+ * profesional o de cita, y basta olvidarse en un lugar para que el panel
  * mienta. Acá la respuesta no puede desincronizarse porque no se guarda.
  */
 
@@ -13,7 +13,8 @@ export enum OnboardingStep {
   BUSINESS_HOURS = 'BUSINESS_HOURS',
   SERVICES = 'SERVICES',
   STAFF = 'STAFF',
-  WHATSAPP = 'WHATSAPP',
+  /** Una cita creada y finalizada: el circuito completo, hecho una vez. */
+  FIRST_APPOINTMENT = 'FIRST_APPOINTMENT',
 }
 
 /**
@@ -21,17 +22,25 @@ export enum OnboardingStep {
  *
  * `BUSINESS_SETUP` crea y personaliza el negocio; `POLARIA_ACTIVATION` lo deja
  * en condiciones de operar. La separación existe para que nadie tenga que cargar
- * servicios, profesionales y WhatsApp antes de entrar al producto.
+ * servicios, profesionales y una primera cita antes de entrar al producto.
  */
 export const BUSINESS_SETUP_STEPS: readonly OnboardingStep[] = [
   OnboardingStep.BUSINESS_INFO,
   OnboardingStep.BUSINESS_HOURS,
 ];
 
+/**
+ * Lo que el negocio aprende adentro del producto, y en el orden en que se puede
+ * aprender: no hay cita que cargar sin un servicio y alguien que lo haga.
+ *
+ * WhatsApp no está. Polaria toma reservas por su página aunque el canal no esté
+ * conectado, así que exigirlo acá convertía una sugerencia en un bloqueo y dejaba
+ * al negocio con un pendiente que no le impedía nada.
+ */
 export const POLARIA_ACTIVATION_STEPS: readonly OnboardingStep[] = [
   OnboardingStep.SERVICES,
   OnboardingStep.STAFF,
-  OnboardingStep.WHATSAPP,
+  OnboardingStep.FIRST_APPOINTMENT,
 ];
 
 const ORDERED_STEPS: readonly OnboardingStep[] = [
@@ -53,6 +62,14 @@ export type OnboardingSnapshot = {
    * listo mientras el flujo de reserva no ofrece a nadie.
    */
   bookableStaffCount: number;
+  /**
+   * Citas finalizadas.
+   *
+   * Finalizadas y no creadas: crear una cita es media lección. Lo que cierra el
+   * circuito —y lo que el negocio no descubre solo— es cobrarla y darla por
+   * terminada.
+   */
+  completedAppointmentsCount: number;
   whatsappConnected: boolean;
 };
 
@@ -64,12 +81,20 @@ export type OnboardingStatus = {
    * Si un cliente podría reservar ahora mismo.
    *
    * No es lo mismo que "todo completo": el tipo de negocio es parte de la
-   * personalización pero no hace falta para tomar una reserva. Lo que hace falta
-   * es horario, servicios, alguien que atienda y un canal por donde pedir.
+   * personalización pero no hace falta para tomar una reserva, y la primera cita
+   * propia es una lección, no un requisito. Lo que hace falta es horario,
+   * servicios y alguien que atienda.
    */
   readyForBookings: boolean;
   /** Primer paso pendiente, en el orden del flujo. `null` si no falta ninguno. */
   nextStep: OnboardingStep | null;
+  /**
+   * Si el canal de WhatsApp está conectado.
+   *
+   * Viaja suelto y no como paso: el panel lo ofrece como sugerencia al pie de las
+   * lecciones, sin contarlo en el progreso ni bloquear nada.
+   */
+  whatsappConnected: boolean;
 };
 
 export function resolveOnboardingStatus(
@@ -81,7 +106,7 @@ export function resolveOnboardingStatus(
     [OnboardingStep.BUSINESS_HOURS]: snapshot.businessHoursCount > 0,
     [OnboardingStep.SERVICES]: snapshot.activeServicesCount > 0,
     [OnboardingStep.STAFF]: snapshot.bookableStaffCount > 0,
-    [OnboardingStep.WHATSAPP]: snapshot.whatsappConnected,
+    [OnboardingStep.FIRST_APPOINTMENT]: snapshot.completedAppointmentsCount > 0,
   };
 
   const done = (step: OnboardingStep) => steps[step];
@@ -93,8 +118,8 @@ export function resolveOnboardingStatus(
     readyForBookings:
       steps[OnboardingStep.BUSINESS_HOURS] &&
       steps[OnboardingStep.SERVICES] &&
-      steps[OnboardingStep.STAFF] &&
-      steps[OnboardingStep.WHATSAPP],
+      steps[OnboardingStep.STAFF],
     nextStep: ORDERED_STEPS.find((step) => !steps[step]) ?? null,
+    whatsappConnected: snapshot.whatsappConnected,
   };
 }

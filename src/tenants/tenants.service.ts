@@ -8,6 +8,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { IsNull, Like, Not, Repository } from 'typeorm';
 
 import { Tenant } from './entities/tenant.entity';
+import { Client } from '../clients/entities/client.entity';
+import { DEMO_CLIENT } from '../clients/demo-client';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { isDuplicateEntryError } from '../database/duplicate-entry.util';
@@ -124,7 +126,7 @@ export class TenantsService {
     }
   }
 
-  create(createTenantDto: CreateTenantDto): Promise<Tenant> {
+  async create(createTenantDto: CreateTenantDto): Promise<Tenant> {
     const tenant = this.tenantRepository.create({
       ...createTenantDto,
       // Un negocio nuevo arranca con el aviso del día anterior. Va acá y no como
@@ -139,7 +141,33 @@ export class TenantsService {
         createTenantDto.currency ??
         currencyForTimeZone(createTenantDto.timezone),
     });
-    return this.tenantRepository.save(tenant);
+
+    const saved = await this.tenantRepository.save(tenant);
+    await this.seedDemoClient(saved.id);
+
+    return saved;
+  }
+
+  /**
+   * El cliente de prueba con el que el negocio recorre su primera cita.
+   *
+   * Se escribe con el repositorio de clientes tomado del mismo manager en lugar
+   * de inyectar `ClientsService`: ese módulo ya depende de éste, y pedirle el
+   * servicio cerraría el ciclo por una única inserción sin reglas.
+   *
+   * Si falla, el negocio se crea igual. Un alta que se cae porque no se pudo
+   * sembrar un ejemplo sería un registro perdido por algo que el usuario puede
+   * resolver cargando un cliente a mano.
+   */
+  private async seedDemoClient(tenantId: string): Promise<void> {
+    try {
+      const clients = this.tenantRepository.manager.getRepository(Client);
+      await clients.save(clients.create({ tenantId, ...DEMO_CLIENT }));
+    } catch (error: unknown) {
+      this.logger.warn(
+        `No se pudo crear el cliente de prueba (tenantId=${tenantId}): ${String(error)}`,
+      );
+    }
   }
 
   findAll(): Promise<Tenant[]> {

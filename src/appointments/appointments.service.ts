@@ -645,6 +645,20 @@ export class AppointmentsService {
   }
 
   /**
+   * Cuántas citas finalizadas tiene el negocio.
+   *
+   * La usa el onboarding para saber si ya recorrió el circuito completo una vez.
+   * Cuenta también las borradas —`withDeleted`— porque lo que se está midiendo es
+   * si aprendió a cerrar una cita, y eso no se desaprende cuando después la borra.
+   */
+  async countCompletedByTenant(tenantId: string): Promise<number> {
+    return this.appointmentRepository.count({
+      where: { tenantId, status: AppointmentStatus.COMPLETED },
+      withDeleted: true,
+    });
+  }
+
+  /**
    * Las citas de un rango de días.
    *
    * @param onlyStaffId Cuando viene, se devuelven **solo** las citas en las que

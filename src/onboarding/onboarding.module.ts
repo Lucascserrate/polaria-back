@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { AppointmentsModule } from '../appointments/appointments.module';
 import { BusinessHoursModule } from '../business_hours/business_hours.module';
 import { ServicesModule } from '../services/services.module';
 import { StaffModule } from '../staff/staff.module';
@@ -15,7 +16,13 @@ import { OnboardingService } from './onboarding.service';
  * justamente lo que evita que el estado se desincronice.
  */
 @Module({
-  imports: [TenantsModule, BusinessHoursModule, ServicesModule, StaffModule],
+  imports: [
+    TenantsModule,
+    BusinessHoursModule,
+    ServicesModule,
+    StaffModule,
+    AppointmentsModule,
+  ],
   controllers: [OnboardingController],
   providers: [OnboardingService],
   exports: [OnboardingService],
