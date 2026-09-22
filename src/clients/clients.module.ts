@@ -7,6 +7,8 @@ import { Tenant } from '../tenants/entities/tenant.entity';
 import { Client } from './entities/client.entity';
 import { ClientsService } from './clients.service';
 import { ClientsController } from './clients.controller';
+import { ClientsImportController } from './import/clients-import.controller';
+import { ClientsImportService } from './import/clients-import.service';
 
 /**
  * `Tenant` se registra acá y no se importa `TenantsModule` porque lo único que
@@ -29,8 +31,8 @@ import { ClientsController } from './clients.controller';
     TypeOrmModule.forFeature([Client, Tenant, Appointment]),
     AppointmentsModule,
   ],
-  controllers: [ClientsController],
-  providers: [ClientsService],
+  controllers: [ClientsController, ClientsImportController],
+  providers: [ClientsService, ClientsImportService],
   exports: [ClientsService],
 })
 export class ClientsModule {}

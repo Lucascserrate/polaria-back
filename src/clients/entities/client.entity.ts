@@ -25,10 +25,9 @@ import { Message } from '../../messages/entities/message.entity';
  */
 export enum ClientSource {
   WHATSAPP = 'whatsapp',
-  /** La página pública de reservas del negocio. */
   WEB = 'web',
-  /** Lo cargó el negocio desde el panel. */
   PANEL = 'panel',
+  IMPORT = 'import',
 }
 
 /**

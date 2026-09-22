@@ -620,7 +620,7 @@ export class ClientsService {
   }
 
   /** El prefijo del país del negocio, deducido de su zona horaria. */
-  private async dialCodeFor(tenantId: string): Promise<string> {
+  async dialCodeFor(tenantId: string): Promise<string> {
     const tenant = await this.tenantRepository.findOne({
       where: { id: tenantId },
       select: { id: true, timezone: true },
