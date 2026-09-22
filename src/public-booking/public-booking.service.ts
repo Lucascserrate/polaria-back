@@ -28,6 +28,7 @@ import { TenantsService } from '../tenants/tenants.service';
 import type { Staff } from '../staff/entities/staff.entity';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import type { BookingRequestItem } from '../availability/booking/booking-availability.service';
+import { ANY_STAFF } from './dto/booking-selection';
 import type {
   PublicBookingConfirmation,
   PublicBookingStaff,
@@ -244,6 +245,10 @@ export class PublicBookingService {
    * Sin `staffIds` la reserva es "cualquier profesional", y ahí se pide que
    * **una sola persona** pueda con todo: quien no eligió a nadie no está
    * pidiendo que lo pasen de silla en silla.
+   *
+   * Con `staffIds` llena de `cualquiera` la respuesta es otra, y no es una
+   * sutileza: ésa es la pantalla de repartir, donde el cliente pidió
+   * expresamente que cada servicio se resuelva por su cuenta. Ver `ANY_STAFF`.
    */
   private toBookingRequest(query: {
     serviceIds: string[];
@@ -262,10 +267,14 @@ export class PublicBookingService {
     }
 
     return {
-      items: serviceIds.map((serviceId, index) => ({
-        serviceId,
-        staffId: staffIds?.[index],
-      })),
+      items: serviceIds.map((serviceId, index) => {
+        const staffId = staffIds?.[index];
+
+        return {
+          serviceId,
+          staffId: staffId && staffId !== ANY_STAFF ? staffId : undefined,
+        };
+      }),
       requireSingleStaff: !staffIds,
     };
   }
