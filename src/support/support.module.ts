@@ -6,7 +6,7 @@ import { TenantsModule } from '../tenants/tenants.module';
 import { SuperAdminGuard } from '../auth/guards/super-admin.guard';
 import { SupportWhatsappController } from './support-whatsapp.controller';
 import { SupportImpersonationController } from './support-impersonation.controller';
-import { SupportTrialController } from './support-trial.controller';
+import { SupportSubscriptionController } from './support-subscription.controller';
 
 /**
  * Las rutas internas de soporte que operan sobre un tenant ajeno.
@@ -20,7 +20,7 @@ import { SupportTrialController } from './support-trial.controller';
   controllers: [
     SupportWhatsappController,
     SupportImpersonationController,
-    SupportTrialController,
+    SupportSubscriptionController,
   ],
   providers: [SuperAdminGuard],
 })

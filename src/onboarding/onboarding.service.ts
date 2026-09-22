@@ -86,6 +86,7 @@ export class OnboardingService {
         {
           subscriptionStatus: tenant.subscriptionStatus,
           trialEndsAt: tenant.trialEndsAt ?? null,
+          subscriptionEndsAt: tenant.subscriptionEndsAt ?? null,
         },
         new Date(),
       ),

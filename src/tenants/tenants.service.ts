@@ -15,6 +15,7 @@ import { UpdateTenantDto } from './dto/update-tenant.dto';
 import { isDuplicateEntryError } from '../database/duplicate-entry.util';
 import {
   extendTrial,
+  paySubscription,
   SubscriptionStatus,
   trialEndsAt,
 } from '../subscriptions/subscription.rules';
@@ -408,6 +409,75 @@ export class TenantsService {
       `Prueba extendida ${days} días (tenantId=${tenantId}, desde=${
         tenant.trialEndsAt?.toISOString() ?? 'sin prueba'
       }, hasta=${outcome.trialEndsAt.toISOString()}).`,
+    );
+
+    const updated = await this.findOne(tenantId);
+    if (!updated) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    return updated;
+  }
+
+  /**
+   * Registra que el negocio pagó y lo deja cubierto unos meses más.
+   *
+   * Vive al lado de `extendTrial` y no en `support/` por lo mismo: es el otro
+   * escritor del estado de suscripción, y las dos formas de moverlo conviene
+   * leerlas juntas. La ruta sí está en `support/`, que es lo que se lleva el
+   * repositorio de administración cuando se separe.
+   *
+   * Tampoco es idempotente, y tampoco debe serlo: apretar dos veces "3 meses"
+   * son seis. Por eso la decisión es explícita y queda en el log.
+   *
+   * Sirve para el alta y para la renovación, que son la misma operación: sumar
+   * meses a lo que haya. No hay un "activar" aparte de un "renovar" porque el
+   * negocio no distingue entre las dos, y dos métodos serían dos formas de
+   * escribir la misma fecha.
+   *
+   * La cuenta —desde cuándo se suma— está en `paySubscription`, que es pura.
+   */
+  async paySubscription(
+    tenantId: string,
+    months: number,
+    now: Date = new Date(),
+  ): Promise<Tenant> {
+    const tenant = await this.findOne(tenantId);
+    if (!tenant) {
+      throw new NotFoundException('Tenant not found');
+    }
+
+    const outcome = paySubscription(
+      {
+        subscriptionStatus: tenant.subscriptionStatus,
+        subscriptionEndsAt: tenant.subscriptionEndsAt ?? null,
+      },
+      months,
+      now,
+    );
+
+    if (!outcome.granted) {
+      throw new ConflictException(
+        'El pago tiene que ser un número de meses positivo.',
+      );
+    }
+
+    await this.tenantRepository.update(tenantId, {
+      subscriptionStatus: SubscriptionStatus.ACTIVE,
+      subscriptionEndsAt: outcome.subscriptionEndsAt,
+    });
+
+    /*
+     * Con las dos fechas y el estado previo: es la única huella de cuándo un
+     * negocio empezó a pagar y de qué se le cobró. Sin auditoría en Polaria,
+     * esta línea es lo que permite reconstruirlo después.
+     */
+    this.logger.log(
+      `Suscripción paga ${months} meses (tenantId=${tenantId}, estadoPrevio=${
+        tenant.subscriptionStatus
+      }, desde=${
+        tenant.subscriptionEndsAt?.toISOString() ?? 'sin suscripción'
+      }, hasta=${outcome.subscriptionEndsAt.toISOString()}).`,
     );
 
     const updated = await this.findOne(tenantId);

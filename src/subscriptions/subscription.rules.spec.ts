@@ -1,16 +1,27 @@
 import {
   canExtendTrial,
   extendTrial,
+  paySubscription,
   resolveSubscription,
+  SUBSCRIPTION_MONTHS,
   SubscriptionState,
   SubscriptionStatus,
   TRIAL_DURATION_DAYS,
   trialEndsAt,
 } from './subscription.rules';
+import type { SubscriptionSnapshot } from './subscription.rules';
 
 const NOW = new Date('2026-08-21T12:00:00.000Z');
 const inHours = (hours: number) =>
   new Date(NOW.getTime() + hours * 60 * 60 * 1000);
+
+/** Un negocio con los dos relojes en cero, salvo lo que cada caso cambie. */
+const snapshot = (overrides: Partial<SubscriptionSnapshot> = {}) => ({
+  subscriptionStatus: SubscriptionStatus.NONE as string | null,
+  trialEndsAt: null,
+  subscriptionEndsAt: null,
+  ...overrides,
+});
 
 describe('trialEndsAt', () => {
   it('dura los días configurados', () => {
@@ -24,54 +35,56 @@ describe('resolveSubscription', () => {
   it('sin prueba iniciada da acceso: el negocio se está configurando', () => {
     expect(
       resolveSubscription(
-        { subscriptionStatus: SubscriptionStatus.NONE, trialEndsAt: null },
+        snapshot({ subscriptionStatus: SubscriptionStatus.NONE }),
         NOW,
       ),
     ).toEqual({
       state: SubscriptionState.NOT_STARTED,
-      trialDaysRemaining: null,
+      daysRemaining: null,
       hasAccess: true,
     });
   });
 
   it('trata un estado ausente como prueba no iniciada', () => {
     expect(
-      resolveSubscription({ subscriptionStatus: null, trialEndsAt: null }, NOW)
-        .state,
+      resolveSubscription(snapshot({ subscriptionStatus: null }), NOW).state,
     ).toBe(SubscriptionState.NOT_STARTED);
   });
 
   it('durante la prueba informa los días que faltan', () => {
     const resolved = resolveSubscription(
-      {
+      snapshot({
         subscriptionStatus: SubscriptionStatus.TRIAL,
         trialEndsAt: inHours(48),
-      },
+      }),
       NOW,
     );
 
     expect(resolved.state).toBe(SubscriptionState.TRIAL_ACTIVE);
-    expect(resolved.trialDaysRemaining).toBe(2);
+    expect(resolved.daysRemaining).toBe(2);
     expect(resolved.hasAccess).toBe(true);
   });
 
   it('redondea hacia arriba los días restantes', () => {
     // Quedando 6 horas, al negocio le queda "1 día", no 0.
     const resolved = resolveSubscription(
-      { subscriptionStatus: SubscriptionStatus.TRIAL, trialEndsAt: inHours(6) },
+      snapshot({
+        subscriptionStatus: SubscriptionStatus.TRIAL,
+        trialEndsAt: inHours(6),
+      }),
       NOW,
     );
 
-    expect(resolved.trialDaysRemaining).toBe(1);
+    expect(resolved.daysRemaining).toBe(1);
   });
 
   it('la prueba vence sin que nadie la marque', () => {
     // Es el punto del diseño: no hace falta un cron para que expire.
     const resolved = resolveSubscription(
-      {
+      snapshot({
         subscriptionStatus: SubscriptionStatus.TRIAL,
         trialEndsAt: inHours(-1),
-      },
+      }),
       NOW,
     );
 
@@ -81,7 +94,10 @@ describe('resolveSubscription', () => {
 
   it('el instante exacto del vencimiento ya está vencido', () => {
     const resolved = resolveSubscription(
-      { subscriptionStatus: SubscriptionStatus.TRIAL, trialEndsAt: NOW },
+      snapshot({
+        subscriptionStatus: SubscriptionStatus.TRIAL,
+        trialEndsAt: NOW,
+      }),
       NOW,
     );
 
@@ -90,7 +106,7 @@ describe('resolveSubscription', () => {
 
   it('una prueba sin fecha de fin no regala acceso', () => {
     const resolved = resolveSubscription(
-      { subscriptionStatus: SubscriptionStatus.TRIAL, trialEndsAt: null },
+      snapshot({ subscriptionStatus: SubscriptionStatus.TRIAL }),
       NOW,
     );
 
@@ -100,19 +116,71 @@ describe('resolveSubscription', () => {
 
   it('distingue los estados de pago', () => {
     const cases: Array<[SubscriptionStatus, SubscriptionState, boolean]> = [
-      [SubscriptionStatus.ACTIVE, SubscriptionState.ACTIVE, true],
       [SubscriptionStatus.EXPIRED, SubscriptionState.EXPIRED, false],
       [SubscriptionStatus.CANCELED, SubscriptionState.CANCELED, false],
     ];
 
     for (const [status, state, hasAccess] of cases) {
       const resolved = resolveSubscription(
-        { subscriptionStatus: status, trialEndsAt: null },
+        snapshot({ subscriptionStatus: status }),
         NOW,
       );
       expect(resolved.state).toBe(state);
       expect(resolved.hasAccess).toBe(hasAccess);
     }
+  });
+
+  it('con la suscripción paga informa los días que faltan', () => {
+    const resolved = resolveSubscription(
+      snapshot({
+        subscriptionStatus: SubscriptionStatus.ACTIVE,
+        subscriptionEndsAt: inHours(72),
+      }),
+      NOW,
+    );
+
+    expect(resolved.state).toBe(SubscriptionState.ACTIVE);
+    expect(resolved.daysRemaining).toBe(3);
+    expect(resolved.hasAccess).toBe(true);
+  });
+
+  it('la suscripción paga vence sin que nadie la marque', () => {
+    const resolved = resolveSubscription(
+      snapshot({
+        subscriptionStatus: SubscriptionStatus.ACTIVE,
+        subscriptionEndsAt: inHours(-1),
+      }),
+      NOW,
+    );
+
+    expect(resolved.state).toBe(SubscriptionState.EXPIRED);
+    expect(resolved.daysRemaining).toBeNull();
+    expect(resolved.hasAccess).toBe(false);
+  });
+
+  it('una suscripción paga sin fecha de fin no da acceso para siempre', () => {
+    const resolved = resolveSubscription(
+      snapshot({ subscriptionStatus: SubscriptionStatus.ACTIVE }),
+      NOW,
+    );
+
+    expect(resolved.state).toBe(SubscriptionState.EXPIRED);
+    expect(resolved.hasAccess).toBe(false);
+  });
+
+  it('la prueba vencida no revive porque después se haya pagado', () => {
+    // Los dos relojes conviven: manda el estado guardado, no la fecha mayor.
+    const resolved = resolveSubscription(
+      snapshot({
+        subscriptionStatus: SubscriptionStatus.ACTIVE,
+        trialEndsAt: inHours(-100),
+        subscriptionEndsAt: inHours(240),
+      }),
+      NOW,
+    );
+
+    expect(resolved.state).toBe(SubscriptionState.ACTIVE);
+    expect(resolved.daysRemaining).toBe(10);
   });
 });
 
@@ -242,6 +310,105 @@ describe('extendTrial', () => {
           NOW,
         ),
       ).toEqual({ granted: false, reason: 'INVALID_DAYS' });
+    }
+  });
+});
+
+describe('paySubscription', () => {
+  const paid = (
+    months: number,
+    overrides: Parameters<typeof snapshot>[0] = {},
+    now: Date = NOW,
+  ) =>
+    paySubscription(
+      {
+        subscriptionStatus: snapshot(overrides).subscriptionStatus,
+        subscriptionEndsAt: snapshot(overrides).subscriptionEndsAt,
+      },
+      months,
+      now,
+    );
+
+  it('da de alta desde hoy al negocio que nunca pagó', () => {
+    const outcome = paid(1);
+
+    expect(outcome).toEqual({
+      granted: true,
+      subscriptionEndsAt: new Date('2026-09-21T12:00:00.000Z'),
+    });
+  });
+
+  it('suma al vencimiento vigente, no a hoy', () => {
+    // Renovar antes de tiempo no puede perder los días que quedaban.
+    const outcome = paid(3, {
+      subscriptionStatus: SubscriptionStatus.ACTIVE,
+      subscriptionEndsAt: new Date('2026-09-10T12:00:00.000Z'),
+    });
+
+    expect(outcome).toEqual({
+      granted: true,
+      subscriptionEndsAt: new Date('2026-12-10T12:00:00.000Z'),
+    });
+  });
+
+  it('con la suscripción vencida el reloj arranca hoy', () => {
+    const outcome = paid(1, {
+      subscriptionStatus: SubscriptionStatus.ACTIVE,
+      subscriptionEndsAt: new Date('2026-07-01T12:00:00.000Z'),
+    });
+
+    expect(outcome).toEqual({
+      granted: true,
+      subscriptionEndsAt: new Date('2026-09-21T12:00:00.000Z'),
+    });
+  });
+
+  it('no arrastra la fecha de un estado que no es pago', () => {
+    // Un `subscriptionEndsAt` viejo bajo `CANCELED` no cubre nada: se cobra
+    // desde hoy, como si nunca hubiera pagado.
+    const outcome = paid(1, {
+      subscriptionStatus: SubscriptionStatus.CANCELED,
+      subscriptionEndsAt: new Date('2027-01-01T12:00:00.000Z'),
+    });
+
+    expect(outcome).toEqual({
+      granted: true,
+      subscriptionEndsAt: new Date('2026-09-21T12:00:00.000Z'),
+    });
+  });
+
+  it('cobra meses de calendario, no bloques de treinta días', () => {
+    const outcome = paid(12, {}, new Date('2026-02-14T12:00:00.000Z'));
+
+    expect(outcome).toEqual({
+      granted: true,
+      subscriptionEndsAt: new Date('2027-02-14T12:00:00.000Z'),
+    });
+  });
+
+  it('recorta al último día del mes cuando el día no existe', () => {
+    // 31 de enero más un mes no existe: sin recorte, JavaScript desbordaría al
+    // 3 de marzo y el negocio se quedaría con días que nadie le cobró.
+    const outcome = paid(1, {}, new Date('2026-01-31T12:00:00.000Z'));
+
+    expect(outcome).toEqual({
+      granted: true,
+      subscriptionEndsAt: new Date('2026-02-28T12:00:00.000Z'),
+    });
+  });
+
+  it('se niega con meses que acortarían la suscripción', () => {
+    for (const months of [0, -1, 1.5]) {
+      expect(paid(months)).toEqual({
+        granted: false,
+        reason: 'INVALID_MONTHS',
+      });
+    }
+  });
+
+  it('todos los plazos que se ofrecen son cobrables', () => {
+    for (const months of SUBSCRIPTION_MONTHS) {
+      expect(paid(months).granted).toBe(true);
     }
   });
 });

@@ -264,6 +264,24 @@ export class Tenant {
   trialEndsAt?: Date | null;
 
   /**
+   * Hasta cuándo está paga la suscripción.
+   *
+   * Es la única forma de que `ACTIVE` signifique algo acotado: sin esto, marcar
+   * un pago daría acceso para siempre y cobrar de nuevo no tendría dónde
+   * anotarse. Se mueve sumándole meses al vencimiento vigente, nunca a hoy, así
+   * que renovar antes de tiempo no pierde los días que quedaban.
+   *
+   * `NULL` en todo negocio que nunca pagó. Con `ACTIVE` guardado es una fila
+   * rota —sólo la escribe `paySubscription`, que siempre deja fecha—, y
+   * `resolveSubscription` la trata como vencida en vez de regalar el producto.
+   *
+   * No reemplaza a `trialEndsAt` ni lo pisa: son dos relojes distintos, y los de
+   * la prueba quedan como el registro de cuándo este negocio probó Polaria.
+   */
+  @Column({ type: 'datetime', nullable: true })
+  subscriptionEndsAt?: Date | null;
+
+  /**
    * Si Meta bloqueó los envíos del negocio por facturación.
    *
    * Estado aparte de la conexión a propósito: una WABA conectada, con plantillas

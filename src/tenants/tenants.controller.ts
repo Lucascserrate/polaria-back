@@ -31,6 +31,7 @@ export type TenantSubscription = {
   state: string;
   daysRemaining: number | null;
   trialEndsAt: string | null;
+  subscriptionEndsAt: string | null;
 };
 
 export type TenantListItem = Tenant & { subscription: TenantSubscription };
@@ -44,6 +45,7 @@ function describeSubscriptions(
       {
         subscriptionStatus: tenant.subscriptionStatus,
         trialEndsAt: tenant.trialEndsAt ?? null,
+        subscriptionEndsAt: tenant.subscriptionEndsAt ?? null,
       },
       now,
     );
@@ -52,8 +54,9 @@ function describeSubscriptions(
       ...tenant,
       subscription: {
         state: resolved.state,
-        daysRemaining: resolved.trialDaysRemaining,
+        daysRemaining: resolved.daysRemaining,
         trialEndsAt: tenant.trialEndsAt?.toISOString() ?? null,
+        subscriptionEndsAt: tenant.subscriptionEndsAt?.toISOString() ?? null,
       },
     };
   });
