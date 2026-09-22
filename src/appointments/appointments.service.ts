@@ -745,12 +745,25 @@ export class AppointmentsService {
   }
 
   /**
-   * Citas futuras de un cliente, la más próxima primero.
+   * Qué es un turno vigente, escrito una sola vez.
    *
-   * Solo las que ocupan agenda: una cancelada o completada no es algo que el
-   * cliente pueda reagendar. El corte es por hora de inicio, así que un turno en
-   * curso ya no aparece.
+   * Solo los que ocupan agenda: uno cancelado o completado no es algo que el
+   * cliente pueda reagendar ni algo de lo que haya que avisarle. El corte es por
+   * hora de inicio, así que un turno en curso ya no aparece.
+   *
+   * Existe como pieza aparte porque hay dos formas de preguntar por lo mismo
+   * —por la ficha del negocio y por la cuenta de Polaria—, y dos definiciones de
+   * "vigente" harían que WhatsApp y la página de reservas contaran turnos
+   * distintos de la misma persona.
    */
+  private upcomingWhere(params: { now?: Date }) {
+    return {
+      status: In([...BLOCKING_APPOINTMENT_STATUSES]),
+      startTime: MoreThanOrEqual(params.now ?? new Date()),
+    };
+  }
+
+  /** Citas futuras de un cliente de un negocio, la más próxima primero. */
   findUpcomingByClient(params: {
     tenantId: string;
     clientId: string;
@@ -761,10 +774,48 @@ export class AppointmentsService {
       where: {
         tenantId: params.tenantId,
         clientId: params.clientId,
-        status: In([...BLOCKING_APPOINTMENT_STATUSES]),
-        startTime: MoreThanOrEqual(params.now ?? new Date()),
+        ...this.upcomingWhere(params),
       },
       relations: { services: { service: true, staff: true } },
+      // Sin esto, el profesional dado de baja entra como `NULL` y el cliente ve
+      // su turno sin profesional asignado.
+      withDeleted: true,
+      order: { startTime: 'ASC' },
+      take: params.limit,
+    });
+  }
+
+  /**
+   * Citas futuras de una **cuenta de Polaria**, la más próxima primero.
+   *
+   * Es la misma pregunta que `findUpcomingByClient` con otro sujeto, y esa
+   * diferencia es toda la seguridad de esta consulta: se lista lo que hizo la
+   * cuenta, no lo que hay bajo un número de teléfono. Un teléfono es un
+   * identificador y no una credencial —cualquiera puede escribir el de otro—,
+   * así que buscar por número dejaría ver turnos ajenos a quien acierte uno. Ver
+   * `CustomerAccount`.
+   *
+   * `tenantId` es opcional a propósito: con él contesta "qué tengo con este
+   * negocio", que es lo que la página de reservas necesita; sin él, "qué tengo
+   * en Polaria", que es la pantalla de turnos de la cuenta cuando exista. El
+   * índice `(customerAccountId, startTime)` sostiene las dos.
+   *
+   * Trae el negocio porque, sin tenant fijo, cada turno es de uno distinto y sin
+   * esto habría que pedirlos de a uno.
+   */
+  findUpcomingByCustomerAccount(params: {
+    customerAccountId: string;
+    tenantId?: string;
+    now?: Date;
+    limit?: number;
+  }): Promise<Appointment[]> {
+    return this.appointmentRepository.find({
+      where: {
+        customerAccountId: params.customerAccountId,
+        ...(params.tenantId ? { tenantId: params.tenantId } : {}),
+        ...this.upcomingWhere(params),
+      },
+      relations: { tenant: true, services: { service: true, staff: true } },
       // Sin esto, el profesional dado de baja entra como `NULL` y el cliente ve
       // su turno sin profesional asignado.
       withDeleted: true,
