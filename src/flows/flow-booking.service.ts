@@ -346,8 +346,7 @@ export class FlowBookingService {
     const confirmation = await this.bookingAvailabilityService.confirmSlot({
       tenantId: session.tenantId,
       date,
-      serviceId,
-      staffId,
+      items: [{ serviceId, staffId }],
       startTime: new Date(slot),
     });
 
@@ -359,8 +358,7 @@ export class FlowBookingService {
       const appointment = await this.appointmentsService.createFromBookingFlow({
         tenantId: session.tenantId,
         clientId: session.clientId,
-        serviceId,
-        staffId: confirmation.staffId,
+        segments: confirmation.segments,
         startTime: confirmation.startTime,
         endTime: confirmation.endTime,
       });
@@ -437,7 +435,7 @@ export class FlowBookingService {
     const dates = await this.bookingAvailabilityService.getServiceableDates({
       tenantId,
       dates: horizon,
-      serviceId,
+      items: serviceId ? [{ serviceId }] : [],
     });
 
     return dates.map((date) => ({
@@ -459,8 +457,7 @@ export class FlowBookingService {
       this.bookingAvailabilityService.getAvailableSlots({
         tenantId,
         date: params.date,
-        serviceId: params.serviceId,
-        staffId: params.staffId,
+        items: [{ serviceId: params.serviceId, staffId: params.staffId }],
       }),
       this.resolveTimezone(tenantId),
     ]);

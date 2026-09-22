@@ -27,8 +27,10 @@ import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { TenantsService } from '../tenants/tenants.service';
 import type { Staff } from '../staff/entities/staff.entity';
 import type { Tenant } from '../tenants/entities/tenant.entity';
+import type { BookingRequestItem } from '../availability/booking/booking-availability.service';
 import type {
   PublicBookingConfirmation,
+  PublicBookingStaff,
   PublicBusinessProfile,
   PublicSlot,
   PublicStaff,
@@ -153,33 +155,46 @@ export class PublicBookingService {
   }
 
   /**
-   * Profesionales habilitados para un servicio.
+   * Quién puede atender lo elegido: la lista de "toda la reserva" y la de cada
+   * servicio.
    *
    * Alimenta el paso de "elegir profesional", que la página se saltea cuando
-   * devuelve uno solo: preguntar entre una única opción no es una elección.
+   * `shared` devuelve uno solo: preguntar entre una única opción no es una
+   * elección. `byService` es lo que sostiene el paso de elegirlo servicio por
+   * servicio, y llega en la misma respuesta porque la pantalla ofrece las dos
+   * cosas a la vez.
    */
-  async getStaff(slug: string, serviceId: string): Promise<PublicStaff[]> {
+  async getStaff(
+    slug: string,
+    serviceIds: string[],
+  ): Promise<PublicBookingStaff> {
     const tenant = await this.resolveTenant(slug);
 
-    const staff = await this.bookingAvailabilityService.getStaffForService({
-      tenantId: tenant.id,
-      serviceId,
-    });
+    const { shared, byService } =
+      await this.bookingAvailabilityService.getStaffForServices({
+        tenantId: tenant.id,
+        serviceIds,
+      });
 
-    return staff.map(toPublicStaff);
+    return {
+      shared: shared.map(toPublicStaff),
+      byService: byService.map((entry) => ({
+        serviceId: entry.serviceId,
+        staff: entry.staff.map(toPublicStaff),
+      })),
+    };
   }
 
   async getSlots(
     slug: string,
-    query: { date: string; serviceId: string; staffId?: string },
+    query: { date: string; serviceIds: string[]; staffIds?: string[] },
   ): Promise<PublicSlot[]> {
     const tenant = await this.resolveTenant(slug);
 
     const slots = await this.bookingAvailabilityService.getAvailableSlots({
       tenantId: tenant.id,
       date: query.date,
-      serviceId: query.serviceId,
-      staffId: query.staffId,
+      ...this.toBookingRequest(query),
       /*
        * Siempre `client`, y no es configurable desde afuera: el `panel` existe
        * para que el dueño registre lo que ya ocurrió, y una página pública que
@@ -203,7 +218,7 @@ export class PublicBookingService {
    */
   async getServiceableDays(
     slug: string,
-    query: { serviceId: string; staffId?: string; days?: number },
+    query: { serviceIds: string[]; staffIds?: string[]; days?: number },
   ): Promise<string[]> {
     const tenant = await this.resolveTenant(slug);
 
@@ -213,9 +228,46 @@ export class PublicBookingService {
     return this.bookingAvailabilityService.getServiceableDates({
       tenantId: tenant.id,
       dates,
-      serviceId: query.serviceId,
-      staffId: query.staffId,
+      items: this.toBookingRequest(query).items,
     });
+  }
+
+  /**
+   * Traduce lo que viaja en la URL —dos listas paralelas— a la forma con la que
+   * el motor razona: un ítem por servicio, con su profesional si lo hay.
+   *
+   * Las dos listas se emparejan **por posición**, así que una desalineada es un
+   * 400 y no un silencio: con `staffIds` más corta, el último servicio saldría
+   * con "cualquiera" sin que nadie lo haya pedido, y quien eligió a Jose para el
+   * corte se enteraría el día del turno.
+   *
+   * Sin `staffIds` la reserva es "cualquier profesional", y ahí se pide que
+   * **una sola persona** pueda con todo: quien no eligió a nadie no está
+   * pidiendo que lo pasen de silla en silla.
+   */
+  private toBookingRequest(query: {
+    serviceIds: string[];
+    staffIds?: string[];
+  }): { items: BookingRequestItem[]; requireSingleStaff: boolean } {
+    const { serviceIds, staffIds } = query;
+
+    if (new Set(serviceIds).size !== serviceIds.length) {
+      throw new BadRequestException('Hay un servicio repetido en la reserva');
+    }
+
+    if (staffIds && staffIds.length !== serviceIds.length) {
+      throw new BadRequestException(
+        'Falta el profesional de alguno de los servicios',
+      );
+    }
+
+    return {
+      items: serviceIds.map((serviceId, index) => ({
+        serviceId,
+        staffId: staffIds?.[index],
+      })),
+      requireSingleStaff: !staffIds,
+    };
   }
 
   /**
@@ -230,8 +282,8 @@ export class PublicBookingService {
   async createBooking(
     slug: string,
     input: {
-      serviceId: string;
-      staffId?: string;
+      serviceIds: string[];
+      staffIds?: string[];
       startTime: string;
       customerName?: string;
       customerPhone?: string;
@@ -245,13 +297,23 @@ export class PublicBookingService {
       throw new BadRequestException('startTime inválido');
     }
 
-    const service = await this.servicesService.findOneByTenant(
-      input.serviceId,
-      tenant.id,
+    const request = this.toBookingRequest(input);
+
+    /*
+     * Los servicios se traen en el orden pedido, que es el orden en que se van a
+     * atender y el que el cliente vio en el resumen.
+     */
+    const services = await Promise.all(
+      input.serviceIds.map((serviceId) =>
+        this.servicesService.findOneByTenant(serviceId, tenant.id),
+      ),
     );
-    if (!service || !service.isActive) {
+
+    if (services.some((service) => !service || !service.isActive)) {
       throw new NotFoundException('El servicio ya no está disponible');
     }
+
+    const chosen = services as NonNullable<(typeof services)[number]>[];
 
     /*
      * El rechazo es explícito y no un "no hay horarios".
@@ -259,8 +321,11 @@ export class PublicBookingService {
      * `loadContext` ya corta este caso, pero devolvería que el horario no está
      * disponible, y eso manda al cliente a probar otro día por algo que ningún día
      * va a resolver. Acá sabemos el motivo, así que se dice.
+     *
+     * Con varios servicios alcanza con que uno lo requiera: no se reserva media
+     * reserva.
      */
-    if (!isSelfBookable(service.bookingPolicy)) {
+    if (chosen.some((service) => !isSelfBookable(service.bookingPolicy))) {
       throw new BadRequestException(CONSULTATION_FIRST_NOTICE);
     }
 
@@ -272,8 +337,7 @@ export class PublicBookingService {
        * que caer en el mismo día de la agenda.
        */
       date: currentDateInTimeZone(tenant.timezone, startTime),
-      serviceId: input.serviceId,
-      staffId: input.staffId,
+      ...request,
       startTime,
       scope: 'client',
     });
@@ -339,25 +403,42 @@ export class PublicBookingService {
         tenantId: tenant.id,
         clientId: client.id,
         customerAccountId: account?.id ?? null,
-        serviceId: input.serviceId,
-        staffId: confirmation.staffId,
+        segments: confirmation.segments,
         startTime: confirmation.startTime,
         endTime: confirmation.endTime,
       });
+
+      const staffNames = await this.resolveStaffNames(tenant.id);
+      const serviceById = new Map(
+        chosen.map((service) => [service.id, service]),
+      );
 
       return {
         id: appointment.id,
         startTime: confirmation.startTime.toISOString(),
         endTime: confirmation.endTime.toISOString(),
-        serviceName: service.name,
-        staffName: await this.resolveStaffName(
-          tenant.id,
-          input.serviceId,
-          confirmation.staffId,
+        currency: tenant.currency,
+        durationMinutes: chosen.reduce(
+          (total, service) => total + service.durationMinutes,
+          0,
         ),
-        price: toPrice(service.price),
-        currency: service.currency,
-        durationMinutes: service.durationMinutes,
+        /*
+         * El comprobante se arma sobre los tramos confirmados y no sobre lo que
+         * pidió el cliente: el orden, la hora de cada uno y sobre todo quién los
+         * atiende salen de la revalidación, que es la que tuvo la última palabra.
+         */
+        services: confirmation.segments.map((segment) => {
+          const service = serviceById.get(segment.serviceId)!;
+
+          return {
+            serviceId: service.id,
+            name: service.name,
+            staffName: staffNames.get(segment.staffId) ?? null,
+            price: toPrice(service.price),
+            durationMinutes: service.durationMinutes,
+            startTime: segment.startTime.toISOString(),
+          };
+        }),
       };
     } catch (error: unknown) {
       /*
@@ -389,16 +470,22 @@ export class PublicBookingService {
     return tenant;
   }
 
-  private async resolveStaffName(
+  /**
+   * Los nombres del equipo, por id.
+   *
+   * Una consulta para todo el equipo y no una por servicio: los tramos de una
+   * misma reserva pueden ir con personas distintas, y preguntar "quién hace este
+   * servicio" una vez por tramo serían tantas consultas como servicios para
+   * llenar un comprobante que se lee una sola vez.
+   */
+  private async resolveStaffNames(
     tenantId: string,
-    serviceId: string,
-    staffId: string,
-  ): Promise<string | null> {
-    const staff = await this.bookingAvailabilityService.getStaffForService({
+  ): Promise<Map<string, string>> {
+    const staff = await this.bookingAvailabilityService.getBookableStaff({
       tenantId,
-      serviceId,
     });
-    return staff.find((member) => member.id === staffId)?.name ?? null;
+
+    return new Map(staff.map((member) => [member.id, member.name]));
   }
 }
 

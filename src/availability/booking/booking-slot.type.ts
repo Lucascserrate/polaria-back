@@ -1,17 +1,39 @@
 import type { SlotRange } from '../utils/availability.types';
 
 /**
- * Un horario realmente disponible para un servicio y una fecha.
+ * Un horario realmente disponible para una reserva y una fecha.
  *
  * A diferencia de `SuggestedSlot` (el modelo del flujo conversacional, que
  * colapsaba cada horario a un único profesional), un `BookingSlot` conserva
  * **todos** los profesionales habilitados y libres en ese horario. Esa lista es
  * la que permite resolver "Sin preferencia" por menor carga de trabajo en el
  * momento de confirmar, y no antes.
+ *
+ * Una reserva puede llevar **varios servicios encadenados**, y por eso el
+ * horario va con dos listas y no con una. Las dos hacen falta porque son
+ * respuestas a preguntas distintas, y el cliente elige cuál le importa. Ver
+ * `buildBookingSlots`.
  */
 export type BookingSlot = SlotRange & {
-  /** Profesionales que pueden hacer el servicio y están libres. Ordenados por id. */
+  /**
+   * Quiénes pueden hacer **toda** la reserva ellos solos, y están libres de
+   * punta a punta. Ordenados por id.
+   *
+   * Con un servicio es la lista de siempre. Con varios es la que necesita el
+   * modo por defecto —un profesional para todo—, y puede quedar vacía en un
+   * horario que igual se ofrece: si el corte lo hace Diego y la barba Carlos,
+   * el bloque existe aunque ninguno de los dos lo cubra entero.
+   */
   eligibleStaffIds: string[];
+  /**
+   * Lo mismo, tramo por tramo y en el orden de los servicios.
+   *
+   * Es lo que sostiene "elegir profesional por servicio": los tramos van uno
+   * detrás del otro y no se pisan, así que la disponibilidad de cada uno se
+   * resuelve por separado. Con un servicio tiene un solo elemento, igual a
+   * `eligibleStaffIds`.
+   */
+  eligibleStaffIdsBySegment: string[][];
   /**
    * Empieza dentro del horario de atención pero termina después.
    *

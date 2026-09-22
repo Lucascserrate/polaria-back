@@ -16,6 +16,10 @@ import {
   ReminderState,
 } from './appointment-reminders.rules';
 import type { AppointmentReminder } from './entities/appointment-reminder.entity';
+import {
+  describeServices,
+  describeStaff,
+} from '../appointments/appointment-naming';
 import { buildReminderMessage } from './reminder-message';
 
 /**
@@ -189,13 +193,18 @@ export class AppointmentRemindersJob {
       return;
     }
 
-    const segment = appointment.services?.[0];
+    /*
+     * Los servicios se nombran todos. Un recordatorio que dice "Corte" para un
+     * turno de corte y barba hace que la persona calcule mal cuánto va a tardar,
+     * que es justo lo que el recordatorio existe para evitar.
+     */
+    const segments = appointment.services ?? [];
     const message = buildReminderMessage({
       appointmentId: appointment.id,
       clientName: appointment.client?.name ?? null,
       businessName: tenant.name,
-      serviceName: segment?.service?.name ?? null,
-      professionalName: segment?.staff?.name ?? null,
+      serviceName: segments.length > 0 ? describeServices(segments) : null,
+      professionalName: describeStaff(segments),
       startTime: appointment.startTime,
       timezone: tenant.timezone,
     });

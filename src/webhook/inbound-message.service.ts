@@ -1,5 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 
+import {
+  describeServices,
+  describeStaff,
+} from '../appointments/appointment-naming';
 import { AppointmentsService } from '../appointments/appointments.service';
 import type { Appointment } from '../appointments/entities/appointment.entity';
 import { AssistantSessionService } from '../assistant/services/assistant-session.service';
@@ -55,16 +59,19 @@ const UNSUPPORTED_MESSAGE_REPLY =
 /**
  * Reduce una cita a lo que hace falta para mostrarla y operarla.
  *
- * Un servicio por reserva, así que se toma el primer segmento; el nombre del
- * profesional puede faltar si la relación no vino cargada.
+ * Una reserva puede llevar varios servicios encadenados —las que salen de la
+ * página pública—, así que se nombran todos en una línea en lugar de tomar el
+ * primero. Tomar el primero decía "Corte" para un turno que además incluye la
+ * barba, y con dos profesionales distintos escondía al segundo. Ver
+ * `describeServices`.
  */
 function toAppointmentSummary(appointment: Appointment): AppointmentSummary {
-  const segment = appointment.services?.[0];
+  const segments = appointment.services ?? [];
 
   return {
     id: appointment.id,
-    serviceName: segment?.service?.name ?? 'Turno',
-    staffName: segment?.staff?.name ?? null,
+    serviceName: describeServices(segments),
+    staffName: describeStaff(segments),
     startTime:
       appointment.startTime instanceof Date
         ? appointment.startTime

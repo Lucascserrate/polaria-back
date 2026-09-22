@@ -625,8 +625,12 @@ export class BookingFlowService {
     const confirmation = await this.bookingAvailabilityService.confirmSlot({
       tenantId: session.tenantId,
       date: selectedDate,
-      serviceId: selectedServiceId,
-      staffId: session.selectedStaffId ?? undefined,
+      items: [
+        {
+          serviceId: selectedServiceId,
+          staffId: session.selectedStaffId ?? undefined,
+        },
+      ],
       startTime: selectedSlotStart,
       // La misma exclusión que al listar: lo que se ofreció tiene que poder
       // confirmarse.
@@ -655,14 +659,13 @@ export class BookingFlowService {
             session,
             appointmentId: editing.id,
             serviceId: selectedServiceId,
-            staffId: confirmation.staffId,
+            staffId: confirmation.segments[0].staffId,
             startTime: confirmation.startTime,
           })
         : await this.appointmentsService.createFromBookingFlow({
             tenantId: session.tenantId,
             clientId: session.clientId,
-            serviceId: selectedServiceId,
-            staffId: confirmation.staffId,
+            segments: confirmation.segments,
             startTime: confirmation.startTime,
             endTime: confirmation.endTime,
           });
@@ -688,7 +691,10 @@ export class BookingFlowService {
 
     // El profesional definitivo es el que resolvió la revalidación, incluso si el
     // cliente había elegido "Sin preferencia".
-    const summary = await this.buildSummary(completed, confirmation.staffId);
+    const summary = await this.buildSummary(
+      completed,
+      confirmation.segments[0].staffId,
+    );
 
     return summary
       ? {
@@ -1293,8 +1299,14 @@ export class BookingFlowService {
     const dates = await this.bookingAvailabilityService.getServiceableDates({
       tenantId: session.tenantId,
       dates: horizon,
-      serviceId: session.selectedServiceId ?? undefined,
-      staffId: session.selectedStaffId ?? undefined,
+      items: session.selectedServiceId
+        ? [
+            {
+              serviceId: session.selectedServiceId,
+              staffId: session.selectedStaffId ?? undefined,
+            },
+          ]
+        : [],
     });
 
     return dates.map((date) =>
@@ -1310,8 +1322,12 @@ export class BookingFlowService {
     return this.bookingAvailabilityService.getAvailableSlots({
       tenantId: session.tenantId,
       date: session.selectedDate,
-      serviceId: session.selectedServiceId,
-      staffId: session.selectedStaffId ?? undefined,
+      items: [
+        {
+          serviceId: session.selectedServiceId,
+          staffId: session.selectedStaffId ?? undefined,
+        },
+      ],
       /*
        * Reagendando, la propia cita no cuenta como ocupada. Sin esto, mover un
        * turno de 18:00 a 18:15 no aparece siquiera como opción: sus propios

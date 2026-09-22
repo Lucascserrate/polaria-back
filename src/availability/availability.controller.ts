@@ -46,8 +46,9 @@ export class AvailabilityController {
     return this.bookingAvailabilityService.getAvailableSlots({
       tenantId,
       date: query.date,
-      serviceId: query.serviceId,
-      staffId: query.staffId,
+      // Agenda carga un servicio por vez. Varios servicios encadenados son cosa
+      // de la página pública; acá el bloque y el servicio son lo mismo.
+      items: [{ serviceId: query.serviceId, staffId: query.staffId }],
       excludeAppointmentId: query.excludeAppointmentId,
       scope: query.scope,
     });

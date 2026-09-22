@@ -125,15 +125,53 @@ export type PublicSlot = {
   endTime: string;
 };
 
-/** El comprobante de la reserva, que es lo único que la página muestra al final. */
+/**
+ * Quién puede atender lo que se eligió.
+ *
+ * Dos listas porque son dos preguntas, y la pantalla hace las dos seguidas:
+ * `shared` es "quién puede con toda la reserva", que es lo que se ofrece por
+ * defecto; `byService` es "quién puede con cada cosa", que es lo que hace falta
+ * para repartirla.
+ *
+ * Con un solo servicio las dos dicen lo mismo, y la pantalla usa `shared`.
+ *
+ * **`shared` vacía con `byService` llena no es un error**: significa que nadie
+ * hace todos los servicios elegidos y que la reserva sólo existe repartida. La
+ * página tiene que poder decirlo con esas palabras en lugar de mostrar una lista
+ * vacía.
+ */
+export type PublicBookingStaff = {
+  shared: PublicStaff[];
+  /** En el mismo orden en que se pidieron los servicios. */
+  byService: { serviceId: string; staff: PublicStaff[] }[];
+};
+
+/** Un servicio dentro del comprobante, con su tramo ya resuelto. */
+export type PublicBookedService = {
+  serviceId: string;
+  name: string;
+  /** Quién lo atiende. Puede ser distinto en cada servicio de la misma reserva. */
+  staffName: string | null;
+  /** `null` si se cotiza: el comprobante lo dice en vez de mostrar un importe. */
+  price: number | null;
+  durationMinutes: number;
+  /** Cuándo arranca **este** servicio, que no es el inicio del bloque salvo el primero. */
+  startTime: string;
+};
+
+/**
+ * El comprobante de la reserva, que es lo único que la página muestra al final.
+ *
+ * Los horarios de arriba son los del **bloque**: de cuando empieza el primer
+ * servicio a cuando termina el último. Lo de cada uno va en `services`.
+ */
 export type PublicBookingConfirmation = {
   id: string;
   startTime: string;
   endTime: string;
-  serviceName: string;
-  staffName: string | null;
-  /** `null` si se cotiza: el comprobante lo dice en vez de mostrar un importe. */
-  price: number | null;
   currency: string;
+  /** La suma de los servicios, que es lo que dura estar ahí. */
   durationMinutes: number;
+  /** En orden de atención. Nunca vacío. */
+  services: PublicBookedService[];
 };

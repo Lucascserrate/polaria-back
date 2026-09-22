@@ -1,20 +1,18 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { ServiceIdsParam, StaffIdsParam } from './booking-selection';
 
 /**
  * Qué días de acá en adelante atiende el negocio, para no ofrecer una fecha que
  * no lleva a ninguna parte.
  */
 export class PublicDaysQueryDto {
-  @ApiProperty()
-  @IsUUID()
-  serviceId!: string;
+  @ServiceIdsParam()
+  serviceIds!: string[];
 
-  @ApiPropertyOptional()
-  @IsOptional()
-  @IsUUID()
-  staffId?: string;
+  @StaffIdsParam()
+  staffIds?: string[];
 
   /**
    * Cuántos días mirar hacia adelante, contando hoy.

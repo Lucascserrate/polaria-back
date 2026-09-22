@@ -6,6 +6,7 @@ import { CustomerSessionService } from '../customer-accounts/customer-session';
 
 import { CreatePublicBookingDto } from './dto/create-public-booking.dto';
 import { PublicDaysQueryDto } from './dto/public-days-query.dto';
+import { PublicStaffQueryDto } from './dto/public-staff-query.dto';
 import { PublicSlotsQueryDto } from './dto/public-slots-query.dto';
 import { PublicBookingService } from './public-booking.service';
 
@@ -41,9 +42,16 @@ export class PublicBookingController {
     return this.publicBookingService.getProfile(slug);
   }
 
+  /**
+   * Quién puede atender lo elegido.
+   *
+   * Recibe los servicios y no uno solo porque una reserva puede llevar varios:
+   * la respuesta trae la lista de quienes pueden con todo y, aparte, la de cada
+   * servicio. Ver `PublicBookingStaff`.
+   */
   @Get('staff')
-  getStaff(@Param('slug') slug: string, @Query('serviceId') serviceId: string) {
-    return this.publicBookingService.getStaff(slug, serviceId);
+  getStaff(@Param('slug') slug: string, @Query() query: PublicStaffQueryDto) {
+    return this.publicBookingService.getStaff(slug, query.serviceIds);
   }
 
   @Get('slots')

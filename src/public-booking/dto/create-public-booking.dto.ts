@@ -1,11 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsISO8601,
-  IsOptional,
-  IsString,
-  IsUUID,
-  Length,
-} from 'class-validator';
+import { IsISO8601, IsOptional, IsString, Length } from 'class-validator';
+import { ServiceIdsParam, StaffIdsParam } from './booking-selection';
 
 /**
  * La reserva que pide alguien desde la página pública.
@@ -15,16 +10,11 @@ import {
  * podría reservar diez minutos y ocupar dos horas, o al revés.
  */
 export class CreatePublicBookingDto {
-  @ApiProperty()
-  @IsUUID()
-  serviceId!: string;
+  @ServiceIdsParam()
+  serviceIds!: string[];
 
-  @ApiPropertyOptional({
-    description: 'Profesional elegido. Omitirlo es "sin preferencia".',
-  })
-  @IsOptional()
-  @IsUUID()
-  staffId?: string;
+  @StaffIdsParam()
+  staffIds?: string[];
 
   @ApiProperty({
     description: 'Inicio del turno, en ISO 8601 con zona.',

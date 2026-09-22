@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 
+import {
+  describeServices,
+  describeStaff,
+} from '../appointments/appointment-naming';
 import { AppointmentsService } from '../appointments/appointments.service';
 import { TenantsService } from '../tenants/tenants.service';
 import type { Appointment } from '../appointments/entities/appointment.entity';
@@ -101,18 +105,19 @@ export class CustomerAppointmentsService {
 /**
  * Un turno reducido a lo que se muestra.
  *
- * Un servicio por reserva, así que se toma el primer tramo, igual que hace
- * WhatsApp al armar el menú de quien ya tiene turno.
+ * Los servicios se nombran todos en una línea, con la misma función que usa
+ * WhatsApp para el menú de quien ya tiene turno: el aviso existe para que nadie
+ * reserve dos veces lo mismo, y para eso tiene que decir qué reservó.
  */
 const toView = (appointment: Appointment): CustomerAppointmentView => {
-  const segment = appointment.services?.[0];
+  const segments = appointment.services ?? [];
 
   return {
     id: appointment.id,
     startTime: appointment.startTime.toISOString(),
     endTime: appointment.endTime.toISOString(),
-    serviceName: segment?.service?.name ?? 'Turno',
-    staffName: segment?.staff?.name ?? null,
+    serviceName: describeServices(segments),
+    staffName: describeStaff(segments),
     business: {
       slug: appointment.tenant.slug ?? '',
       name: appointment.tenant.name,

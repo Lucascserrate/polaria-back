@@ -30,6 +30,8 @@ import {
 import {
   buildBookingSlots,
   findBookingSlotAt,
+  windowOf,
+  type BookingSegmentSpec,
   type StaffBusyMap,
 } from './slot-builder';
 import {
@@ -37,13 +39,43 @@ import {
   resolveStaffForSlot,
 } from './staff-assignment';
 
+/**
+ * Un servicio de la reserva, tal como lo pidió quien reserva.
+ *
+ * Es la unidad de todo este módulo, y es una lista y no un campo suelto porque
+ * una reserva puede llevar varios servicios encadenados —corte y barba— que el
+ * cliente elige juntos. Uno solo es el caso de siempre: WhatsApp, el Flow y el
+ * panel mandan un único ítem y nada cambia para ellos.
+ */
+export type BookingRequestItem = {
+  serviceId: string;
+  /** Profesional elegido para **este** servicio. Omitirlo es "Sin preferencia". */
+  staffId?: string;
+};
+
 export type BookingSlotsQuery = {
   tenantId: string;
   /** Fecha en formato YYYY-MM-DD, en la zona horaria del negocio. */
   date: string;
-  serviceId: string;
-  /** Profesional elegido. Omitirlo equivale a "Sin preferencia". */
-  staffId?: string;
+  /**
+   * Los servicios de la reserva, **en orden de ejecución**: el primero arranca
+   * en el horario ofrecido y los demás van uno detrás del otro.
+   *
+   * El orden importa y no se reordena acá: es el que el cliente vio en el
+   * resumen y el que `planBookingSegments` va a escribir en la cita.
+   */
+  items: BookingRequestItem[];
+  /**
+   * Con varios servicios y sin profesional elegido, exige que **una sola
+   * persona** pueda con todos.
+   *
+   * Es el modo por defecto: quien pide un corte y una barba sin elegir a nadie
+   * espera que lo atienda alguien, no que lo pasen de silla en silla. Se apaga
+   * cuando el cliente pidió expresamente elegir profesional por servicio.
+   *
+   * Con un solo servicio no cambia nada.
+   */
+  requireSingleStaff?: boolean;
   /**
    * Cita que no cuenta como ocupada.
    *
@@ -86,8 +118,28 @@ const extremesOf = (dates: string[]): [string, string] => {
   return [sorted[0], sorted[sorted.length - 1]];
 };
 
+/**
+ * Un tramo ya resuelto: qué servicio, con quién y entre qué horas.
+ *
+ * Sale de `confirmSlot` listo para escribirse, y por eso lleva el profesional
+ * decidido: "Sin preferencia" se resuelve ahí y no después.
+ */
+export type ConfirmedSegment = {
+  serviceId: string;
+  staffId: string;
+  startTime: Date;
+  endTime: Date;
+};
+
 export type SlotConfirmation =
-  | { available: true; startTime: Date; endTime: Date; staffId: string }
+  | {
+      available: true;
+      startTime: Date;
+      /** El final del **bloque**: cuando termina el último servicio. */
+      endTime: Date;
+      /** En el mismo orden que los servicios pedidos. Nunca vacío. */
+      segments: ConfirmedSegment[];
+    }
   | { available: false };
 
 /**
@@ -110,11 +162,14 @@ export class BookingAvailabilityService {
   ) {}
 
   /**
-   * Todos los horarios disponibles para un servicio y una fecha, sin recortes.
+   * Todos los horarios disponibles para una reserva y una fecha, sin recortes.
    *
-   * Cada horario incluye los profesionales habilitados y libres. Cuando se pasa
-   * `staffId`, la lista queda restringida a ese profesional; cuando no, es la
-   * unión de disponibilidades de todos los que pueden hacer el servicio.
+   * Cada horario incluye los profesionales habilitados y libres. Cuando un ítem
+   * trae `staffId`, su tramo queda restringido a esa persona; cuando no, es la
+   * unión de disponibilidades de todos los que pueden hacer ese servicio.
+   *
+   * Con varios servicios el horario es el del **bloque entero**: la suma de las
+   * duraciones, encadenadas desde ese instante.
    *
    * Responde una sola pregunta: **qué se puede reservar**. Siempre desde ahora
    * en adelante, para cualquier consumidor. Registrar una atención que ya
@@ -127,7 +182,8 @@ export class BookingAvailabilityService {
 
     return buildBookingSlots({
       candidateSlots: context.candidateSlots,
-      staffIds: context.staffIds,
+      segments: context.segments,
+      requireSingleStaff: context.requireSingleStaff,
       workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
       minStartTime: context.minStartTime,
@@ -230,7 +286,13 @@ export class BookingAvailabilityService {
       return (
         buildBookingSlots({
           candidateSlots,
-          staffIds,
+          segments: [
+            {
+              staffIds,
+              offsetMinutes: 0,
+              durationMinutes: service.durationMinutes,
+            },
+          ],
           workingRangesByStaff,
           appointmentsByStaff,
           minStartTime,
@@ -250,6 +312,47 @@ export class BookingAvailabilityService {
     return this.availabilityRepository.getStaffList(params.tenantId, [
       params.serviceId,
     ]);
+  }
+
+  /**
+   * Las dos listas que necesita el paso de profesional cuando hay varios
+   * servicios: quién puede con **todo** y quién puede con **cada uno**.
+   *
+   * Van juntas y no en dos consultas porque son la misma pregunta hecha con dos
+   * recortes, y la pantalla necesita las dos a la vez: la primera para la lista
+   * de "un profesional para toda la reserva", la segunda para el paso de
+   * elegirlo por servicio. Pedirlas por separado dejaría que una llegue y la
+   * otra no, con media pantalla dibujada.
+   *
+   * `shared` puede venir vacía con `byService` llena, y no es un error: si nadie
+   * hace el corte y la barba, la reserva sigue siendo posible repartiéndola. Es
+   * exactamente el caso que la pantalla tiene que saber explicar.
+   */
+  async getStaffForServices(params: {
+    tenantId: string;
+    /** En el orden en que se van a atender. */
+    serviceIds: string[];
+  }): Promise<{
+    shared: Staff[];
+    byService: { serviceId: string; staff: Staff[] }[];
+  }> {
+    const { tenantId, serviceIds } = params;
+    if (serviceIds.length === 0) return { shared: [], byService: [] };
+
+    const [shared, ...lists] = await Promise.all([
+      this.availabilityRepository.getStaffList(tenantId, serviceIds),
+      ...serviceIds.map((serviceId) =>
+        this.availabilityRepository.getStaffList(tenantId, [serviceId]),
+      ),
+    ]);
+
+    return {
+      shared,
+      byService: serviceIds.map((serviceId, index) => ({
+        serviceId,
+        staff: lists[index],
+      })),
+    };
   }
 
   /**
@@ -280,16 +383,24 @@ export class BookingAvailabilityService {
    * apareciendo. Ese caso ya tiene salida propia en el paso de horarios. Lo que
    * sí descarta es el día cuya jornada ya terminó —hoy, después de cerrar—,
    * porque ahí no hay nada que la agenda pueda cambiar.
+   *
+   * **Con varios servicios se pide cobertura para todos**, no para la suma de
+   * sus equipos: un día en el que trabaja el barbero pero no la colorista no es
+   * un día en el que se pueda reservar corte y color, y ofrecerlo llevaría al
+   * "no quedan horarios" que este filtro existe para evitar. Se resuelve
+   * intersecando las coberturas, con los horarios y las jornadas cargados una
+   * sola vez.
    */
   async getServiceableDates(params: {
     tenantId: string;
     dates: string[];
-    /** Ausente busca cobertura de cualquiera del equipo. */
-    serviceId?: string;
-    staffId?: string;
+    /** Vacío busca cobertura de cualquiera del equipo. */
+    items?: BookingRequestItem[];
   }): Promise<string[]> {
-    const { tenantId, dates, serviceId, staffId } = params;
+    const { tenantId, dates } = params;
     if (dates.length === 0) return [];
+
+    const items = params.items?.length ? params.items : [{ serviceId: '' }];
 
     const tenant = await this.availabilityRepository.getTenant(tenantId);
     const timeZone = tenant?.timezone;
@@ -298,17 +409,24 @@ export class BookingAvailabilityService {
       return [];
     }
 
-    const staffList = await this.availabilityRepository.getStaffList(
-      tenantId,
-      serviceId ? [serviceId] : [],
-      staffId,
+    const staffByItem = await Promise.all(
+      items.map((item) =>
+        this.availabilityRepository.getStaffList(
+          tenantId,
+          item.serviceId ? [item.serviceId] : [],
+          item.staffId,
+        ),
+      ),
     );
-    if (staffList.length === 0) return [];
+
+    if (staffByItem.some((staffList) => staffList.length === 0)) return [];
+
+    const everyone = uniqueStaff(staffByItem.flat());
 
     const [businessHours, schedulesByStaff, blocksByStaff] = await Promise.all([
       this.availabilityRepository.getBusinessHours(tenantId),
       this.availabilityRepository.getStaffSchedules(
-        staffList.map((staff) => staff.id),
+        everyone.map((staff) => staff.id),
       ),
       /*
        * Una sola consulta para todas las fechas, acotada por sus extremos. Se
@@ -319,26 +437,35 @@ export class BookingAvailabilityService {
       this.availabilityRepository.getScheduleBlocksByStaff(
         tenantId,
         timeZone,
-        staffList.map((staff) => staff.id),
+        everyone.map((staff) => staff.id),
         ...extremesOf(dates),
       ),
     ]);
 
-    return datesWithCoverage({
-      dates,
-      timeZone,
-      businessHours,
-      staff: staffList,
-      schedulesByStaff,
-      blocksByStaff,
-      /*
-       * El mismo piso que usa el armado de horarios. Sin él, un negocio
-       * consultado diez minutos antes de cerrar ofrecía "hoy" como día con
-       * atención y el paso siguiente contestaba que no quedan horarios: el
-       * primer contacto con la reserva era un callejón sin salida.
-       */
-      notBefore: this.calculateMinStartTime(timeZone),
-    });
+    /*
+     * El mismo piso que usa el armado de horarios. Sin él, un negocio
+     * consultado diez minutos antes de cerrar ofrecía "hoy" como día con
+     * atención y el paso siguiente contestaba que no quedan horarios: el
+     * primer contacto con la reserva era un callejón sin salida.
+     */
+    const notBefore = this.calculateMinStartTime(timeZone);
+
+    return staffByItem
+      .map((staff) =>
+        datesWithCoverage({
+          dates,
+          timeZone,
+          businessHours,
+          staff,
+          schedulesByStaff,
+          blocksByStaff,
+          notBefore,
+        }),
+      )
+      .reduce((kept, covered) => {
+        const set = new Set(covered);
+        return kept.filter((date) => set.has(date));
+      });
   }
 
   /**
@@ -462,6 +589,12 @@ export class BookingAvailabilityService {
    * Cuando el cliente eligió "Sin preferencia" (`staffId` ausente), el
    * profesional se decide acá: menor carga de trabajo del día en minutos, con
    * desempate por id.
+   *
+   * Con varios servicios y sin preferencia, **primero se busca a alguien que
+   * pueda con todo** y recién si no lo hay se reparte tramo por tramo. El orden
+   * no es una optimización: con `requireSingleStaff` —el modo por defecto— el
+   * horario ni siquiera se ofrece si nadie puede solo, así que repartir acá
+   * sería contradecir lo que la pantalla mostró.
    */
   async confirmSlot(
     query: BookingSlotsQuery & { startTime: Date },
@@ -471,7 +604,8 @@ export class BookingAvailabilityService {
 
     const slots = buildBookingSlots({
       candidateSlots: context.candidateSlots,
-      staffIds: context.staffIds,
+      segments: context.segments,
+      requireSingleStaff: context.requireSingleStaff,
       workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
       minStartTime: context.minStartTime,
@@ -480,20 +614,47 @@ export class BookingAvailabilityService {
     const slot = findBookingSlotAt(slots, query.startTime);
     if (!slot) return { available: false };
 
-    const staffId = resolveStaffForSlot({
+    const workloadByStaffId = calculateWorkloadByStaffId(
+      context.appointmentsByStaff,
+    );
+
+    /*
+     * Uno para toda la reserva mientras sea posible. Da lo mismo con un solo
+     * servicio —las dos listas son la misma— y es lo que hace que una reserva de
+     * corte y barba no salga con dos personas cuando una alcanza.
+     */
+    const forEverything = resolveStaffForSlot({
       eligibleStaffIds: slot.eligibleStaffIds,
-      workloadByStaffId: calculateWorkloadByStaffId(
-        context.appointmentsByStaff,
-      ),
+      workloadByStaffId,
     });
 
-    if (!staffId) return { available: false };
+    const staffIds = context.segments.map((_, index) =>
+      forEverything !== null
+        ? forEverything
+        : resolveStaffForSlot({
+            eligibleStaffIds: slot.eligibleStaffIdsBySegment[index] ?? [],
+            workloadByStaffId,
+          }),
+    );
+
+    if (staffIds.some((staffId) => staffId === null)) {
+      return { available: false };
+    }
 
     return {
       available: true,
       startTime: slot.startTime,
       endTime: slot.endTime,
-      staffId,
+      segments: context.segments.map((segment, index) => {
+        const window = windowOf(slot.startTime, segment);
+
+        return {
+          serviceId: segment.serviceId,
+          staffId: staffIds[index] as string,
+          startTime: window.startTime,
+          endTime: window.endTime,
+        };
+      }),
     };
   }
 
@@ -504,7 +665,9 @@ export class BookingAvailabilityService {
    */
   private async loadContext(query: BookingSlotsQuery): Promise<{
     candidateSlots: SlotRange[];
-    staffIds: string[];
+    /** Un tramo por servicio, en orden y ya ubicado dentro del bloque. */
+    segments: (BookingSegmentSpec & { serviceId: string })[];
+    requireSingleStaff: boolean;
     workingRangesByStaff: Record<string, SlotRange[]>;
     appointmentsByStaff: StaffBusyMap;
     /** Ausente en el registro manual: ahí no hay hora mínima que respetar. */
@@ -513,11 +676,13 @@ export class BookingAvailabilityService {
     const {
       tenantId,
       date,
-      serviceId,
-      staffId,
+      items,
       excludeAppointmentId,
       scope = 'client',
+      requireSingleStaff = true,
     } = query;
+
+    if (items.length === 0) return null;
 
     const tenant = await this.availabilityRepository.getTenant(tenantId);
     const timeZone = tenant?.timezone;
@@ -526,11 +691,13 @@ export class BookingAvailabilityService {
       return null;
     }
 
-    const services = await this.availabilityRepository.getServices(tenantId, [
-      serviceId,
-    ]);
-    const service = services[0];
-    if (!service || service.durationMinutes <= 0) return null;
+    const services = await this.availabilityRepository.getServices(
+      tenantId,
+      items.map((item) => item.serviceId),
+    );
+    const serviceById = new Map(
+      services.map((service) => [service.id, service]),
+    );
 
     /*
      * Un servicio con consulta previa no tiene horarios **para el cliente**.
@@ -541,31 +708,48 @@ export class BookingAvailabilityService {
      * opciones es la comodidad; que su id no rinda ningún horario es lo que hace
      * que sea una regla y no una sugerencia.
      *
+     * Con varios servicios alcanza con que uno lo sea para que el bloque entero
+     * deje de existir: no se reserva media reserva.
+     *
      * `scope === 'panel'` la saltea a propósito: el negocio agenda estos servicios
      * justamente después de la consulta, que es el punto de la política. Ese scope
      * solo llega desde el endpoint autenticado del panel; la página pública manda
      * `'client'` escrito a mano y no puede pedir otra cosa.
      */
-    if (scope === 'client' && !isSelfBookable(service.bookingPolicy)) {
-      return null;
+    for (const item of items) {
+      const service = serviceById.get(item.serviceId);
+      if (!service || service.durationMinutes <= 0) return null;
+      if (scope === 'client' && !isSelfBookable(service.bookingPolicy)) {
+        return null;
+      }
     }
 
-    const staffList = await this.availabilityRepository.getStaffList(
-      tenantId,
-      [serviceId],
-      staffId,
+    /*
+     * Los candidatos habilitados de cada tramo, uno por uno y no en una sola
+     * consulta: quien pidió a Jose para el corte no restringe quién puede
+     * hacerle la barba, y una lista compartida borraría esa diferencia.
+     */
+    const staffByItem = await Promise.all(
+      items.map((item) =>
+        this.availabilityRepository.getStaffList(
+          tenantId,
+          [item.serviceId],
+          item.staffId,
+        ),
+      ),
     );
-    if (staffList.length === 0) return null;
+    if (staffByItem.some((staffList) => staffList.length === 0)) return null;
+
+    const everyone = uniqueStaff(staffByItem.flat());
+    const everyoneIds = everyone.map((staff) => staff.id);
 
     const [businessHours, schedulesByStaff, blocksByStaff] = await Promise.all([
       this.availabilityRepository.getBusinessHours(tenantId),
-      this.availabilityRepository.getStaffSchedules(
-        staffList.map((staff) => staff.id),
-      ),
+      this.availabilityRepository.getStaffSchedules(everyoneIds),
       this.availabilityRepository.getScheduleBlocksByStaff(
         tenantId,
         timeZone,
-        staffList.map((staff) => staff.id),
+        everyoneIds,
         date,
       ),
     ]);
@@ -582,17 +766,33 @@ export class BookingAvailabilityService {
       date,
       timeZone,
       businessHours,
-      staff: staffList,
+      staff: everyone,
       schedulesByStaff,
       blocksByStaff,
     });
 
     // Solo siguen los que efectivamente trabajan esa fecha. Esto también cubre
     // el negocio cerrado: con el local sin franjas, nadie queda en pie.
-    const staffIds = staffList
-      .map((staff) => staff.id)
-      .filter((id) => workingRangesByStaff[id].length > 0);
-    if (staffIds.length === 0) return null;
+    const worksToday = (id: string) => workingRangesByStaff[id].length > 0;
+
+    let offsetMinutes = 0;
+    const segments = items.map((item, index) => {
+      const durationMinutes = serviceById.get(item.serviceId)!.durationMinutes;
+      const segment = {
+        serviceId: item.serviceId,
+        staffIds: staffByItem[index]
+          .map((staff) => staff.id)
+          .filter(worksToday),
+        offsetMinutes,
+        durationMinutes,
+      };
+      offsetMinutes += durationMinutes;
+      return segment;
+    });
+
+    if (segments.some((segment) => segment.staffIds.length === 0)) return null;
+
+    const staffIds = everyoneIds.filter(worksToday);
 
     const appointmentsByStaff =
       await this.availabilityRepository.getAppointmentsByStaff(
@@ -603,9 +803,20 @@ export class BookingAvailabilityService {
         excludeAppointmentId,
       );
 
+    /*
+     * Los candidatos se generan con la **duración total** del bloque: lo que se
+     * ofrece es la hora a la que arranca la reserva entera, no la de cada
+     * servicio. Dónde cae cada tramo lo resuelve después `buildBookingSlots` con
+     * los `offsetMinutes`.
+     */
+    const totalDuration = segments.reduce(
+      (total, segment) => total + segment.durationMinutes,
+      0,
+    );
+
     const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
       unionWorkingRanges(workingRangesByStaff, staffIds),
-      service.durationMinutes,
+      totalDuration,
       DEFAULT_SLOT_STEP_MINUTES,
       /*
        * El panel genera además los que se pasan del cierre. Que terminen
@@ -617,7 +828,13 @@ export class BookingAvailabilityService {
 
     return {
       candidateSlots,
-      staffIds,
+      segments,
+      /*
+       * Con un solo servicio la bandera no cambia nada —las dos listas de
+       * `BookingSlot` son la misma— así que no vale la pena que los tres canales
+       * que reservan de a uno tengan que pensarla.
+       */
+      requireSingleStaff: requireSingleStaff && segments.length > 1,
       workingRangesByStaff,
       appointmentsByStaff,
       minStartTime: this.resolveEarliestStart(timeZone, date, scope),
@@ -677,6 +894,23 @@ export class BookingAvailabilityService {
       MIN_LEAD_TIME_MINUTES,
     );
   }
+}
+
+/**
+ * Un profesional una sola vez, conservando el orden de aparición.
+ *
+ * Hace falta porque los candidatos se piden por servicio, y quien hace el corte
+ * y la barba vuelve en las dos listas. Cargarle dos veces la jornada y los
+ * bloqueos no rompe nada; contarlo dos veces en la cobertura del día, sí.
+ */
+function uniqueStaff(staffList: Staff[]): Staff[] {
+  const seen = new Set<string>();
+
+  return staffList.filter((staff) => {
+    if (seen.has(staff.id)) return false;
+    seen.add(staff.id);
+    return true;
+  });
 }
 
 function staffIdsForService(staffList: Staff[], serviceId: string): string[] {

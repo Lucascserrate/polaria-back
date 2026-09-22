@@ -915,26 +915,48 @@ export class AppointmentsService {
    * cálculo acá, además de redundante, reintroduciría el suggester legado con sus
    * criterios cosméticos.
    *
-   * Un servicio por reserva, y por lo tanto un único segmento.
+   * **Los tramos llegan resueltos, no se planifican acá.** Vienen de
+   * `confirmSlot`, que ya encadenó los horarios y decidió el profesional de cada
+   * uno; recalcularlos sería una segunda planificación que puede discrepar de la
+   * que se acaba de validar contra la agenda. Uno solo es el caso de WhatsApp y
+   * el Flow; la página pública puede mandar varios.
    */
   async createFromBookingFlow(input: {
     tenantId: string;
     clientId: string;
-    serviceId: string;
-    staffId: string;
+    /** En orden de ejecución, tal como los devolvió `confirmSlot`. */
+    segments: {
+      serviceId: string;
+      staffId: string;
+      startTime: Date;
+      endTime: Date;
+    }[];
+    /** El bloque completo: del inicio del primer tramo al final del último. */
     startTime: Date;
     endTime: Date;
     customerAccountId?: string | null;
   }): Promise<Appointment> {
-    const service = await this.serviceRepository.findOne({
+    if (input.segments.length === 0) {
+      throw new BadRequestException('La reserva no tiene servicios');
+    }
+
+    const services = await this.serviceRepository.find({
       where: {
-        id: input.serviceId,
+        id: In(input.segments.map((segment) => segment.serviceId)),
         tenantId: input.tenantId,
         isActive: true,
       },
     });
 
-    if (!service) {
+    const serviceById = new Map(
+      services.map((service) => [service.id, service]),
+    );
+
+    const missing = input.segments
+      .map((segment) => segment.serviceId)
+      .filter((serviceId) => !serviceById.has(serviceId));
+
+    if (missing.length > 0) {
       throw new BadRequestException(
         'El servicio no existe o no está activo para este tenant',
       );
@@ -952,28 +974,39 @@ export class AppointmentsService {
     );
 
     try {
+      /*
+       * Los tramos se guardan de una sola vez: el índice único es la barrera, y
+       * escribirlos uno por uno dejaría media reserva escrita si el segundo
+       * choca. El `catch` de abajo borra la cita igual, pero cuantos menos
+       * estados intermedios existan, menos hay que deshacer.
+       */
       await this.appointmentServiceRepository.save(
-        this.appointmentServiceRepository.create({
-          appointmentId: appointment.id,
-          serviceId: service.id,
-          staffId: input.staffId,
-          startTime: input.startTime,
-          activeStartTime: input.startTime,
-          endTime: input.endTime,
-          priceAtBooking: toPrice(service.price),
-          currencyAtBooking: service.currency,
-          durationAtBooking: service.durationMinutes,
-          sequenceOrder: 0,
+        input.segments.map((segment, index) => {
+          const service = serviceById.get(segment.serviceId)!;
+
+          return this.appointmentServiceRepository.create({
+            appointmentId: appointment.id,
+            serviceId: service.id,
+            staffId: segment.staffId,
+            startTime: segment.startTime,
+            activeStartTime: segment.startTime,
+            endTime: segment.endTime,
+            priceAtBooking: toPrice(service.price),
+            currencyAtBooking: service.currency,
+            durationAtBooking: service.durationMinutes,
+            sequenceOrder: index,
+          });
         }),
       );
     } catch (error: unknown) {
-      // El índice único rechazó el segmento: otro cliente ganó la carrera entre la
+      // El índice único rechazó un segmento: otro cliente ganó la carrera entre la
       // revalidación y esta inserción. Se deshace la cita huérfana y se informa
       // como horario ocupado.
       await this.appointmentRepository.delete({ id: appointment.id });
 
       if (isDuplicateEntryError(error)) {
-        throw new SlotAlreadyTakenError(input.staffId, input.startTime);
+        const [first] = input.segments;
+        throw new SlotAlreadyTakenError(first.staffId, first.startTime);
       }
       throw error;
     }
@@ -981,13 +1014,11 @@ export class AppointmentsService {
     await this.staffNotifications.appointmentCreated({
       tenantId: input.tenantId,
       appointmentId: appointment.id,
-      segments: [
-        {
-          staffId: input.staffId,
-          serviceId: service.id,
-          startTime: input.startTime,
-        },
-      ],
+      segments: input.segments.map((segment) => ({
+        staffId: segment.staffId,
+        serviceId: segment.serviceId,
+        startTime: segment.startTime,
+      })),
     });
     this.dispatchStaffAlerts();
 

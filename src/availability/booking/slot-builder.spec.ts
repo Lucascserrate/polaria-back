@@ -1,9 +1,50 @@
 import type { SlotRange } from '../utils/availability.types';
 import {
-  buildBookingSlots,
+  buildBookingSlots as buildSlots,
   findBookingSlotAt,
-  hasAnyBookingSlot,
+  hasAnyBookingSlot as hasAnySlot,
+  type BuildBookingSlotsInput,
 } from './slot-builder';
+
+/**
+ * Casi todo este archivo prueba una reserva de **un** servicio, que es la de
+ * WhatsApp, la del Flow y la del panel. Ahí el bloque y el servicio son lo
+ * mismo, así que el tramo se arma solo: ocupa el candidato entero.
+ *
+ * El adaptador existe para que estas pruebas sigan diciendo exactamente lo que
+ * decían antes de que una reserva pudiera llevar varios servicios. Que no haya
+ * que tocarlas **es** la afirmación que sostienen: para un servicio no cambió
+ * nada. Lo de varios tiene su propio `describe` al final, con los tramos
+ * escritos a mano.
+ */
+type SingleServiceInput = Omit<BuildBookingSlotsInput, 'segments'> & {
+  staffIds: string[];
+};
+
+function asOneService(input: SingleServiceInput): BuildBookingSlotsInput {
+  const { staffIds, ...rest } = input;
+  const [candidate] = input.candidateSlots;
+
+  return {
+    ...rest,
+    segments: [
+      {
+        staffIds,
+        offsetMinutes: 0,
+        durationMinutes: candidate
+          ? (candidate.endTime.getTime() - candidate.startTime.getTime()) /
+            60_000
+          : 30,
+      },
+    ],
+  };
+}
+
+const buildBookingSlots = (input: SingleServiceInput) =>
+  buildSlots(asOneService(input));
+
+const hasAnyBookingSlot = (input: SingleServiceInput) =>
+  hasAnySlot(asOneService(input));
 
 const NICO = 'aaaa-nico';
 const ANA = 'bbbb-ana';
@@ -388,6 +429,103 @@ describe('buildBookingSlots con horarios que se pasan del cierre', () => {
 
     expect(slots).toHaveLength(1);
     expect(slots[0].endsAfterHours).toBeUndefined();
+    expect(slots[0].eligibleStaffIds).toEqual([ANA]);
+  });
+});
+
+/**
+ * Una reserva de varios servicios, que es lo que hace la página pública cuando
+ * el cliente agrega un segundo servicio a la misma cita.
+ *
+ * Acá los tramos se escriben a mano: el bloque dura la suma, y cada servicio
+ * ocupa su pedazo a partir de su `offsetMinutes`. Lo que estas pruebas fijan es
+ * que la disponibilidad de cada tramo se resuelva por separado —los tramos no se
+ * pisan— y que "uno para toda la reserva" sea una exigencia y no una casualidad.
+ */
+describe('buildBookingSlots con varios servicios', () => {
+  /** Corte de 30' y barba de 30': un bloque de una hora desde las 15:00. */
+  const corteYBarba = (corte: string[], barba: string[]) => ({
+    candidateSlots: candidates(at(15, 0, 60)),
+    segments: [
+      { staffIds: corte, offsetMinutes: 0, durationMinutes: 30 },
+      { staffIds: barba, offsetMinutes: 30, durationMinutes: 30 },
+    ],
+  });
+
+  it('ofrece el bloque cuando una sola persona puede con los dos', () => {
+    const slots = buildSlots({
+      ...corteYBarba([NICO], [NICO]),
+      workingRangesByStaff: allDay(NICO),
+      appointmentsByStaff: { [NICO]: [] },
+      requireSingleStaff: true,
+    });
+
+    expect(slots).toHaveLength(1);
+    expect(slots[0].eligibleStaffIds).toEqual([NICO]);
+    expect(slots[0].eligibleStaffIdsBySegment).toEqual([[NICO], [NICO]]);
+  });
+
+  /*
+   * El caso que justifica que el bloque se mida entero: el segundo tramo cae
+   * sobre una cita que ya existe, y el primero está libre. Sin mirar los dos, el
+   * horario se ofrecería y la reserva se caería al confirmar.
+   */
+  it('no ofrece el bloque si el segundo tramo está ocupado', () => {
+    const slots = buildSlots({
+      ...corteYBarba([NICO], [NICO]),
+      workingRangesByStaff: allDay(NICO),
+      // 15:30 es exactamente donde arranca la barba.
+      appointmentsByStaff: { [NICO]: [at(15, 30, 30)] },
+      requireSingleStaff: true,
+    });
+
+    expect(slots).toEqual([]);
+  });
+
+  /*
+   * Repartir la reserva entre dos personas es legítimo, pero hay que pedirlo.
+   * Quien no eligió profesional no está pidiendo que lo pasen de silla en silla,
+   * y por eso el modo por defecto descarta este horario.
+   */
+  it('con dos personas distintas sólo lo ofrece si no se exige una sola', () => {
+    const input = {
+      ...corteYBarba([NICO], [ANA]),
+      workingRangesByStaff: allDay(NICO, ANA),
+      appointmentsByStaff: { [NICO]: [], [ANA]: [] },
+    };
+
+    expect(buildSlots({ ...input, requireSingleStaff: true })).toEqual([]);
+
+    const repartido = buildSlots({ ...input, requireSingleStaff: false });
+    expect(repartido).toHaveLength(1);
+    expect(repartido[0].eligibleStaffIds).toEqual([]);
+    expect(repartido[0].eligibleStaffIdsBySegment).toEqual([[NICO], [ANA]]);
+  });
+
+  /*
+   * La jornada se mira contra el tramo, no contra el bloque: Nico se va a las
+   * 15:30 y podría hacer el corte, pero no la barba. Que el bloque entre en el
+   * horario de Ana no lo habilita a él.
+   */
+  it('mira la jornada de cada tramo, no la del bloque', () => {
+    const slots = buildSlots({
+      ...corteYBarba([NICO, ANA], [NICO, ANA]),
+      workingRangesByStaff: {
+        // Nico se va 15:30: llega al corte, no a la barba.
+        [NICO]: [
+          {
+            startTime: new Date(Date.UTC(2026, 6, 31, 9, 0, 0)),
+            endTime: new Date(Date.UTC(2026, 6, 31, 15, 30, 0)),
+          },
+        ],
+        [ANA]: shift(9, 20),
+      },
+      appointmentsByStaff: { [NICO]: [], [ANA]: [] },
+      requireSingleStaff: false,
+    });
+
+    expect(slots).toHaveLength(1);
+    expect(slots[0].eligibleStaffIdsBySegment).toEqual([[NICO, ANA], [ANA]]);
     expect(slots[0].eligibleStaffIds).toEqual([ANA]);
   });
 });

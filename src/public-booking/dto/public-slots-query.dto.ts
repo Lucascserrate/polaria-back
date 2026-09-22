@@ -1,12 +1,16 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsUUID, Matches } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { Matches } from 'class-validator';
+import { ServiceIdsParam, StaffIdsParam } from './booking-selection';
 
 /**
- * Horarios de un servicio para una fecha.
+ * Horarios de una reserva para una fecha.
  *
  * El negocio no viaja acá: sale del slug de la ruta. Y no hay `scope`: desde
  * afuera siempre se pregunta como cliente, con la anticipación mínima puesta.
  * Que la regla no sea expresable desde el request es lo que la hace una regla.
+ *
+ * La reserva puede llevar varios servicios, y entonces el horario que se
+ * devuelve es el del **bloque entero**: la suma de las duraciones, encadenadas.
  */
 export class PublicSlotsQueryDto {
   @ApiProperty({ example: '2026-08-29', description: 'YYYY-MM-DD' })
@@ -15,14 +19,9 @@ export class PublicSlotsQueryDto {
   })
   date!: string;
 
-  @ApiProperty()
-  @IsUUID()
-  serviceId!: string;
+  @ServiceIdsParam()
+  serviceIds!: string[];
 
-  @ApiPropertyOptional({
-    description: 'Profesional elegido. Omitirlo es "sin preferencia".',
-  })
-  @IsOptional()
-  @IsUUID()
-  staffId?: string;
+  @StaffIdsParam()
+  staffIds?: string[];
 }
