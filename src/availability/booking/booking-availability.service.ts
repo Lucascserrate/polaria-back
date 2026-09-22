@@ -131,6 +131,13 @@ export class BookingAvailabilityService {
       workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
       minStartTime: context.minStartTime,
+      /*
+       * `confirmSlot` no lo pasa, y es a propósito: esa es la revalidación del
+       * flujo del cliente, donde un horario que se pasa del cierre no existe.
+       * El panel no pasa por ahí —crea con advertencias, ver
+       * `collectBookingWarnings`—, así que no hay nada que aflojarle.
+       */
+      allowEndAfterHours: query.scope === 'panel',
     });
   }
 
@@ -600,6 +607,12 @@ export class BookingAvailabilityService {
       unionWorkingRanges(workingRangesByStaff, staffIds),
       service.durationMinutes,
       DEFAULT_SLOT_STEP_MINUTES,
+      /*
+       * El panel genera además los que se pasan del cierre. Que terminen
+       * ofreciéndose o no lo decide `buildBookingSlots`, que es quien sabe si
+       * alguien los empieza dentro de su jornada: acá sólo se los hace existir.
+       */
+      scope === 'panel',
     );
 
     return {

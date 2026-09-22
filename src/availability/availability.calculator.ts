@@ -33,12 +33,27 @@ export class AvailabilityCalculator {
     // El flujo guiado usa un paso más grueso; el conversacional necesitaba 5
     // para poder buscar el horario más cercano al que pedía el usuario.
     stepMinutes = 5,
+    /**
+     * Genera también los que **empiezan** dentro de la franja aunque terminen
+     * después.
+     *
+     * Sólo lo pide el panel: un servicio de una hora a las 16:30 con cierre a
+     * las 17:00 es una decisión legítima del negocio —se queda media hora más—,
+     * y no ofrecerlo era obligar a mover el horario de atención para agendarlo.
+     * A un cliente se le sigue ofreciendo únicamente lo que entra entero.
+     */
+    allowOverflow = false,
   ): SlotRange[] {
     const slots: SlotRange[] = [];
 
     for (const range of workingRanges) {
       let slotStart = range.startTime;
-      while (addMinutes(slotStart, durationMinutes) <= range.endTime) {
+      const fits = () =>
+        allowOverflow
+          ? slotStart < range.endTime
+          : addMinutes(slotStart, durationMinutes) <= range.endTime;
+
+      while (fits()) {
         const slotEnd = addMinutes(slotStart, durationMinutes);
         slots.push({ startTime: slotStart, endTime: slotEnd });
         slotStart = addMinutes(slotStart, stepMinutes);

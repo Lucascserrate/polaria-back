@@ -250,6 +250,26 @@ export const isWithinWorkingRanges = (
 };
 
 /**
+ * Si el horario **arranca** dentro de alguna franja, sin mirar dónde termina.
+ *
+ * Es la pregunta del panel, no la del cliente: a un cliente sólo se le ofrece lo
+ * que entra entero, pero el negocio puede empezar una atención a las 16:30 y
+ * cerrar a las 17:00 sabiendo que se va a quedar de más. Lo que no puede es
+ * empezar a las 17:00, con el local ya cerrado, así que el final de la franja es
+ * exclusivo.
+ */
+export const startsWithinWorkingRanges = (
+  ranges: SlotRange[] | undefined,
+  startTime: Date,
+): boolean => {
+  if (!ranges || ranges.length === 0) return false;
+
+  return ranges.some(
+    (range) => startTime >= range.startTime && startTime < range.endTime,
+  );
+};
+
+/**
  * Fusiona franjas solapadas o contiguas en tramos continuos.
  *
  * Hace falta para armar la unión de las jornadas de todo el equipo: dos

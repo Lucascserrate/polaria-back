@@ -12,6 +12,14 @@ import type { SlotRange } from '../utils/availability.types';
 export type BookingSlot = SlotRange & {
   /** Profesionales que pueden hacer el servicio y están libres. Ordenados por id. */
   eligibleStaffIds: string[];
+  /**
+   * Empieza dentro del horario de atención pero termina después.
+   *
+   * Ausente en todo lo que se le ofrece a un cliente: ahí sólo entra lo que
+   * termina dentro. Lo produce el panel, para poder ofrecerlo **marcado** en
+   * lugar de esconderlo, y que quien agenda sepa lo que está decidiendo.
+   */
+  endsAfterHours?: boolean;
 };
 
 /**

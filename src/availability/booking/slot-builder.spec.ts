@@ -298,3 +298,96 @@ describe('findBookingSlotAt', () => {
     ).toBeNull();
   });
 });
+
+/**
+ * El horario que empieza dentro de la atención y termina después.
+ *
+ * Es el caso del mostrador: el local cierra a las 17:00, entra alguien a las
+ * 16:30 y el servicio dura una hora. No ofrecerlo obligaba a mover el horario de
+ * atención para poder agendarlo; ofrecerlo sin marca escondería que se pasa.
+ */
+describe('buildBookingSlots con horarios que se pasan del cierre', () => {
+  const closesAtFive = { [NICO]: shift(9, 17) };
+
+  it('no los ofrece por defecto', () => {
+    const slots = buildBookingSlots({
+      candidateSlots: candidates(at(16, 30, 60)),
+      staffIds: [NICO],
+      workingRangesByStaff: closesAtFive,
+      appointmentsByStaff: { [NICO]: [] },
+    });
+
+    expect(slots).toEqual([]);
+  });
+
+  it('los ofrece marcados cuando se le permite', () => {
+    const slots = buildBookingSlots({
+      candidateSlots: candidates(at(16, 30, 60)),
+      staffIds: [NICO],
+      workingRangesByStaff: closesAtFive,
+      appointmentsByStaff: { [NICO]: [] },
+      allowEndAfterHours: true,
+    });
+
+    expect(slots).toHaveLength(1);
+    expect(slots[0].endsAfterHours).toBe(true);
+    expect(slots[0].eligibleStaffIds).toEqual([NICO]);
+  });
+
+  it('el que entra entero no lleva marca', () => {
+    const slots = buildBookingSlots({
+      candidateSlots: candidates(at(15, 30, 60)),
+      staffIds: [NICO],
+      workingRangesByStaff: closesAtFive,
+      appointmentsByStaff: { [NICO]: [] },
+      allowEndAfterHours: true,
+    });
+
+    expect(slots).toHaveLength(1);
+    expect(slots[0].endsAfterHours).toBeUndefined();
+  });
+
+  it('empezar con el local ya cerrado no se ofrece', () => {
+    // El final de la jornada es exclusivo: a las 17:00 ya no se atiende, así que
+    // no hay nada que "pasarse".
+    const slots = buildBookingSlots({
+      candidateSlots: candidates(at(17, 0, 60)),
+      staffIds: [NICO],
+      workingRangesByStaff: closesAtFive,
+      appointmentsByStaff: { [NICO]: [] },
+      allowEndAfterHours: true,
+    });
+
+    expect(slots).toEqual([]);
+  });
+
+  it('pasarse del cierre no habilita pisar otra cita', () => {
+    const slots = buildBookingSlots({
+      candidateSlots: candidates(at(16, 30, 60)),
+      staffIds: [NICO],
+      workingRangesByStaff: closesAtFive,
+      appointmentsByStaff: { [NICO]: [at(16, 30, 30)] },
+      allowEndAfterHours: true,
+    });
+
+    expect(slots).toEqual([]);
+  });
+
+  /*
+   * Si alguien del equipo lo cubre entero, el horario es normal para quien lo va
+   * a atender: marcarlo diría que se pasa un horario que no se pasa.
+   */
+  it('con alguien que lo cubre entero, el horario va sin marca y es suyo', () => {
+    const slots = buildBookingSlots({
+      candidateSlots: candidates(at(16, 30, 60)),
+      staffIds: [NICO, ANA],
+      workingRangesByStaff: { [NICO]: shift(9, 17), [ANA]: shift(9, 20) },
+      appointmentsByStaff: { [NICO]: [], [ANA]: [] },
+      allowEndAfterHours: true,
+    });
+
+    expect(slots).toHaveLength(1);
+    expect(slots[0].endsAfterHours).toBeUndefined();
+    expect(slots[0].eligibleStaffIds).toEqual([ANA]);
+  });
+});

@@ -1,5 +1,8 @@
 import { isOverlapping } from '../utils/availability.helpers';
-import { isWithinWorkingRanges } from '../utils/working-hours.resolver';
+import {
+  isWithinWorkingRanges,
+  startsWithinWorkingRanges,
+} from '../utils/working-hours.resolver';
 import type { SlotRange } from '../utils/availability.types';
 import type { BookingSlot } from './booking-slot.type';
 
@@ -22,6 +25,15 @@ export type BuildBookingSlotsInput = {
   appointmentsByStaff: StaffBusyMap;
   /** Ningún slot que empiece antes de este momento se ofrece. */
   minStartTime?: Date;
+  /**
+   * Acepta además los que empiezan dentro de la jornada y terminan después,
+   * marcándolos con `endsAfterHours`.
+   *
+   * Sólo lo pide el panel. La lista que ve un cliente no puede incluirlos: que
+   * el negocio decida quedarse media hora más es suyo; que lo decida un cliente
+   * sin que el negocio se entere, no.
+   */
+  allowEndAfterHours?: boolean;
 };
 
 /**
@@ -45,6 +57,7 @@ export function buildBookingSlots(
     workingRangesByStaff,
     appointmentsByStaff,
     minStartTime,
+    allowEndAfterHours = false,
   } = input;
 
   if (staffIds.length === 0) return [];
@@ -56,18 +69,49 @@ export function buildBookingSlots(
   for (const candidate of candidateSlots) {
     if (minStartTime && candidate.startTime < minStartTime) continue;
 
+    const free = (staffId: string) =>
+      isStaffFree(appointmentsByStaff[staffId], candidate);
+
     const eligibleStaffIds = orderedStaffIds.filter(
       (staffId) =>
         isWithinWorkingRanges(workingRangesByStaff[staffId], candidate) &&
-        isStaffFree(appointmentsByStaff[staffId], candidate),
+        free(staffId),
     );
 
-    if (eligibleStaffIds.length === 0) continue;
+    if (eligibleStaffIds.length > 0) {
+      slots.push({
+        startTime: candidate.startTime,
+        endTime: candidate.endTime,
+        eligibleStaffIds,
+      });
+      continue;
+    }
+
+    if (!allowEndAfterHours) continue;
+
+    /*
+     * Nadie lo cubre entero; se mira quién al menos lo empieza dentro.
+     *
+     * El orden importa: si alguien puede hacerlo completo, el horario es normal
+     * y no lleva marca, aunque a otro del equipo se le pase del turno. Marcarlo
+     * igual diría que se pasa del horario un horario que no se pasa para quien
+     * lo va a atender.
+     */
+    const startingStaffIds = orderedStaffIds.filter(
+      (staffId) =>
+        startsWithinWorkingRanges(
+          workingRangesByStaff[staffId],
+          candidate.startTime,
+        ) && free(staffId),
+    );
+
+    if (startingStaffIds.length === 0) continue;
 
     slots.push({
       startTime: candidate.startTime,
       endTime: candidate.endTime,
-      eligibleStaffIds,
+      eligibleStaffIds: startingStaffIds,
+      endsAfterHours: true,
     });
   }
 
