@@ -9,6 +9,7 @@ import { DEFAULT_CURRENCY } from '../tenants/currency';
 import { isSelfBookable } from './booking-policy';
 import { CreateServiceDto } from './dto/create-service.dto';
 import { UpdateServiceDto } from './dto/update-service.dto';
+import type { ServiceScope } from './dto/list-services-query.dto';
 
 @Injectable()
 export class ServicesService {
@@ -73,8 +74,29 @@ export class ServicesService {
    * `findSelfBookableByTenant`.
    */
   findActiveByTenant(tenantId: string): Promise<Service[]> {
+    return this.findByTenant(tenantId, 'active');
+  }
+
+  /**
+   * El catálogo del negocio, con o sin los dados de baja.
+   *
+   * Existe porque desactivar un servicio no puede ser de ida. La baja deja la
+   * fila —las citas que lo usaron conservan su precio y su duración— pero hasta
+   * acá nadie sabía leerla, así que el servicio desaparecía de todas las
+   * pantallas y no había desde dónde volver a activarlo.
+   *
+   * El valor por defecto es `active` y no `all` justamente por eso: los cuatro
+   * lugares que llaman a `findActiveByTenant` —el asistente, el onboarding, la
+   * página pública y, por su intermedio, los canales de reserva— tienen que
+   * seguir viendo lo que ofrece el negocio hoy. Pedir los desactivados es una
+   * decisión explícita de una sola pantalla.
+   */
+  findByTenant(
+    tenantId: string,
+    scope: ServiceScope = 'active',
+  ): Promise<Service[]> {
     return this.serviceRepository.find({
-      where: { tenantId, isActive: true },
+      where: scope === 'all' ? { tenantId } : { tenantId, isActive: true },
       order: { name: 'ASC' },
     });
   }
@@ -156,10 +178,5 @@ export class ServicesService {
     if (!categoryId || !tenantId) return;
 
     await this.categoriesService.assertBelongsToTenant(categoryId, tenantId);
-  }
-
-  async removeByTenant(id: string, tenantId: string) {
-    await this.serviceRepository.update({ id, tenantId }, { isActive: false });
-    return this.findOneByTenant(id, tenantId);
   }
 }
