@@ -6,7 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Brackets, EntityManager, Repository } from 'typeorm';
+import {
+  Brackets,
+  EntityManager,
+  Repository,
+  SelectQueryBuilder,
+} from 'typeorm';
 
 import {
   Appointment,
@@ -18,6 +23,7 @@ import { Tenant } from '../tenants/entities/tenant.entity';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { Client, ClientSource } from './entities/client.entity';
 import { UpdateClientDto } from './dto/update-client.dto';
+import type { ClientSort, SortOrder } from './dto/list-clients-query.dto';
 import { resolveClientPhone, type ClientPhoneInput } from './client-phone.util';
 import {
   resolveClientDeletion,
@@ -83,9 +89,22 @@ export interface ClientSummary {
   futureAppointments: number;
 }
 
+/**
+ * Una fila de la lista de clientes: la ficha más la última visita.
+ *
+ * La visita no está en la tabla `clients`: se calcula sobre `appointments` en la
+ * misma consulta. Guardarla como columna obligaría a actualizarla cada vez que
+ * una cita se crea, se mueve, se cancela o se marca atendida, y es el clásico
+ * dato que queda viejo sin que nadie lo note.
+ */
+export interface ClientListItem extends Client {
+  /** Instante ISO de la última visita, o `null` si nunca vino. */
+  lastVisitAt: string | null;
+}
+
 /** Una página de la lista de clientes del panel. */
 export interface ClientPage {
-  items: Client[];
+  items: ClientListItem[];
   total: number;
   page: number;
   limit: number;
@@ -95,8 +114,36 @@ export interface ClientPage {
 const INVALID_PHONE_MESSAGE =
   'El teléfono no parece válido. Revisalo y probá de nuevo.';
 
+/**
+ * Qué cita cuenta como una visita: una que ya pasó y que nadie canceló.
+ *
+ * No se exige que esté marcada como atendida. Marcarla es un gesto manual de la
+ * agenda y hay negocios que no lo hacen nunca, así que exigirlo dejaría la
+ * última visita en blanco justo donde más falta hace: en la lista, para saber
+ * hace cuántos días que alguien no aparece. Una cancelada sí queda afuera —a esa
+ * la persona no fue—, que es la distinción que de verdad importa.
+ *
+ * Usa los parámetros `:cancelled` y `:now`, que quien la llame tiene que enlazar.
+ */
+const visitedCondition = (alias: string) =>
+  `${alias}.status <> :cancelled AND ${alias}.startTime < :now`;
+
+/**
+ * La última visita de cada cliente, como subconsulta correlacionada.
+ *
+ * Va en la misma consulta que la lista y no en una por fila: veinte fichas son
+ * veinte llamadas más al servidor, y ordenar por este dato sería imposible sin
+ * tenerlo en la base.
+ */
+const LAST_VISIT_SELECT = `(SELECT MAX(visit.startTime) FROM appointments visit
+     WHERE visit.clientId = client.id AND ${visitedCondition('visit')})`;
+
 /** Tope por página. El mismo que usa el listado de citas. */
 const MAX_PAGE_SIZE = 100;
+
+/** Las fechas crudas llegan como `Date` o como texto según el driver. */
+const toIso = (value: Date | string | null | undefined): string | null =>
+  value ? new Date(value).toISOString() : null;
 
 @Injectable()
 export class ClientsService {
@@ -119,10 +166,21 @@ export class ClientsService {
    * El buscador mira nombre, teléfono y email a la vez. Que el teléfono esté ahí
    * importa más de lo que parece: es el único dato con el que el negocio puede
    * distinguir a dos personas que se llaman igual.
+   *
+   * Cada fila trae además `lastVisitAt`, y por ahí se puede ordenar. El orden
+   * tiene que resolverse acá y no en el navegador: ordenar sólo las veinte filas
+   * de la página daría un orden falso, porque el cliente que hace ocho meses que
+   * no viene puede estar en la página cuatro.
    */
   async findPageByTenant(
     tenantId: string,
-    options: { page?: number; limit?: number; search?: string } = {},
+    options: {
+      page?: number;
+      limit?: number;
+      search?: string;
+      sort?: ClientSort;
+      order?: SortOrder;
+    } = {},
   ): Promise<ClientPage> {
     const page = Math.max(1, options.page ?? 1);
     const limit = Math.min(Math.max(1, options.limit ?? 20), MAX_PAGE_SIZE);
@@ -147,11 +205,35 @@ export class ClientsService {
       );
     }
 
-    const [items, total] = await query
-      .orderBy('client.createdAt', 'DESC')
+    /*
+     * El total se cuenta antes de pedir la página: `getCount` arma su propia
+     * consulta y no arrastra el orden ni el `LIMIT` que vienen después.
+     */
+    const total = await query.getCount();
+
+    query
+      .addSelect(LAST_VISIT_SELECT, 'lastVisitAt')
+      .setParameters({
+        cancelled: AppointmentStatus.CANCELLED,
+        now: new Date(),
+      })
       .skip((page - 1) * limit)
-      .take(limit)
-      .getManyAndCount();
+      .take(limit);
+
+    this.applySort(query, options.sort, options.order);
+
+    /*
+     * `getRawAndEntities` y no `getMany` porque `lastVisitAt` no es una columna
+     * de la entidad: viaja en las filas crudas, que vienen en el mismo orden.
+     */
+    const { entities, raw } = await query.getRawAndEntities<{
+      lastVisitAt: Date | string | null;
+    }>();
+
+    const items = entities.map((client, index) => ({
+      ...client,
+      lastVisitAt: toIso(raw[index]?.lastVisitAt),
+    }));
 
     return {
       items,
@@ -160,6 +242,41 @@ export class ClientsService {
       limit,
       hasMore: (page - 1) * limit + items.length < total,
     };
+  }
+
+  /**
+   * El orden de la lista.
+   *
+   * Los que no tienen el dato quedan siempre al final, en los dos sentidos: un
+   * cliente sin nombre o que nunca vino no es "el primero alfabéticamente" ni
+   * "el que hace más tiempo que no viene", es uno del que no se sabe. En MySQL
+   * los `NULL` se van arriba solos con `ASC`, así que hay que decirlo.
+   *
+   * Siempre cierra por `createdAt`: sin un desempate estable, dos clientes con
+   * el mismo valor pueden cambiar de lugar entre una página y la siguiente, y
+   * entonces uno de los dos no aparece en ninguna.
+   */
+  private applySort(
+    query: SelectQueryBuilder<Client>,
+    sort?: ClientSort,
+    order: SortOrder = 'asc',
+  ): void {
+    const direction = order === 'desc' ? 'DESC' : 'ASC';
+
+    if (sort === 'name') {
+      query
+        .orderBy(`client.name IS NULL OR client.name = ''`, 'ASC')
+        .addOrderBy('client.name', direction);
+    } else if (sort === 'lastVisit') {
+      query
+        .orderBy('lastVisitAt IS NULL', 'ASC')
+        .addOrderBy('lastVisitAt', direction);
+    } else {
+      // Sin orden pedido, las fichas más nuevas primero.
+      query.orderBy('client.createdAt', 'DESC');
+    }
+
+    query.addOrderBy('client.createdAt', 'DESC');
   }
 
   findOne(id: string): Promise<Client | null> {
@@ -189,14 +306,9 @@ export class ClientsService {
         `SUM(CASE WHEN appointment.status = :cancelled THEN 1 ELSE 0 END)`,
         'cancelled',
       )
-      /*
-       * La última visita se cuenta sólo entre las atendidas. Una cancelada no es
-       * una visita: decir "última cita: 3 de agosto" por un turno al que la
-       * persona no fue haría que el negocio la trate como alguien que vino hace
-       * poco.
-       */
+      // Ver `visitedCondition`: la ficha y la lista tienen que decir lo mismo.
       .addSelect(
-        `MAX(CASE WHEN appointment.status = :completed THEN appointment.startTime END)`,
+        `MAX(CASE WHEN ${visitedCondition('appointment')} THEN appointment.startTime END)`,
         'lastAt',
       )
       .addSelect(
