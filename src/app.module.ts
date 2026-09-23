@@ -36,6 +36,7 @@ import { BusinessPhotosModule } from './business-photos/business-photos.module';
 import { CustomerAccountsModule } from './customer-accounts/customer-accounts.module';
 import { ScheduleBlocksModule } from './schedule-blocks/schedule-blocks.module';
 import { StaffJoinRequestsModule } from './staff-join-requests/staff-join-requests.module';
+import { SchedulingRulesModule } from './scheduling-rules/scheduling-rules.module';
 import { ImpersonationInterceptor } from './auth/impersonation.interceptor';
 
 @Module({
@@ -88,6 +89,7 @@ import { ImpersonationInterceptor } from './auth/impersonation.interceptor';
     CustomerAccountsModule,
     ScheduleBlocksModule,
     StaffJoinRequestsModule,
+    SchedulingRulesModule,
   ],
   // Global porque una sesión de soporte lo es en toda la aplicación: si hubiera
   // que registrarlo módulo por módulo, el que se olvidara sería justo por donde

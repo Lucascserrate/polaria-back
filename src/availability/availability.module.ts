@@ -13,6 +13,7 @@ import { AvailabilityCalculator } from './availability.calculator';
 import { AvailabilityRepository } from './availability.repository';
 import { AvailabilityService } from './availability.service';
 import { BookingAvailabilityService } from './booking/booking-availability.service';
+import { SchedulingRulesModule } from '../scheduling-rules/scheduling-rules.module';
 
 @Module({
   imports: [
@@ -26,6 +27,11 @@ import { BookingAvailabilityService } from './booking/booking-availability.servi
       StaffSchedule,
       Tenant,
     ]),
+    /*
+     * Las reglas de qué categorías conviven las lee `loadContext` en cada
+     * consulta de horarios. Es una dependencia del cálculo, no del panel.
+     */
+    SchedulingRulesModule,
   ],
   controllers: [AvailabilityController],
   providers: [

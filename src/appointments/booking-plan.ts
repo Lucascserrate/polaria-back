@@ -39,10 +39,28 @@ export interface PlanBookingInput {
     { durationMinutes: number; price: number | null; currency: string }
   >;
   agreedPrices?: Map<string, { price: number | null; currency: string }>;
+  /**
+   * Cuántos minutos después del inicio arranca cada ítem, en su mismo orden.
+   *
+   * Omitirlo encadena, que es lo que Polaria hizo siempre y sigue siendo el caso
+   * de casi todas las reservas. Se pasa cuando el negocio declaró que dos
+   * categorías se atienden a la vez: ahí dos ítems comparten offset, y la cuenta
+   * de dónde empieza cada uno la hizo `buildExecutionPlans` sobre la misma lista
+   * contra la que se comprobó la disponibilidad.
+   *
+   * **No se recalcula acá aunque se pudiera**: el horario que se ofreció salió
+   * de un reparto concreto, y rehacerlo al escribir es la forma más silenciosa
+   * de guardar una cita que dura distinto de la que se mostró.
+   */
+  offsetsMinutes?: number[];
 }
 
 /**
- * Encadena los tramos uno detrás del otro desde `startTime`.
+ * Ubica los tramos a partir de `startTime`.
+ *
+ * Encadenados por defecto —cada uno donde termina el anterior— o donde diga
+ * `offsetsMinutes`, que es como dos servicios simultáneos comparten instante de
+ * arranque.
  *
  * La duración es siempre la vigente del servicio, incluso para los que ya
  * estaban: es la que usa el motor de disponibilidad para decidir si el horario
@@ -61,15 +79,20 @@ export const planBookingSegments = (input: PlanBookingInput): BookingPlan => {
     return { ok: false, missingServiceIds: [...new Set(missingServiceIds)] };
   }
 
-  let cursor = input.startTime;
+  let chained = 0;
 
   const segments = input.items.map((item, index) => {
     const service = input.services.get(item.serviceId)!;
-    const startTime = cursor;
+
+    const offsetMinutes = input.offsetsMinutes?.[index] ?? chained;
+    chained = offsetMinutes + service.durationMinutes;
+
+    const startTime = new Date(
+      input.startTime.getTime() + offsetMinutes * 60_000,
+    );
     const endTime = new Date(
       startTime.getTime() + service.durationMinutes * 60_000,
     );
-    cursor = endTime;
 
     const agreed = input.agreedPrices?.get(item.serviceId);
 
@@ -92,5 +115,50 @@ export const planBookingSegments = (input: PlanBookingInput): BookingPlan => {
     };
   });
 
-  return { ok: true, segments, endTime: cursor };
+  /*
+   * El fin de la reserva es el del último tramo en terminar, y con servicios
+   * simultáneos ése no tiene por qué ser el último de la lista: una pedicure de
+   * media hora que arranca junto a una manicure de una termina antes. Tomar el
+   * final del último ítem dejaría la cita diciendo que termina media hora antes
+   * de que su profesional se libere.
+   */
+  const endTime = new Date(
+    Math.max(...segments.map((segment) => segment.endTime.getTime())),
+  );
+
+  return { ok: true, segments, endTime };
+};
+
+/**
+ * Qué tramos de una reserva se pisan entre sí con el mismo profesional.
+ *
+ * Es la comprobación que el índice único de la base **no** puede hacer. Aquel
+ * cubre `(staffId, activeStartTime)`, o sea dos tramos que arrancan en el mismo
+ * instante; mientras los servicios iban encadenados eso alcanzaba, porque dos
+ * tramos de una misma cita nunca se solapaban. Con servicios simultáneos de
+ * distinta duración —manicure de 60 y pedicure de 30 arrancando juntas— un
+ * solape parcial no comparte instante de inicio y pasaría sin que nada avisara.
+ *
+ * Devuelve los profesionales repetidos, para poder nombrarlos en el mensaje: al
+ * administrador que puso a la misma persona en dos servicios que ocurren a la
+ * vez hay que decirle quién es, no que "hay un conflicto".
+ */
+export const overlappingStaffIds = (
+  segments: Array<{ staffId: string; startTime: Date; endTime: Date }>,
+): string[] => {
+  const conflicted = new Set<string>();
+
+  for (let a = 0; a < segments.length; a++) {
+    for (let b = a + 1; b < segments.length; b++) {
+      if (segments[a].staffId !== segments[b].staffId) continue;
+
+      const overlaps =
+        segments[a].startTime < segments[b].endTime &&
+        segments[b].startTime < segments[a].endTime;
+
+      if (overlaps) conflicted.add(segments[a].staffId);
+    }
+  }
+
+  return [...conflicted];
 };

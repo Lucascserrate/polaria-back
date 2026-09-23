@@ -64,7 +64,27 @@ export interface AppointmentItem {
   staffName?: string;
   businessName?: string;
   serviceNames: string[];
+  /**
+   * **Minutos de trabajo**: la suma de lo que dura cada servicio.
+   *
+   * Dejó de ser lo mismo que lo que ocupa la cita en la agenda. Cuando dos
+   * servicios se atienden a la vez —una manicure y una pedicure de una hora
+   * cada una— son 120 minutos de trabajo repartidos en un bloque de 60. Los dos
+   * números son ciertos y contestan preguntas distintas: éste es el que suman
+   * las estadísticas y el que sostiene la comisión de cada profesional.
+   *
+   * Para cuánto dura la cita, ver `blockDurationMinutes`.
+   */
   totalDuration: number;
+  /**
+   * **Lo que ocupa la cita**, de que empieza a que termina.
+   *
+   * Es lo que hay que mostrar cuando se dice "dura una hora" y lo que mide el
+   * alto del bloque en la agenda. Con servicios encadenados coincide con
+   * `totalDuration`, que es el caso de todas las citas anteriores a que las
+   * categorías pudieran convivir.
+   */
+  blockDurationMinutes: number;
   timezone: string;
   segments: AppointmentSegmentItem[];
   /**
@@ -114,6 +134,19 @@ export const toAppointmentItem = (
     0,
   );
 
+  /*
+   * Sale de la cita y no de sumar las duraciones, por lo mismo que `endTime`:
+   * sumar da otra cosa en cuanto dos servicios ocurren a la vez, y da cero si
+   * algún tramo no tiene duración cargada.
+   */
+  const blockDurationMinutes = Math.max(
+    0,
+    Math.round(
+      (appointment.endTime.getTime() - appointment.startTime.getTime()) /
+        60_000,
+    ),
+  );
+
   const staffNames = Array.from(
     new Set(services.map((s) => s.staff?.name).filter((n): n is string => !!n)),
   );
@@ -157,6 +190,7 @@ export const toAppointmentItem = (
     businessName: appointment.tenant?.name,
     serviceNames,
     totalDuration,
+    blockDurationMinutes,
     timezone,
     segments,
     reminder: reminder

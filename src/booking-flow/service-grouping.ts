@@ -10,7 +10,7 @@ export type GroupableService = {
 export type GroupableCategory = {
   id: string;
   name: string;
-  description?: string;
+  description?: string | null;
 };
 
 /** Un grupo con al menos un servicio reservable. */

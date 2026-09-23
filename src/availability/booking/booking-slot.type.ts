@@ -23,17 +23,41 @@ export type BookingSlot = SlotRange & {
    * modo por defecto —un profesional para todo—, y puede quedar vacía en un
    * horario que igual se ofrece: si el corte lo hace Diego y la barba Carlos,
    * el bloque existe aunque ninguno de los dos lo cubra entero.
+   *
+   * **Vacía siempre que el plan tenga servicios simultáneos**, aunque alguien
+   * esté habilitado para todos ellos: poder hacer la manicure y poder hacer la
+   * pedicure no es poder hacer las dos al mismo tiempo.
    */
   eligibleStaffIds: string[];
   /**
    * Lo mismo, tramo por tramo y en el orden de los servicios.
    *
-   * Es lo que sostiene "elegir profesional por servicio": los tramos van uno
-   * detrás del otro y no se pisan, así que la disponibilidad de cada uno se
-   * resuelve por separado. Con un servicio tiene un solo elemento, igual a
-   * `eligibleStaffIds`.
+   * Es lo que sostiene "elegir profesional por servicio": los tramos de tandas
+   * distintas van uno detrás del otro y no se pisan, así que la disponibilidad
+   * de cada uno se resuelve por separado. Con un servicio tiene un solo
+   * elemento, igual a `eligibleStaffIds`.
+   *
+   * Entre tramos **simultáneos** es una lista de quiénes podrían atender cada
+   * uno, no de quiénes lo van a atender: dos tramos a la misma hora pueden
+   * compartir candidatos y aun así hace falta que queden en personas distintas.
+   * Que el reparto exista ya está comprobado —si no, el horario no estaría en la
+   * lista—; cuál es, lo decide `confirmSlot`.
    */
   eligibleStaffIdsBySegment: string[][];
+  /**
+   * Cuál de los planes ofrecidos resolvió este horario, por su posición en la
+   * lista que se pasó a `buildBookingSlotsForPlans`.
+   *
+   * Hace falta porque los planes tienen **duraciones distintas** y reparten los
+   * servicios de formas distintas: las 15:00 pueden haberse resuelto con las dos
+   * profesionales a la vez y las 16:00 encadenando con una sola. Sin este dato,
+   * confirmar un horario obligaría a volver a adivinar cuál de los dos se le
+   * mostró al cliente, y la reserva podría escribirse con un reparto que nadie
+   * eligió.
+   *
+   * `0` cuando se pasó un solo plan, que es el caso de siempre.
+   */
+  planIndex: number;
   /**
    * Empieza dentro del horario de atención pero termina después.
    *

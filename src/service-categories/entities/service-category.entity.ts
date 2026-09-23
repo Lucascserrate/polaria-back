@@ -43,8 +43,13 @@ export class ServiceCategory {
    * cuando el menú de WhatsApp liste categorías: ahí una lista de nombres sueltos
    * obliga a adivinar qué hay adentro de cada una.
    */
-  @Column({ nullable: true })
-  description?: string;
+  /*
+   * El `type` explícito es obligatorio con una unión que incluye `null`: de
+   * `string | null` TypeORM reflexiona `Object` y la app no arranca. Ver
+   * `entity-metadata.spec.ts`.
+   */
+  @Column({ type: 'varchar', length: 255, nullable: true })
+  description?: string | null;
 
   /**
    * En qué orden se muestran las categorías entre sí.

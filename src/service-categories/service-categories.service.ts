@@ -84,8 +84,22 @@ export class ServiceCategoriesService {
     tenantId: string,
     dto: UpdateServiceCategoryDto,
   ): Promise<ServiceCategory> {
+    /*
+     * Una descripción borrada vuelve a `NULL`, no a cadena vacía.
+     *
+     * Las dos se ven igual en la pantalla y no son lo mismo en la base: la
+     * cadena vacía es un subtítulo que existe y no dice nada, y el menú de
+     * WhatsApp la imprimiría como una línea en blanco debajo del nombre.
+     */
+    const changes = {
+      ...dto,
+      ...(dto.description !== undefined && !dto.description.trim()
+        ? { description: null }
+        : {}),
+    };
+
     try {
-      await this.categoryRepository.update({ id, tenantId }, dto);
+      await this.categoryRepository.update({ id, tenantId }, changes);
     } catch (error: unknown) {
       if (isDuplicateEntryError(error)) {
         throw new ConflictException(DUPLICATE_NAME_MESSAGE);

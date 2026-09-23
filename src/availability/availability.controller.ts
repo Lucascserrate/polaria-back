@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { AvailabilityService } from './availability.service';
 import { BookingAvailabilityService } from './booking/booking-availability.service';
 import { BookingSlotsQueryDto } from './dto/booking-slots-query.dto';
+import { BookingLayoutDto } from './dto/booking-layout.dto';
 import { FindAvailableSlotsDto } from './dto/find-available-slots.dto';
 import { WorkingStaffQueryDto } from './dto/working-staff-query.dto';
 
@@ -52,6 +53,33 @@ export class AvailabilityController {
       items: [{ serviceId: query.serviceId, staffId: query.staffId }],
       excludeAppointmentId: query.excludeAppointmentId,
       scope: query.scope,
+    });
+  }
+
+  /**
+   * Dónde arranca cada servicio de una reserva, antes de guardarla.
+   *
+   * Lo consulta el drawer de Agenda para dibujar los tramos y para preguntar
+   * disponibilidad con los desplazamientos correctos. La cuenta es la misma que
+   * usa la creación de la cita, y por eso se pide en vez de repetirse acá: un
+   * negocio que declaró que dos categorías se atienden a la vez tiene que ver en
+   * la pantalla la misma reserva que se va a escribir.
+   *
+   * `POST` aunque no cambie nada: lo que se manda es una lista de servicios con
+   * su profesional, que en una query string sería una cadena que hay que parsear
+   * a mano.
+   */
+  @UseGuards(AuthGuard('jwt'))
+  @Post('booking-layout')
+  getBookingLayout(@Req() req: Request, @Body() body: BookingLayoutDto) {
+    const tenantId = (req.user as { sub?: string }).sub;
+    if (!tenantId) {
+      throw new UnauthorizedException('Missing tenant id');
+    }
+
+    return this.bookingAvailabilityService.resolveBookingLayout({
+      tenantId,
+      items: body.items,
     });
   }
 

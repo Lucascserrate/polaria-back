@@ -25,6 +25,7 @@ import {
 } from './booking-slot.type';
 import {
   buildBookingSlots,
+  buildBookingSlotsForPlans,
   findBookingSlotAt,
   windowOf,
   type BookingSegmentSpec,
@@ -32,8 +33,14 @@ import {
 } from './slot-builder';
 import {
   calculateWorkloadByStaffId,
+  resolveStaffForPlan,
   resolveStaffForSlot,
 } from './staff-assignment';
+import { SchedulingRulesService } from '../../scheduling-rules/scheduling-rules.service';
+import {
+  buildExecutionPlans,
+  pickPlanForAssignment,
+} from '../../scheduling-rules/execution-plan';
 
 /**
  * Un servicio de la reserva, tal como lo pidió quien reserva.
@@ -155,6 +162,7 @@ export class BookingAvailabilityService {
   constructor(
     private readonly availabilityRepository: AvailabilityRepository,
     private readonly availabilityCalculator: AvailabilityCalculator,
+    private readonly schedulingRules: SchedulingRulesService,
   ) {}
 
   /**
@@ -164,8 +172,13 @@ export class BookingAvailabilityService {
    * trae `staffId`, su tramo queda restringido a esa persona; cuando no, es la
    * unión de disponibilidades de todos los que pueden hacer ese servicio.
    *
-   * Con varios servicios el horario es el del **bloque entero**: la suma de las
-   * duraciones, encadenadas desde ese instante.
+   * Con varios servicios el horario es el del **bloque entero**, y cuánto dura
+   * ese bloque **depende del horario**: si el negocio declaró que dos categorías
+   * se atienden a la vez y a esa hora hay dos profesionales libres, la reserva
+   * ocupa lo que el más largo de los dos servicios; si a la hora siguiente queda
+   * una sola persona, ocupa la suma. Son el mismo pedido resuelto de la única
+   * forma que cada momento del día permitía, y por eso la lista puede traer
+   * horarios de distinta duración entre sí. Ver `buildExecutionPlans`.
    *
    * Responde una sola pregunta: **qué se puede reservar**. Siempre desde ahora
    * en adelante, para cualquier consumidor. Registrar una atención que ya
@@ -176,9 +189,9 @@ export class BookingAvailabilityService {
     const context = await this.loadContext(query);
     if (!context) return [];
 
-    return buildBookingSlots({
+    return buildBookingSlotsForPlans({
       candidateSlots: context.candidateSlots,
-      segments: context.segments,
+      plans: context.plans,
       requireSingleStaff: context.requireSingleStaff,
       workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
@@ -295,6 +308,73 @@ export class BookingAvailabilityService {
         }).length > 0
       );
     });
+  }
+
+  /**
+   * Dónde arranca cada servicio de una reserva, y cuánto dura el bloque.
+   *
+   * Responde la pregunta que el panel no puede contestar solo: **si estos
+   * servicios, con estas personas, se atienden a la vez o uno detrás del otro**.
+   * El panel no elige un horario de una lista —elige un instante y un
+   * profesional por servicio—, así que sin esto tendría que deducir el reparto
+   * por su cuenta, y eso es tener dos versiones de la misma cuenta que
+   * inevitablemente se separan: una dibujando el drawer y otra escribiendo la
+   * cita.
+   *
+   * Es puro salvo por dos lecturas —el catálogo y las reglas del negocio—, no
+   * mira la agenda y no decide nada sobre disponibilidad. Que las personas
+   * asignadas estén libres es otra pregunta, y la contesta `getAvailableSlots`.
+   *
+   * Un servicio que no existe o está inactivo se ignora en la cuenta y recibe
+   * offset `0`: acá no se valida el catálogo, eso ya lo hace quien guarda.
+   */
+  async resolveBookingLayout(input: {
+    tenantId: string;
+    /** En orden de ejecución. `staffId` ausente es "todavía sin asignar". */
+    items: Array<{ serviceId: string; staffId?: string | null }>;
+  }): Promise<{ offsetsMinutes: number[]; totalDurationMinutes: number }> {
+    const { tenantId, items } = input;
+
+    if (items.length === 0) {
+      return { offsetsMinutes: [], totalDurationMinutes: 0 };
+    }
+
+    const services = await this.availabilityRepository.getServices(
+      tenantId,
+      items.map((item) => item.serviceId),
+    );
+    const serviceById = new Map(
+      services.map((service) => [service.id, service]),
+    );
+
+    const parallelPairs = await this.schedulingRules.getParallelPairs(tenantId);
+
+    const plans = buildExecutionPlans({
+      services: items.map((item) => {
+        const service = serviceById.get(item.serviceId);
+        return {
+          serviceId: item.serviceId,
+          categoryId: service?.categoryId ?? null,
+          durationMinutes: service?.durationMinutes ?? 0,
+        };
+      }),
+      canRunInParallel: (categoryAId, categoryBId) =>
+        parallelPairs.allows(categoryAId, categoryBId),
+    });
+
+    const plan = pickPlanForAssignment(
+      plans,
+      items.map((item) => item.staffId),
+    );
+
+    if (!plan) return { offsetsMinutes: [], totalDurationMinutes: 0 };
+
+    return {
+      offsetsMinutes: plan.placements.map(
+        (placement) => placement.offsetMinutes,
+      ),
+      totalDurationMinutes: plan.totalDurationMinutes,
+    };
   }
 
   /**
@@ -586,11 +666,18 @@ export class BookingAvailabilityService {
    * profesional se decide acá: menor carga de trabajo del día en minutos, con
    * desempate por id.
    *
-   * Con varios servicios y sin preferencia, **primero se busca a alguien que
-   * pueda con todo** y recién si no lo hay se reparte tramo por tramo. El orden
-   * no es una optimización: con `requireSingleStaff` —el modo por defecto— el
-   * horario ni siquiera se ofrece si nadie puede solo, así que repartir acá
-   * sería contradecir lo que la pantalla mostró.
+   * Con varios servicios encadenados y sin preferencia, **primero se busca a
+   * alguien que pueda con todo** y recién si no lo hay se reparte tramo por
+   * tramo. El orden no es una optimización: con `requireSingleStaff` —el modo por
+   * defecto— el horario ni siquiera se ofrece si nadie puede solo, así que
+   * repartir acá sería contradecir lo que la pantalla mostró.
+   *
+   * **El reparto se hace sobre el mismo plan que produjo el horario**, no sobre
+   * el más conveniente de ahora. El horario que el cliente eligió decía una
+   * duración, y esa duración salió de una forma concreta de acomodar los
+   * servicios; recalcularla acá podría escribir una cita de dos horas donde se
+   * ofreció una de una. Si ese plan ya no se puede cumplir, el horario dejó de
+   * estar disponible y se contesta que no, que es lo que el flujo sabe manejar.
    */
   async confirmSlot(
     query: BookingSlotsQuery & { startTime: Date },
@@ -598,9 +685,9 @@ export class BookingAvailabilityService {
     const context = await this.loadContext(query);
     if (!context) return { available: false };
 
-    const slots = buildBookingSlots({
+    const slots = buildBookingSlotsForPlans({
       candidateSlots: context.candidateSlots,
-      segments: context.segments,
+      plans: context.plans,
       requireSingleStaff: context.requireSingleStaff,
       workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
@@ -610,6 +697,8 @@ export class BookingAvailabilityService {
     const slot = findBookingSlotAt(slots, query.startTime);
     if (!slot) return { available: false };
 
+    const segments = context.plans[slot.planIndex].segments;
+
     const workloadByStaffId = calculateWorkloadByStaffId(
       context.appointmentsByStaff,
     );
@@ -618,35 +707,37 @@ export class BookingAvailabilityService {
      * Uno para toda la reserva mientras sea posible. Da lo mismo con un solo
      * servicio —las dos listas son la misma— y es lo que hace que una reserva de
      * corte y barba no salga con dos personas cuando una alcanza.
+     *
+     * Con tramos simultáneos la lista llega vacía por construcción —nadie puede
+     * con todo si parte de "todo" ocurre al mismo tiempo—, así que esta
+     * preferencia se saltea sola y no hace falta preguntarlo aparte.
      */
     const forEverything = resolveStaffForSlot({
       eligibleStaffIds: slot.eligibleStaffIds,
       workloadByStaffId,
     });
 
-    const staffIds = context.segments.map((_, index) =>
+    const staffIds =
       forEverything !== null
-        ? forEverything
-        : resolveStaffForSlot({
-            eligibleStaffIds: slot.eligibleStaffIdsBySegment[index] ?? [],
+        ? segments.map(() => forEverything)
+        : resolveStaffForPlan({
+            segments,
+            eligibleStaffIdsBySegment: slot.eligibleStaffIdsBySegment,
             workloadByStaffId,
-          }),
-    );
+          });
 
-    if (staffIds.some((staffId) => staffId === null)) {
-      return { available: false };
-    }
+    if (!staffIds) return { available: false };
 
     return {
       available: true,
       startTime: slot.startTime,
       endTime: slot.endTime,
-      segments: context.segments.map((segment, index) => {
+      segments: segments.map((segment, index) => {
         const window = windowOf(slot.startTime, segment);
 
         return {
           serviceId: segment.serviceId,
-          staffId: staffIds[index] as string,
+          staffId: staffIds[index],
           startTime: window.startTime,
           endTime: window.endTime,
         };
@@ -661,8 +752,13 @@ export class BookingAvailabilityService {
    */
   private async loadContext(query: BookingSlotsQuery): Promise<{
     candidateSlots: SlotRange[];
-    /** Un tramo por servicio, en orden y ya ubicado dentro del bloque. */
-    segments: (BookingSegmentSpec & { serviceId: string })[];
+    /**
+     * Las formas de acomodar la reserva, de la más conveniente a la menos.
+     *
+     * Siempre al menos una —la encadenada de siempre—, y más de una sólo cuando
+     * el negocio declaró que alguna de estas categorías convive con otra.
+     */
+    plans: { segments: (BookingSegmentSpec & { serviceId: string })[] }[];
     requireSingleStaff: boolean;
     workingRangesByStaff: Record<string, SlotRange[]>;
     appointmentsByStaff: StaffBusyMap;
@@ -771,22 +867,47 @@ export class BookingAvailabilityService {
     // el negocio cerrado: con el local sin franjas, nadie queda en pie.
     const worksToday = (id: string) => workingRangesByStaff[id].length > 0;
 
-    let offsetMinutes = 0;
-    const segments = items.map((item, index) => {
-      const durationMinutes = serviceById.get(item.serviceId)!.durationMinutes;
-      const segment = {
-        serviceId: item.serviceId,
-        staffIds: staffByItem[index]
-          .map((staff) => staff.id)
-          .filter(worksToday),
-        offsetMinutes,
-        durationMinutes,
-      };
-      offsetMinutes += durationMinutes;
-      return segment;
+    const staffIdsByItem = items.map((item, index) =>
+      staffByItem[index].map((staff) => staff.id).filter(worksToday),
+    );
+
+    if (staffIdsByItem.some((staffIds) => staffIds.length === 0)) return null;
+
+    /*
+     * Las reglas del negocio se leen una vez por consulta, aunque la reserva
+     * traiga un solo servicio: son pocas filas, y preguntarlas sólo a veces
+     * dejaría dos caminos distintos según la cantidad de servicios.
+     */
+    const parallelPairs = await this.schedulingRules.getParallelPairs(tenantId);
+
+    const executionPlans = buildExecutionPlans({
+      services: items.map((item) => {
+        const service = serviceById.get(item.serviceId)!;
+        return {
+          serviceId: item.serviceId,
+          categoryId: service.categoryId ?? null,
+          durationMinutes: service.durationMinutes,
+        };
+      }),
+      canRunInParallel: (categoryAId, categoryBId) =>
+        parallelPairs.allows(categoryAId, categoryBId),
     });
 
-    if (segments.some((segment) => segment.staffIds.length === 0)) return null;
+    /*
+     * Los candidatos de cada tramo salen del pedido y no del plan: quién puede
+     * hacer la pedicure es el mismo dato se atienda a la vez que la manicure o
+     * después. Los `placements` vienen en el orden de los ítems, así que la
+     * posición alcanza para emparejarlos.
+     */
+    const plans = executionPlans.map((plan) => ({
+      segments: plan.placements.map((placement, index) => ({
+        serviceId: placement.serviceId,
+        staffIds: staffIdsByItem[index],
+        offsetMinutes: placement.offsetMinutes,
+        durationMinutes: placement.durationMinutes,
+        roundIndex: placement.roundIndex,
+      })),
+    }));
 
     const staffIds = everyoneIds.filter(worksToday);
 
@@ -800,19 +921,20 @@ export class BookingAvailabilityService {
       );
 
     /*
-     * Los candidatos se generan con la **duración total** del bloque: lo que se
-     * ofrece es la hora a la que arranca la reserva entera, no la de cada
-     * servicio. Dónde cae cada tramo lo resuelve después `buildBookingSlots` con
-     * los `offsetMinutes`.
+     * La grilla se arma con la duración del plan **más corto**, que es el
+     * primero de la lista.
+     *
+     * Es el único piso que no deja horarios afuera: cada instante se prueba
+     * después contra todos los planes, y el que necesita más tiempo se descarta
+     * solo cuando no entra en la jornada de quien lo atendería. Con la duración
+     * del plan largo, en cambio, la última hora del día se perdería incluso
+     * cuando el corto —dos profesionales a la vez— entraba de sobra.
      */
-    const totalDuration = segments.reduce(
-      (total, segment) => total + segment.durationMinutes,
-      0,
-    );
+    const shortestPlanDuration = executionPlans[0].totalDurationMinutes;
 
     const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
       unionWorkingRanges(workingRangesByStaff, staffIds),
-      totalDuration,
+      shortestPlanDuration,
       DEFAULT_SLOT_STEP_MINUTES,
       /*
        * El panel genera además los que se pasan del cierre. Que terminen
@@ -824,13 +946,13 @@ export class BookingAvailabilityService {
 
     return {
       candidateSlots,
-      segments,
+      plans,
       /*
        * Con un solo servicio la bandera no cambia nada —las dos listas de
        * `BookingSlot` son la misma— así que no vale la pena que los tres canales
        * que reservan de a uno tengan que pensarla.
        */
-      requireSingleStaff: requireSingleStaff && segments.length > 1,
+      requireSingleStaff: requireSingleStaff && items.length > 1,
       workingRangesByStaff,
       appointmentsByStaff,
       /*

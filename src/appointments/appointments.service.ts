@@ -18,7 +18,7 @@ import { CreateAppointmentDto } from './dto/create-appointment.dto';
 import { UpdateAppointmentStatusDto } from './dto/update-appointment-status.dto';
 import { EditBookingDto } from './dto/edit-booking.dto';
 import { SetSegmentPricesDto } from './dto/set-segment-prices.dto';
-import { planBookingSegments } from './booking-plan';
+import { overlappingStaffIds, planBookingSegments } from './booking-plan';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import { AppointmentService as AppointmentServiceEntity } from './entities/appointment_service.entity';
 import { Service } from '../services/entities/service.entity';
@@ -73,6 +73,57 @@ export class AppointmentsService {
     private readonly staffNotifications: StaffNotificationsService,
     private readonly staffNotificationsJob: StaffNotificationsJob,
   ) {}
+
+  /**
+   * Dónde arranca cada servicio de una reserva que el panel armó a mano.
+   *
+   * Delega en `resolveBookingLayout`, que es el **mismo** cálculo que consulta el
+   * drawer para dibujar los tramos antes de guardar. Tenerlo en un solo lugar es
+   * lo que impide que la pantalla muestre dos horas y la cita se escriba en una.
+   *
+   * Devuelve `undefined` cuando no hay nada que decidir —un solo servicio—, que
+   * es la señal de encadenar como siempre.
+   */
+  private async resolveOffsets(
+    tenantId: string,
+    items: Array<{ serviceId: string; staffId: string }>,
+  ): Promise<number[] | undefined> {
+    if (items.length < 2) return undefined;
+
+    const layout = await this.bookingAvailabilityService.resolveBookingLayout({
+      tenantId,
+      items,
+    });
+
+    return layout.offsetsMinutes.length === items.length
+      ? layout.offsetsMinutes
+      : undefined;
+  }
+
+  /**
+   * Corta si la reserva pone al mismo profesional en dos lugares a la vez.
+   *
+   * Es un bloqueo y no una advertencia, y va aparte del resto de las
+   * comprobaciones porque es lo único que la base **no** puede atrapar: el
+   * índice único cubre dos tramos que arrancan en el mismo instante, y un solape
+   * parcial —manicure de 60 y pedicure de 30 arrancando juntas— no comparte
+   * instante de inicio. Ver `overlappingStaffIds`.
+   */
+  private assertNoStaffOverlap(
+    segments: Array<{ staffId: string; startTime: Date; endTime: Date }>,
+    staffById: Map<string, { id: string; name: string }>,
+  ): void {
+    const conflicted = overlappingStaffIds(segments);
+    if (conflicted.length === 0) return;
+
+    const names = conflicted
+      .map((staffId) => staffById.get(staffId)?.name ?? staffId)
+      .join(', ');
+
+    throw new BadRequestException(
+      `No se puede: ${names} quedaría en dos servicios al mismo tiempo.`,
+    );
+  }
 
   /**
    * Crea una reserva desde el panel.
@@ -134,6 +185,7 @@ export class AppointmentsService {
           },
         ]),
       ),
+      offsetsMinutes: await this.resolveOffsets(tenantId, dto.items),
     });
 
     if (!plan.ok) {
@@ -143,6 +195,8 @@ export class AppointmentsService {
     }
 
     const staffById = await this.resolveBookingStaff(tenantId, dto.items);
+
+    this.assertNoStaffOverlap(plan.segments, staffById);
 
     const segments = plan.segments.map((segment) => ({
       staffId: segment.staffId,
@@ -966,6 +1020,20 @@ export class AppointmentsService {
       );
     }
 
+    /*
+     * Última barrera antes de escribir, aunque los tramos vengan resueltos: el
+     * índice único de la base no ve un solape parcial, que es lo que un error en
+     * el reparto de una tanda produciría. Cuesta una comparación entre pares de
+     * una lista de a lo sumo cinco.
+     */
+    const overlapping = overlappingStaffIds(input.segments);
+    if (overlapping.length > 0) {
+      throw new SlotAlreadyTakenError(
+        overlapping[0],
+        input.segments[0].startTime,
+      );
+    }
+
     const appointment = await this.appointmentRepository.save(
       this.appointmentRepository.create({
         tenantId: input.tenantId,
@@ -1268,6 +1336,14 @@ export class AppointmentsService {
           },
         ]),
       ),
+      /*
+       * La edición vuelve a resolver el reparto con la misma regla que la
+       * creación. Sin esto, tocarle el horario a una reserva de manicure y
+       * pedicure la convertiría en dos horas encadenadas sin que nadie lo
+       * pidiera: la cita habría cambiado de duración al guardar un cambio que no
+       * era sobre su duración.
+       */
+      offsetsMinutes: await this.resolveOffsets(tenantId, dto.items),
     });
 
     if (!plan.ok) {
@@ -1279,6 +1355,8 @@ export class AppointmentsService {
     // Bloqueo, no advertencia: que alguien no haga ese servicio no es una
     // excepción que el negocio quiera registrar, es un dato incoherente.
     const staffById = await this.resolveBookingStaff(tenantId, dto.items);
+
+    this.assertNoStaffOverlap(plan.segments, staffById);
 
     const { date } = this.getDateTimeParts(startTime, timezone);
 
