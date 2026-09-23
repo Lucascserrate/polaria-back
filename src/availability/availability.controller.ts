@@ -30,7 +30,8 @@ export class AvailabilityController {
    *
    * Delega en el mismo servicio que usa el flujo guiado de WhatsApp, sin
    * variantes: un horario no puede estar libre en una pantalla y ocupado en la
-   * otra. Devuelve siempre de ahora en adelante, igual que para el cliente.
+   * otra. La única diferencia la pone `scope`, y es de propósito: el panel
+   * también registra lo que ya ocurrió, así que no tiene piso de hora.
    *
    * No confundir con `POST slots`, que es el motor conversacional: sugiere
    * horarios alrededor de una hora pedida, con otro paso y otras reglas.

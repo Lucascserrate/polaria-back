@@ -41,7 +41,6 @@ import {
   type AppointmentItem,
 } from './appointment-item';
 import {
-  currentCalendarDate,
   daysInRange,
   parseCalendarDate,
   rangeWindow,
@@ -162,22 +161,27 @@ export class AppointmentsService {
       });
 
     /*
-     * Una cita cuya **fecha** ya pasó nace atendida: lo que se está haciendo es
-     * registrar historia, no agendar. Se decide por fecha y no por instante a
-     * propósito: una hora que ya pasó hoy sigue siendo parte de la jornada en
-     * curso, y el dueño la resuelve desde la agenda como cualquier otra.
+     * Una cita que ya terminó nace atendida: lo que se está haciendo es
+     * registrar historia, no agendar.
+     *
+     * La frontera es el **fin** y no el comienzo. Una que arrancó hace diez
+     * minutos puede estar ocurriendo ahora mismo —el cliente sigue en la
+     * silla— y esa todavía es una cita por delante; una que terminó antes de
+     * cargarse no puede estar por ocurrir de ninguna forma.
+     *
+     * Y por instante, no por fecha: cargar lo de esta mañana es el mismo
+     * trabajo que cargar lo del martes pasado, y cortar por la medianoche
+     * obligaba a que la misma tarea diera dos resultados distintos según la
+     * hora a la que el negocio se sentara a cargarla.
      *
      * De paso, una atendida no ocupa la agenda —`activeStartTime` queda en
      * `null`—, así que cargar historia nunca choca con el índice único ni le
      * quita disponibilidad a nadie.
      */
-    const today = currentCalendarDate(timezone, new Date());
-    const requested = parseCalendarDate(date);
-    const isHistorical = requested ? daysInRange(requested, today) > 1 : false;
-
-    const status = isHistorical
-      ? AppointmentStatus.COMPLETED
-      : AppointmentStatus.PENDING;
+    const status =
+      plan.endTime < new Date()
+        ? AppointmentStatus.COMPLETED
+        : AppointmentStatus.PENDING;
 
     const appointmentId = await this.insertBooking({
       tenantId,

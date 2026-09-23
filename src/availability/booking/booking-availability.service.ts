@@ -5,11 +5,7 @@ import { isSelfBookable } from '../../services/booking-policy';
 import type { Staff } from '../../staff/entities/staff.entity';
 import { AvailabilityCalculator } from '../availability.calculator';
 import { AvailabilityRepository } from '../availability.repository';
-import {
-  addMinutes,
-  currentDateInTimeZone,
-  makeDateInTimeZone,
-} from '../utils/availability.helpers';
+import { addMinutes, makeDateInTimeZone } from '../utils/availability.helpers';
 import {
   datesWithCoverage,
   mergeRanges,
@@ -837,44 +833,18 @@ export class BookingAvailabilityService {
       requireSingleStaff: requireSingleStaff && segments.length > 1,
       workingRangesByStaff,
       appointmentsByStaff,
-      minStartTime: this.resolveEarliestStart(timeZone, date, scope),
+      /*
+       * El panel no tiene piso de hora, ninguno.
+       *
+       * Un horario que ya pasó no se ofrece para reservarlo, se ofrece para
+       * registrarlo, y eso vale igual para el martes anterior que para esta
+       * mañana: lo que ya ocurrió se carga cuando el negocio tiene un rato, que
+       * casi nunca es en el momento. Cortar por la fecha partía esa misma tarea
+       * en dos, y obligaba a esperar a mañana para cargar lo de hoy.
+       */
+      minStartTime:
+        scope === 'client' ? this.calculateMinStartTime(timeZone) : undefined,
     };
-  }
-
-  /**
-   * Desde qué instante se ofrecen horarios, o `undefined` cuando no hay piso.
-   *
-   * Sin piso solo en el panel y sobre una fecha pasada: es la única situación en
-   * la que ofrecer un horario que ya pasó tiene sentido, porque lo que se está
-   * haciendo es registrar lo que ocurrió.
-   */
-  private resolveEarliestStart(
-    timeZone: string,
-    date: string,
-    scope: 'client' | 'panel',
-  ): Date | undefined {
-    if (scope === 'client') return this.calculateMinStartTime(timeZone);
-
-    const today = currentDateInTimeZone(timeZone, new Date());
-    if (date < today) return undefined;
-
-    // Hoy, para el panel: desde ahora, sin la anticipación del cliente.
-    return this.currentInstantIn(timeZone);
-  }
-
-  private currentInstantIn(timeZone: string): Date {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }).format(new Date());
-
-    const [today, now] = parts.split(', ');
-    return makeDateInTimeZone(today, now, timeZone);
   }
 
   private calculateMinStartTime(timeZone: string): Date {
