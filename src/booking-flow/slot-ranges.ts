@@ -73,10 +73,22 @@ export type PlanSlotScreenInput<T extends TimedSlot> = {
   threshold?: number;
   /** Cuántos horarios sueltos mostrar arriba, como mucho. */
   maxNext?: number;
+  /**
+   * Cuántos sueltos hacen falta para que valga la pena mostrarlos.
+   *
+   * Por debajo de esto no se muestra ninguno. Un horario suelto arriba de siete
+   * rangos no se lee como un atajo: se lee como una inconsistencia —"¿y éste por
+   * qué está afuera?"— y encima sólo le sirve a quien quería justo esa hora.
+   * Como bloque de tres sí se entienden, y son los próximos.
+   */
+  minNext?: number;
 };
 
 /** Sueltos de más no ayudan: dejan de ser un atajo y son media lista. */
 const DEFAULT_MAX_NEXT = 3;
+
+/** Menos que esto no forma un bloque. Ver `minNext`. */
+const DEFAULT_MIN_NEXT = 3;
 
 /**
  * Cuánto se puede correr un corte para hacerlo coincidir con un hueco del día.
@@ -103,12 +115,27 @@ export function planSlotScreen<T extends TimedSlot>(
     screenRows,
     rangeCapacity,
     maxNext = DEFAULT_MAX_NEXT,
+    minNext = DEFAULT_MIN_NEXT,
     threshold = twoPagesFit(screenRows),
   } = input;
 
   if (slots.length < threshold) return { kind: 'all' };
 
-  for (let next = Math.min(maxNext, slots.length); next >= 0; next -= 1) {
+  /*
+   * Se prueban primero los repartos con sueltos, del más grande al mínimo, y si
+   * ninguno entra se cae directo a cero. Nunca queda un bloque de uno o dos: o
+   * son suficientes para leerse como "los próximos", o la pantalla es sólo de
+   * rangos y tiene una intención sola.
+   */
+  const candidates = [
+    ...Array.from(
+      { length: Math.max(0, Math.min(maxNext, slots.length) - minNext + 1) },
+      (_, i) => Math.min(maxNext, slots.length) - i,
+    ),
+    0,
+  ];
+
+  for (const next of candidates) {
     const rest = slots.slice(next);
     const room = screenRows - next;
     if (room < 1) continue;

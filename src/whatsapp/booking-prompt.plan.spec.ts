@@ -154,3 +154,60 @@ describe('planToTranscript', () => {
     expect(planToTranscript(plan)).toContain('Confirmar · Cancelar');
   });
 });
+
+/**
+ * Las tres pantallas del paso de horarios.
+ *
+ * Son el mismo paso y hasta acá decían lo mismo: elegir un rango devolvía otra
+ * vez "estos son los horarios disponibles para el jueves 24" y parecía que el
+ * flujo no había entendido nada.
+ */
+describe('el texto del paso de horarios', () => {
+  const base = {
+    kind: 'ASK_SLOT' as const,
+    date: '2026-09-24',
+    hasSlots: true,
+    options: [option('2026-09-24T13:00:00.000Z', '09:00')],
+  };
+
+  const bodyOf = (prompt: Parameters<typeof planBookingPrompt>[0]) => {
+    const [plan] = planBookingPrompt(prompt);
+    return 'body' in plan ? plan.body : '';
+  };
+
+  it('el día completo se anuncia como siempre', () => {
+    expect(bodyOf(base)).toBe(
+      'Estos son los horarios disponibles para el jueves, 24 de septiembre.',
+    );
+  });
+
+  it('dentro de un rango dice entre qué horas, y no repite la fecha', () => {
+    const body = bodyOf({
+      ...base,
+      range: { from: '09:45', to: '11:15' },
+    });
+
+    expect(body).toBe('Elegí un horario entre las 09:45 y las 11:15.');
+    expect(body).not.toContain('septiembre');
+  });
+
+  /*
+   * Son el mismo paso: si dicen lo mismo, elegir un rato se siente como no haber
+   * avanzado.
+   */
+  it('las dos pantallas dicen cosas distintas', () => {
+    expect(bodyOf(base)).not.toBe(
+      bodyOf({ ...base, range: { from: '09:45', to: '11:15' } }),
+    );
+  });
+
+  it('un día sin cupo manda sobre cualquier otra cosa', () => {
+    const body = bodyOf({
+      ...base,
+      hasSlots: false,
+      range: { from: '09:45', to: '11:15' },
+    });
+
+    expect(body).toContain('No quedan horarios');
+  });
+});

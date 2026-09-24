@@ -147,6 +147,20 @@ export type BookingOption = {
   selectionId: string;
   title: string;
   description?: string;
+  /**
+   * Bajo qué encabezado va esta opción, cuando la pantalla mezcla cosas de
+   * distinta naturaleza.
+   *
+   * Existe por el paso de horarios: ahí conviven horarios concretos y ratos del
+   * día, y sin separarlos el cliente ve tres horas sueltas seguidas de unas
+   * filas raras y no entiende qué son. El encabezado lo explica pegado a las
+   * filas que describe, que es donde se lee — mejor que un párrafo arriba de
+   * todo.
+   *
+   * Ausente es lo normal: una lista de cosas del mismo tipo no necesita
+   * títulos. Ver `toListSections`.
+   */
+  group?: string;
 };
 
 export type BookingSummary = {
@@ -178,6 +192,19 @@ export type BookingPrompt =
       kind: 'ASK_SLOT';
       date: string;
       hasSlots: boolean;
+      /**
+       * El tramo que se está mirando, con sus extremos ya escritos en la hora
+       * del negocio.
+       *
+       * Ausente es la pantalla del día completo. Está para que el texto pueda
+       * decir dónde está parado el cliente: las dos pantallas son el mismo paso
+       * y con el mismo encabezado parecen la misma, como si el flujo no hubiera
+       * entendido que eligió un rango.
+       *
+       * Ya formateado y no como instantes porque quien escribe el mensaje no
+       * conoce la zona horaria del negocio, y no tiene por qué.
+       */
+      range?: { from: string; to: string };
       options: BookingOption[];
     }
   | { kind: 'CONFIRM'; summary: BookingSummary; options: BookingOption[] }

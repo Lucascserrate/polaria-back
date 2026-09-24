@@ -80,6 +80,16 @@ const UNCATEGORIZED_LABEL = 'Otros servicios';
 
 const BACK_LABEL = 'Volver a las categorías';
 
+/**
+ * Los encabezados del paso de horarios cuando hay ratos del día.
+ *
+ * Se dice "rato" y no "franja" ni "rango" porque es como lo diría un cliente al
+ * pedir un turno. El subtítulo de cada fila —"7 horarios"— ya aclara que adentro
+ * hay opciones concretas.
+ */
+const NEXT_TIMES_GROUP = 'Próximos horarios';
+const RANGES_GROUP = 'Elegí un rato del día';
+
 /** "3 servicios", cuando la categoría no trae una descripción propia. */
 const countLabel = (count: number): string =>
   count === 1 ? '1 servicio' : `${count} servicios`;
@@ -1208,7 +1218,7 @@ export class BookingFlowService {
      */
     const chosen = this.slotsInChosenRange(session, all);
     if (chosen) {
-      if (chosen.length === 0) {
+      if (chosen.slots.length === 0) {
         const back = await this.bookingSessionService.reissue({
           session,
           selection: { selectedRangeStart: null, selectedRangeEnd: null },
@@ -1220,9 +1230,13 @@ export class BookingFlowService {
       return {
         ...empty,
         hasSlots: true,
+        range: {
+          from: formatTimeLabel(chosen.from, timezone),
+          to: formatTimeLabel(chosen.to, timezone),
+        },
         options: this.paginate(
           session,
-          this.slotOptions(session, chosen, timezone),
+          this.slotOptions(session, chosen.slots, timezone),
           limits,
           [this.allTimesOption(session)],
         ),
@@ -1261,10 +1275,14 @@ export class BookingFlowService {
       ...empty,
       hasSlots: true,
       options: [
-        ...this.slotOptions(session, screen.next, timezone),
-        ...screen.ranges.map((range) =>
-          this.rangeOption(session, range, timezone),
-        ),
+        ...this.slotOptions(session, screen.next, timezone).map((option) => ({
+          ...option,
+          group: NEXT_TIMES_GROUP,
+        })),
+        ...screen.ranges.map((range) => ({
+          ...this.rangeOption(session, range, timezone),
+          group: RANGES_GROUP,
+        })),
         this.otherDaysOption(session),
         this.cancelOption(session),
       ],
@@ -1281,17 +1299,18 @@ export class BookingFlowService {
   private slotsInChosenRange(
     session: BookingSession,
     slots: BookingSlot[],
-  ): BookingSlot[] | null {
-    const { selectedRangeStart, selectedRangeEnd } = session;
-    if (!selectedRangeStart || !selectedRangeEnd) return null;
+  ): { from: Date; to: Date; slots: BookingSlot[] } | null {
+    const { selectedRangeStart: from, selectedRangeEnd: to } = session;
+    if (!from || !to) return null;
 
-    const from = selectedRangeStart.getTime();
-    const to = selectedRangeEnd.getTime();
-
-    return slots.filter((slot) => {
-      const at = slot.startTime.getTime();
-      return at >= from && at <= to;
-    });
+    return {
+      from,
+      to,
+      slots: slots.filter((slot) => {
+        const at = slot.startTime.getTime();
+        return at >= from.getTime() && at <= to.getTime();
+      }),
+    };
   }
 
   private async confirmPrompt(session: BookingSession): Promise<BookingPrompt> {

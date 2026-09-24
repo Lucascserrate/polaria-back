@@ -162,8 +162,12 @@ describe('planSlotScreen', () => {
      * Con 48 horarios ya no alcanzan tres sueltos: se muestran menos para que
      * los rangos entren. Es la variable de ajuste de la pantalla.
      */
-    it('muestra menos sueltos para que los rangos entren', () => {
-      expect(screen.next.length).toBeLessThan(3);
+    /*
+     * Con 48 horarios no entran tres sueltos, y uno o dos no forman bloque: la
+     * pantalla queda sólo de rangos, con una intención sola.
+     */
+    it('se queda sin sueltos antes que dejar un bloque de uno', () => {
+      expect(screen.next).toHaveLength(0);
     });
   });
 
@@ -189,6 +193,7 @@ describe('planSlotScreen', () => {
         screenRows: SCREEN_ROWS,
         rangeCapacity: RANGE_CAPACITY,
         maxNext: 1,
+        minNext: 1,
       });
 
       expect(grouped(screen).next).toHaveLength(1);
@@ -233,6 +238,27 @@ describe('planSlotScreen', () => {
       for (const range of screen.ranges) {
         expect(range.length).toBeLessThanOrEqual(4);
       }
+    });
+  });
+
+  /**
+   * Un horario suelto arriba de siete rangos no se lee como atajo sino como un
+   * error de la pantalla. O son un bloque, o no están.
+   */
+  describe('el bloque de horarios sueltos', () => {
+    it('no deja nunca uno o dos sueltos', () => {
+      for (let n = 16; n <= 60; n += 1) {
+        const screen = plan(grid('09:00', n, 15));
+        if (screen.kind !== 'grouped') continue;
+
+        expect([0, 3]).toContain(screen.next.length);
+      }
+    });
+
+    it('con un día corto sí los muestra, porque son tres', () => {
+      const screen = grouped(plan(grid('09:00', 20)));
+
+      expect(screen.next).toHaveLength(3);
     });
   });
 });

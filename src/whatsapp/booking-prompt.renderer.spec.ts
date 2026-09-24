@@ -5,6 +5,7 @@ import type {
 import {
   BookingPromptRenderer,
   NATIVE_CHANNEL_LIMITS,
+  toListSections,
 } from './booking-prompt.renderer';
 import type {
   SendButtonsInput,
@@ -325,5 +326,77 @@ describe('BookingPromptRenderer', () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0].kind).toBe('text');
+  });
+});
+
+/**
+ * Cómo se reparten las filas en secciones.
+ *
+ * Es lo que hace legible el paso de horarios: sin encabezados, tres horas
+ * sueltas seguidas de unos ratos del día se leen como una lista con filas raras
+ * en el medio.
+ */
+describe('toListSections', () => {
+  const row = (title: string, group?: string) => ({
+    selectionId: `id-${title}`,
+    title,
+    ...(group ? { group } : {}),
+  });
+
+  it('sin encabezados arma una sola sección sin título', () => {
+    const sections = toListSections([row('09:00'), row('09:30')]);
+
+    expect(sections).toHaveLength(1);
+    expect(sections[0].title).toBeUndefined();
+    expect(sections[0].rows).toHaveLength(2);
+  });
+
+  it('separa los bloques y conserva el orden', () => {
+    const sections = toListSections([
+      row('09:00', 'Próximos horarios'),
+      row('09:30', 'Próximos horarios'),
+      row('10:30 a 13:00', 'Elegí un rato del día'),
+      row('Ver otros días'),
+      row('Cancelar'),
+    ]);
+
+    expect(sections.map((s) => s.title)).toEqual([
+      'Próximos horarios',
+      'Elegí un rato del día',
+      undefined,
+    ]);
+    expect(sections[0].rows).toHaveLength(2);
+    expect(sections[2].rows.map((r) => r.title)).toEqual([
+      'Ver otros días',
+      'Cancelar',
+    ]);
+  });
+
+  it('no pierde ninguna fila', () => {
+    const options = [
+      row('09:00', 'A'),
+      row('10:00', 'B'),
+      row('11:00', 'B'),
+      row('Cancelar'),
+    ];
+
+    const total = toListSections(options).reduce(
+      (n, section) => n + section.rows.length,
+      0,
+    );
+
+    expect(total).toBe(options.length);
+  });
+
+  /*
+   * WhatsApp corta el título de sección a 24 caracteres, así que los
+   * encabezados tienen que entrar sin recortarse.
+   */
+  it('los encabezados del paso de horarios entran en el límite', () => {
+    for (const title of ['Próximos horarios', 'Elegí un rato del día']) {
+      expect(title.length).toBeLessThanOrEqual(
+        WHATSAPP_LIMITS.LIST_SECTION_TITLE_MAX,
+      );
+    }
   });
 });

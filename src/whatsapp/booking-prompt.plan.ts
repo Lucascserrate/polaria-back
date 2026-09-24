@@ -78,9 +78,7 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
       return [
         list(
           prompt.kind,
-          prompt.hasSlots
-            ? `Estos son los horarios disponibles para el ${formatDate(prompt.date)}.`
-            : `No quedan horarios para el ${formatDate(prompt.date)}. ¿Querés ver otro día?`,
+          slotStepBody(prompt),
           prompt.hasSlots ? 'Ver horarios' : 'Ver opciones',
           prompt.options,
         ),
@@ -163,6 +161,35 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
     case 'NONE':
       return [];
   }
+}
+
+/**
+ * Qué dice el paso de horarios, que es dos pantallas con la misma cara.
+ *
+ * Elegir un rato del día no saca del paso, así que sin esto la segunda pantalla
+ * repetía "estos son los horarios disponibles para el jueves 24" y el cliente se
+ * quedaba con la duda de si el flujo había entendido su elección.
+ *
+ * Dentro de un rato no se repite la fecha: ya la eligió dos pantallas atrás, y
+ * lo único que cambió —y lo único que hace falta para decidir— es el rato.
+ *
+ * Que el día venga agrupado **no** cambia este texto: lo que hay que hacer en esa
+ * pantalla lo dicen los encabezados de cada bloque, pegados a las filas que
+ * describen. Un párrafo largo acá se lee menos que un título ahí. Ver
+ * `toListSections`.
+ */
+function slotStepBody(
+  prompt: Extract<BookingPrompt, { kind: 'ASK_SLOT' }>,
+): string {
+  if (!prompt.hasSlots) {
+    return `No quedan horarios para el ${formatDate(prompt.date)}. ¿Querés ver otro día?`;
+  }
+
+  if (prompt.range) {
+    return `Elegí un horario entre las ${prompt.range.from} y las ${prompt.range.to}.`;
+  }
+
+  return `Estos son los horarios disponibles para el ${formatDate(prompt.date)}.`;
 }
 
 function text(kind: BookingPrompt['kind'], body: string): BookingMessagePlan {

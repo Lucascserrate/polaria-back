@@ -13,6 +13,7 @@ import { WHATSAPP_LIMITS } from './types/outgoing-message.type';
 import type {
   OutgoingButton,
   OutgoingListRow,
+  OutgoingListSection,
   WhatsAppCredentials,
 } from './types/outgoing-message.type';
 import { WhatsAppSenderService } from './whatsapp-sender.service';
@@ -123,7 +124,7 @@ export class BookingPromptRenderer {
           to,
           body: plan.body,
           buttonText: plan.buttonText,
-          sections: [{ rows: plan.options.map(toListRow) }],
+          sections: toListSections(plan.options),
         });
         return result.ok ? result.metaMessageId : null;
       }
@@ -136,6 +137,49 @@ function toButton(option: {
   title: string;
 }): OutgoingButton {
   return { id: option.selectionId, title: option.title };
+}
+
+/**
+ * Reparte las filas en secciones según su encabezado.
+ *
+ * Una lista de cosas del mismo tipo va en una sola sección sin título, que es lo
+ * que WhatsApp dibuja como una lista común y es el caso de casi todos los pasos.
+ *
+ * El paso de horarios es el que necesita esto: ahí conviven horarios concretos y
+ * ratos del día, y mezclados sin separar se leen como tres horas seguidas de
+ * unas filas raras. Con el encabezado arriba de cada bloque, cada fila se
+ * entiende por dónde está.
+ *
+ * El orden de las secciones es el de aparición de las opciones, así que quien
+ * arma el paso decide qué va primero sin saber nada de secciones. Las filas sin
+ * encabezado —"Ver otros días", "Cancelar"— quedan en una sección propia al
+ * final, sin título.
+ */
+export function toListSections(
+  options: Array<{
+    selectionId: string;
+    title: string;
+    description?: string;
+    group?: string;
+  }>,
+): OutgoingListSection[] {
+  const sections: OutgoingListSection[] = [];
+
+  for (const option of options) {
+    const last = sections[sections.length - 1];
+
+    if (last && last.title === option.group) {
+      last.rows.push(toListRow(option));
+      continue;
+    }
+
+    sections.push({
+      ...(option.group ? { title: option.group } : {}),
+      rows: [toListRow(option)],
+    });
+  }
+
+  return sections;
 }
 
 function toListRow(option: {
