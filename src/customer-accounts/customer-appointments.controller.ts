@@ -1,8 +1,11 @@
 import {
   Controller,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
+  Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
@@ -84,5 +87,25 @@ export class CustomerAppointmentsController {
     @Param('id', ParseUUIDPipe) appointmentId: string,
   ) {
     return this.appointments.findOne({ accountId, appointmentId });
+  }
+
+  /**
+   * Cancela el turno y devuelve cómo quedó.
+   *
+   * `POST` y no `DELETE`: el turno no se borra. Queda en el historial con el
+   * estado en cancelado, que es lo que deja que el cliente vea que efectivamente
+   * lo canceló, y lo que el negocio necesita para saber que ese horario se
+   * liberó en lugar de no haber existido nunca.
+   *
+   * Sin cuerpo: qué se cancela lo dice la URL y quién lo pide lo dice la sesión.
+   * El 200 con el turno de vuelta es lo que la pantalla redibuja.
+   */
+  @Post(':id/cancel')
+  @HttpCode(HttpStatus.OK)
+  cancel(
+    @CustomerAccountId() accountId: string,
+    @Param('id', ParseUUIDPipe) appointmentId: string,
+  ) {
+    return this.appointments.cancel({ accountId, appointmentId });
   }
 }

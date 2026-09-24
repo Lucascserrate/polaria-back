@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 
 import { CustomerAppointmentsService } from './customer-appointments.service';
 import { AppointmentStatus } from '../appointments/entities/appointment.entity';
@@ -78,6 +78,8 @@ const build = (options: {
     .fn()
     .mockResolvedValue(options.one === undefined ? appointment() : options.one);
 
+  const cancelByCustomerAccount = jest.fn().mockResolvedValue(null);
+
   const findBySlug = jest
     .fn()
     .mockResolvedValue(
@@ -97,6 +99,7 @@ const build = (options: {
       findUpcomingByCustomerAccount,
       findPastByCustomerAccount,
       findByCustomerAccountAndId,
+      cancelByCustomerAccount,
     } as unknown as AppointmentsService,
     { findBySlug } as unknown as TenantsService,
     { covers } as unknown as BusinessPhotosService,
@@ -107,10 +110,28 @@ const build = (options: {
     findUpcomingByCustomerAccount,
     findPastByCustomerAccount,
     findByCustomerAccountAndId,
+    cancelByCustomerAccount,
     findBySlug,
     covers,
   };
 };
+
+/*
+ * Los dos lados de la única regla de cancelar. Se calculan contra el reloj real
+ * y no con fechas escritas: la frontera es "ya empezó", así que una fecha fija
+ * cambiaría de lado el día que llegue.
+ */
+const upcoming = () =>
+  appointment({
+    startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+    endTime: new Date(Date.now() + 3 * 60 * 60 * 1000),
+  });
+
+const started = () =>
+  appointment({
+    startTime: new Date(Date.now() - 2 * 60 * 60 * 1000),
+    endTime: new Date(Date.now() - 60 * 60 * 1000),
+  });
 
 describe('CustomerAppointmentsService', () => {
   it('pregunta por la cuenta y acota al negocio pedido', async () => {
@@ -279,6 +300,64 @@ describe('CustomerAppointmentsService', () => {
       const [view] = await service.findPast({ accountId: ACCOUNT_ID });
 
       expect(view.status).toBe(AppointmentStatus.CANCELLED);
+    });
+  });
+
+  describe('cancelar', () => {
+    it('cancela el turno de la cuenta', async () => {
+      const { service, cancelByCustomerAccount } = build({ one: upcoming() });
+
+      await service.cancel({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+
+      expect(cancelByCustomerAccount).toHaveBeenCalledWith({
+        customerAccountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+    });
+
+    /*
+     * Devuelve el turno y no un `ok`: la pantalla que lo pidió lo está mostrando
+     * y se redibuja con lo que vuelve, sin una segunda consulta.
+     */
+    it('devuelve el turno para que la pantalla se redibuje', async () => {
+      const { service } = build({ one: upcoming() });
+
+      const detail = await service.cancel({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+
+      expect(detail.id).toBe('appt-1');
+      expect(detail.services).toHaveLength(1);
+    });
+
+    it('un turno ajeno o inexistente es 404', async () => {
+      const { service, cancelByCustomerAccount } = build({ one: null });
+
+      await expect(
+        service.cancel({ accountId: ACCOUNT_ID, appointmentId: 'appt-9' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+
+      expect(cancelByCustomerAccount).not.toHaveBeenCalled();
+    });
+
+    /*
+     * Un turno que ya pasó no se cancela: no libera nada, y dejar que el cliente
+     * lo marque como cancelado le reescribiría al negocio el registro de una
+     * ausencia. El 409 —y no un 404— es para que la pantalla pueda decir cuál de
+     * las dos cosas pasó.
+     */
+    it('un turno que ya empezó es 409 y no se toca', async () => {
+      const { service, cancelByCustomerAccount } = build({ one: started() });
+
+      await expect(
+        service.cancel({ accountId: ACCOUNT_ID, appointmentId: 'appt-1' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(cancelByCustomerAccount).not.toHaveBeenCalled();
     });
   });
 

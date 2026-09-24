@@ -1034,13 +1034,60 @@ export class AppointmentsService {
     const appointment = await this.findUpcomingByClientAndId(params);
     if (!appointment) return null;
 
+    return this.cancelForCustomer(appointment);
+  }
+
+  /**
+   * Cancelación pedida desde la cuenta de Polaria, en la web.
+   *
+   * El espejo de `cancelByClient` con el otro sujeto, y esa diferencia es toda
+   * la autorización: allá el dueño del turno es el cliente de un negocio, acá es
+   * la cuenta con la que se inició sesión. La comprobación va en la consulta y
+   * no en un `if` de acá, así que un id ajeno devuelve `null` y no el turno de
+   * otro. Ver `findByCustomerAccountAndId`.
+   *
+   * **Sólo se cancela lo que todavía no empezó.** No es una restricción de esta
+   * pantalla sino la misma definición de turno vigente que usa todo lo demás:
+   * un turno que ya pasó no se cancela —no libera nada— y dejar que el cliente
+   * lo marque como cancelado le reescribiría al negocio el registro de una
+   * ausencia. Lo que pasó, pasó, y es el negocio quien lo resuelve.
+   */
+  async cancelByCustomerAccount(params: {
+    customerAccountId: string;
+    appointmentId: string;
+    now?: Date;
+  }): Promise<Appointment | null> {
+    const appointment = await this.findByCustomerAccountAndId(params);
+    if (!appointment) return null;
+
+    if (appointment.startTime < (params.now ?? new Date())) return null;
+
+    return this.cancelForCustomer(appointment);
+  }
+
+  /**
+   * Lo que cancelar significa, escrito una sola vez.
+   *
+   * Libera el horario para otro cliente vía `syncActiveSlot`, que es lo que
+   * anula `activeStartTime` y saca la fila de la disputa por el índice único, y
+   * avisa a quien iba a atender. Los dos canales pasan por acá para que cancelar
+   * por WhatsApp y cancelar desde la web dejen el mismo estado: con dos copias,
+   * una podría olvidarse del aviso y el profesional esperaría a alguien que no
+   * viene.
+   *
+   * Cancelar algo ya cancelado o ya atendido lo devuelve tal cual, sin tocar
+   * nada ni volver a avisar: dos toques al mismo botón no son dos cancelaciones.
+   */
+  private async cancelForCustomer(
+    appointment: Appointment,
+  ): Promise<Appointment> {
     if (!blocksAgenda(appointment.status)) return appointment;
 
     appointment.status = AppointmentStatus.CANCELLED;
     await this.appointmentRepository.save(appointment);
     await this.syncActiveSlot(appointment.id, AppointmentStatus.CANCELLED);
 
-    await this.notifyCancelled(params.tenantId, appointment.id);
+    await this.notifyCancelled(appointment.tenantId, appointment.id);
 
     return appointment;
   }

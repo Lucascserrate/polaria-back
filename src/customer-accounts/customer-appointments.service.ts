@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 
 import {
   describeServices,
@@ -241,6 +245,53 @@ export class CustomerAppointmentsService {
       location: toLocation(appointment.tenant),
       note: appointment.tenant.appointmentNote ?? null,
     };
+  }
+
+  /**
+   * Cancela un turno de la cuenta y devuelve cómo quedó.
+   *
+   * Devuelve el turno y no un `ok` porque la pantalla que lo pidió lo está
+   * mostrando: con el turno de vuelta se redibuja con su estado nuevo, sin una
+   * segunda consulta para averiguar qué pasó.
+   *
+   * Los dos rechazos dicen cosas distintas a propósito. Un id que no existe —o
+   * que es de otra cuenta— es un 404, igual que al abrirlo. Un turno que ya
+   * empezó es un 409 con el motivo escrito: no es que no exista, es que ya no se
+   * cancela, y quien está mirando la pantalla necesita saber cuál de las dos
+   * cosas le pasó.
+   *
+   * La regla de "ya empezó" se comprueba acá para poder contestar 409, y otra
+   * vez en `cancelByCustomerAccount`, que es donde vive de verdad. No es una
+   * duplicación por olvido: la de acá elige el mensaje, la de allá es la que
+   * impide el cambio, y tiene que seguir impidiéndolo aunque mañana la llame
+   * otro camino que no pase por este servicio.
+   */
+  async cancel(params: {
+    accountId: string;
+    appointmentId: string;
+  }): Promise<CustomerAppointmentDetail> {
+    const appointment =
+      await this.appointmentsService.findByCustomerAccountAndId({
+        customerAccountId: params.accountId,
+        appointmentId: params.appointmentId,
+      });
+
+    if (!appointment) {
+      throw new NotFoundException('Turno no encontrado');
+    }
+
+    if (appointment.startTime < new Date()) {
+      throw new ConflictException(
+        'Ese turno ya empezó, así que no se puede cancelar desde acá. Escribile al negocio.',
+      );
+    }
+
+    await this.appointmentsService.cancelByCustomerAccount({
+      customerAccountId: params.accountId,
+      appointmentId: params.appointmentId,
+    });
+
+    return this.findOne(params);
   }
 
   /**
