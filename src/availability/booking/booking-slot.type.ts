@@ -69,20 +69,39 @@ export type BookingSlot = SlotRange & {
 };
 
 /**
- * Paso entre horarios ofrecidos, en minutos.
+ * Cada cuánto se **ofrece** un horario. No es la duración del servicio.
  *
- * Define cada cuánto se **ofrece** un horario, no cuánto dura el servicio.
+ * **Lo elige quien va a mostrar la lista, no el motor**, y por eso hay dos
+ * valores en vez de uno. El motor enumera lo que está disponible; cuántos
+ * horarios se pueden poner en pantalla depende del componente, y ese límite
+ * cambia muchísimo entre una lista nativa de WhatsApp —10 filas— y una grilla de
+ * chips en una página web, que muestra cuarenta sin despeinarse.
  *
- * El cálculo legado usa 5 minutos porque generaba candidatos para buscar "el más
- * cercano a lo que pidió el usuario". Un flujo guiado ofrece una lista finita, y
- * ahí un paso fino se paga caro: con 15 minutos, una jornada de 9 a 19 produce 40
- * horarios, que en un componente de 10 filas son cinco páginas. Llegar a las 17:00
- * costaba cuatro toques de "Ver más".
+ * Con un solo paso para todos, el más apretado se lo imponía al resto: media
+ * hora en la página pública y en el panel, que no tienen ese límite, es
+ * capacidad del negocio que no se ofrece. Y no es teórico: un local que cierra a
+ * las 18:15 no podía dar las 17:45 porque la grilla iba de :00 a :30.
+ */
+
+/**
+ * El paso de los canales con una lista corta: WhatsApp nativo.
  *
- * Media hora es la granularidad natural de una barbería y deja la jornada en 20
- * horarios. Ofrecer 9:00, 9:15, 9:30 y 9:45 era sobre todo ruido.
+ * Media hora es la granularidad natural de una barbería y deja una jornada de 9
+ * a 19 en 20 horarios, que son tres páginas de la lista. Con 15 serían seis, y
+ * llegar a las 17:00 costaría cinco toques de "Ver más".
  */
 export const DEFAULT_SLOT_STEP_MINUTES = 30;
+
+/**
+ * El paso de los canales que pueden mostrar muchos horarios a la vez: la página
+ * pública, el panel y el Dropdown de un Flow.
+ *
+ * Un cuarto de hora recupera dos cosas que media hora perdía: el final de la
+ * jornada cuando el cierre no cae en la grilla, y los huecos que dejan los
+ * servicios que no duran un múltiplo de 30 —una barba de 20 minutos, un color de
+ * 45—. En un componente sin tope de filas eso no cuesta nada.
+ */
+export const FINE_SLOT_STEP_MINUTES = 15;
 
 /**
  * Margen mínimo entre "ahora" y el primer horario ofrecible. Evita ofrecer un

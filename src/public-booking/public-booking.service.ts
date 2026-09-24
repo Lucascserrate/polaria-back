@@ -29,6 +29,7 @@ import type { Staff } from '../staff/entities/staff.entity';
 import type { Tenant } from '../tenants/entities/tenant.entity';
 import type { BookingRequestItem } from '../availability/booking/booking-availability.service';
 import { ANY_STAFF } from './dto/booking-selection';
+import { FINE_SLOT_STEP_MINUTES } from '../availability/booking/booking-slot.type';
 import type {
   PublicBookingConfirmation,
   PublicBookingStaff,
@@ -253,7 +254,11 @@ export class PublicBookingService {
   private toBookingRequest(query: {
     serviceIds: string[];
     staffIds?: string[];
-  }): { items: BookingRequestItem[]; requireSingleStaff: boolean } {
+  }): {
+    items: BookingRequestItem[];
+    requireSingleStaff: boolean;
+    stepMinutes: number;
+  } {
     const { serviceIds, staffIds } = query;
 
     if (new Set(serviceIds).size !== serviceIds.length) {
@@ -276,6 +281,17 @@ export class PublicBookingService {
         };
       }),
       requireSingleStaff: !staffIds,
+      /*
+       * El paso va acá y no en cada consulta a propósito: listar horarios y
+       * confirmar uno tienen que usar el mismo, y con dos lugares para
+       * escribirlo es cuestión de tiempo que queden distintos. Con pasos
+       * distintos, un horario que se ofreció no existiría al confirmarlo y la
+       * reserva se caería con "ese horario acaba de ocuparse".
+       *
+       * La página muestra los horarios en una grilla de chips, sin el tope de
+       * filas de una lista de WhatsApp.
+       */
+      stepMinutes: FINE_SLOT_STEP_MINUTES,
     };
   }
 

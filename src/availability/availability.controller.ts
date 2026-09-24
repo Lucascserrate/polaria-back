@@ -15,6 +15,7 @@ import { AvailabilityService } from './availability.service';
 import { BookingAvailabilityService } from './booking/booking-availability.service';
 import { BookingSlotsQueryDto } from './dto/booking-slots-query.dto';
 import { BookingLayoutDto } from './dto/booking-layout.dto';
+import { FINE_SLOT_STEP_MINUTES } from './booking/booking-slot.type';
 import { FindAvailableSlotsDto } from './dto/find-available-slots.dto';
 import { WorkingStaffQueryDto } from './dto/working-staff-query.dto';
 
@@ -53,6 +54,12 @@ export class AvailabilityController {
       items: [{ serviceId: query.serviceId, staffId: query.staffId }],
       excludeAppointmentId: query.excludeAppointmentId,
       scope: query.scope,
+      /*
+       * El panel muestra los horarios en un selector, sin el tope de filas de
+       * una lista de WhatsApp, así que no tiene por qué ofrecer de a media hora:
+       * quien registra una atención que ya ocurrió necesita poder decir 09:15.
+       */
+      stepMinutes: FINE_SLOT_STEP_MINUTES,
     });
   }
 

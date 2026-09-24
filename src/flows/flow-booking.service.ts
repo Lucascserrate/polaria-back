@@ -29,6 +29,7 @@ import {
   type FlowOption,
   type FlowResponse,
 } from './flow-screen';
+import { FINE_SLOT_STEP_MINUTES } from '../availability/booking/booking-slot.type';
 
 const DEFAULT_TIMEZONE = 'America/La_Paz';
 
@@ -53,6 +54,21 @@ export type FlowBookingPayload = {
  * profesional que no hace ese servicio o un horario que no está libre se rechazan
  * aunque vengan bien formados.
  */
+/**
+ * Cada cuánto ofrecer un horario en el Flow.
+ *
+ * Fino, a diferencia del WhatsApp nativo: acá los horarios van en un `Dropdown`,
+ * que no tiene el tope de diez filas de una lista y muestra la jornada entera
+ * sin paginar. Con media hora se perdían los horarios que no caen en la grilla
+ * —el final del día de un local que cierra 18:15, el hueco que deja una barba de
+ * 20 minutos— sin ganar nada a cambio.
+ *
+ * Es el mismo valor al listar y al confirmar, y tiene que seguir siéndolo: la
+ * confirmación vuelve a buscar el horario elegido contra la grilla, y con un
+ * paso más grueso las 09:15 no existirían.
+ */
+const FLOW_SLOT_STEP_MINUTES = FINE_SLOT_STEP_MINUTES;
+
 @Injectable()
 export class FlowBookingService {
   private readonly logger = new Logger(FlowBookingService.name);
@@ -348,6 +364,7 @@ export class FlowBookingService {
       date,
       items: [{ serviceId, staffId }],
       startTime: new Date(slot),
+      stepMinutes: FLOW_SLOT_STEP_MINUTES,
     });
 
     if (!confirmation.available) {
@@ -458,6 +475,7 @@ export class FlowBookingService {
         tenantId,
         date: params.date,
         items: [{ serviceId: params.serviceId, staffId: params.staffId }],
+        stepMinutes: FLOW_SLOT_STEP_MINUTES,
       }),
       this.resolveTimezone(tenantId),
     ]);

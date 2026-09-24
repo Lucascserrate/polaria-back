@@ -100,6 +100,18 @@ export type BookingSlotsQuery = {
    * que nadie pensó, y el nombre dice por qué cambia la regla.
    */
   scope?: 'client' | 'panel';
+  /**
+   * Cada cuánto ofrecer un horario. Ver `DEFAULT_SLOT_STEP_MINUTES`.
+   *
+   * Lo decide el canal porque es una decisión de **presentación**: depende de
+   * cuántos horarios entran en su componente, que el motor no conoce. Omitirlo
+   * usa el paso del canal más apretado, que es el que había para todos.
+   *
+   * Tiene que ser el mismo al listar y al confirmar: el horario elegido se
+   * vuelve a buscar contra la grilla, y con un paso más grueso las 09:15 no
+   * existirían y la reserva se caería con "ese horario acaba de ocuparse".
+   */
+  stepMinutes?: number;
 };
 
 /**
@@ -935,7 +947,7 @@ export class BookingAvailabilityService {
     const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
       unionWorkingRanges(workingRangesByStaff, staffIds),
       shortestPlanDuration,
-      DEFAULT_SLOT_STEP_MINUTES,
+      query.stepMinutes ?? DEFAULT_SLOT_STEP_MINUTES,
       /*
        * El panel genera además los que se pasan del cierre. Que terminen
        * ofreciéndose o no lo decide `buildBookingSlots`, que es quien sabe si
