@@ -98,7 +98,12 @@ const query = {
   scope: 'client' as const,
 };
 
-const find = (slots: Array<{ startTime: Date }>, hour: number, minute = 0) =>
+/** El horario que empieza a esa hora, conservando su tipo. */
+const find = <T extends { startTime: Date }>(
+  slots: T[],
+  hour: number,
+  minute = 0,
+) =>
   slots.find((slot) => slot.startTime.getTime() === at(hour, minute).getTime());
 
 describe('reservar cerca del cierre', () => {
