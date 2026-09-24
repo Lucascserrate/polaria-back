@@ -9,6 +9,7 @@ import {
 } from './booking-flow.machine';
 import {
   BookingSessionState,
+  encodeSlotRange,
   RESERVED_VALUES,
   StaffPreference,
 } from './booking-flow.types';
@@ -206,6 +207,63 @@ describe('isValueValidForState', () => {
     expect(isValueValidForState(BookingSessionState.ASK_DATE, 'viernes')).toBe(
       false,
     );
+  });
+
+  /**
+   * El paso de horarios ofrece cuatro cosas distintas y las cuatro vuelven por
+   * acá. Que una quede afuera no se ve como un error: el cliente toca una fila
+   * que el propio paso le ofreció y recibe "esa opción ya no está vigente".
+   */
+  it('ASK_SLOT admite un tramo del día', () => {
+    const tramo = encodeSlotRange(
+      new Date('2026-09-24T13:45:00.000Z'),
+      new Date('2026-09-24T15:15:00.000Z'),
+    );
+
+    expect(isValueValidForState(BookingSessionState.ASK_SLOT, tramo)).toBe(
+      true,
+    );
+  });
+
+  it('ASK_SLOT admite volver del tramo a todos los horarios', () => {
+    expect(
+      isValueValidForState(
+        BookingSessionState.ASK_SLOT,
+        RESERVED_VALUES.ALL_TIMES,
+      ),
+    ).toBe(true);
+  });
+
+  it('ASK_SLOT rechaza un tramo ilegible', () => {
+    expect(
+      isValueValidForState(BookingSessionState.ASK_SLOT, 'range:ayer~hoy'),
+    ).toBe(false);
+  });
+
+  /*
+   * La lista completa de lo que este paso puede producir. Si mañana se agrega
+   * una opción más, este test es el que obliga a declararla acá también.
+   */
+  it('ASK_SLOT acepta todo lo que el paso ofrece, y nada más', () => {
+    const ofrecidos = [
+      '2026-09-24T13:00:00.000Z',
+      RESERVED_VALUES.OTHER_DAYS,
+      RESERVED_VALUES.ALL_TIMES,
+      RESERVED_VALUES.MORE,
+      encodeSlotRange(new Date(), new Date()),
+    ];
+
+    for (const value of ofrecidos) {
+      expect(isValueValidForState(BookingSessionState.ASK_SLOT, value)).toBe(
+        true,
+      );
+    }
+
+    for (const value of ['', 'mañana', RESERVED_VALUES.CONFIRM]) {
+      expect(isValueValidForState(BookingSessionState.ASK_SLOT, value)).toBe(
+        false,
+      );
+    }
   });
 
   it('ASK_SLOT exige un instante ISO', () => {

@@ -3,6 +3,7 @@ import {
   isTerminalState,
   RESERVED_VALUES,
   StaffPreference,
+  decodeSlotRange,
 } from './booking-flow.types';
 import {
   decodeSelection,
@@ -140,9 +141,19 @@ export function isValueValidForState(
       return value === RESERVED_VALUES.ANY_STAFF || value.length > 0;
 
     case BookingSessionState.ASK_SLOT:
-      // "Ver otros días" es una respuesta legítima de este paso: no elige
-      // horario, abre el selector de fecha.
-      return value === RESERVED_VALUES.OTHER_DAYS || isIsoInstant(value);
+      /*
+       * Este paso produce cuatro cosas distintas, y las cuatro vuelven por acá:
+       * un horario, un **tramo del día** —cuando los horarios no entran en una
+       * pantalla y se agrupan—, "Ver otros días" y la vuelta del tramo a la
+       * lista completa. Dejar afuera a cualquiera de ellas la convierte en una
+       * opción que el propio paso ofreció y después rechaza como inválida.
+       */
+      return (
+        value === RESERVED_VALUES.OTHER_DAYS ||
+        value === RESERVED_VALUES.ALL_TIMES ||
+        decodeSlotRange(value) !== null ||
+        isIsoInstant(value)
+      );
 
     case BookingSessionState.CONFIRM:
       return value === RESERVED_VALUES.CONFIRM;
