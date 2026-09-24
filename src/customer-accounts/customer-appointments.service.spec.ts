@@ -3,6 +3,7 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { CustomerAppointmentsService } from './customer-appointments.service';
 import { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import type { AppointmentsService } from '../appointments/appointments.service';
+import type { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
 import type { BusinessPhotosService } from '../business-photos/business-photos.service';
 import type { TenantsService } from '../tenants/tenants.service';
 import type { Appointment } from '../appointments/entities/appointment.entity';
@@ -37,6 +38,8 @@ const tenant = (overrides: Partial<Tenant> = {}): Tenant =>
 /** Un tramo tal como sale de la base, con lo pactado al reservar. */
 const segment = (overrides: Record<string, unknown> = {}) =>
   ({
+    serviceId: 'svc-corte',
+    staffId: 'staff-fernando',
     service: { name: 'Corte' },
     staff: { name: 'Fernando' },
     startTime: new Date('2026-09-24T20:30:00.000Z'),
@@ -79,6 +82,10 @@ const build = (options: {
     .mockResolvedValue(options.one === undefined ? appointment() : options.one);
 
   const cancelByCustomerAccount = jest.fn().mockResolvedValue(null);
+  const editBookingByTenant = jest.fn().mockResolvedValue({ warnings: [] });
+
+  const getAvailableSlots = jest.fn().mockResolvedValue([]);
+  const getServiceableDates = jest.fn().mockResolvedValue([]);
 
   const findBySlug = jest
     .fn()
@@ -100,9 +107,14 @@ const build = (options: {
       findPastByCustomerAccount,
       findByCustomerAccountAndId,
       cancelByCustomerAccount,
+      editBookingByTenant,
     } as unknown as AppointmentsService,
     { findBySlug } as unknown as TenantsService,
     { covers } as unknown as BusinessPhotosService,
+    {
+      getAvailableSlots,
+      getServiceableDates,
+    } as unknown as BookingAvailabilityService,
   );
 
   return {
@@ -111,6 +123,9 @@ const build = (options: {
     findPastByCustomerAccount,
     findByCustomerAccountAndId,
     cancelByCustomerAccount,
+    editBookingByTenant,
+    getAvailableSlots,
+    getServiceableDates,
     findBySlug,
     covers,
   };
@@ -358,6 +373,122 @@ describe('CustomerAppointmentsService', () => {
       ).rejects.toBeInstanceOf(ConflictException);
 
       expect(cancelByCustomerAccount).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('mover el turno', () => {
+    /*
+     * El horario que el turno ya ocupa no puede bloquearse a sí mismo: sin la
+     * exclusión, el único horario que no se le ofrecería sería el suyo.
+     */
+    it('no cuenta el propio turno como ocupado', async () => {
+      const { service, getAvailableSlots } = build({ one: upcoming() });
+
+      await service.reschedulableSlots({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+        date: '2026-10-08',
+      });
+
+      expect(getAvailableSlots).toHaveBeenCalledWith(
+        expect.objectContaining({ excludeAppointmentId: 'appt-1' }),
+      );
+    });
+
+    /*
+     * Mover la hora no es cambiar de manos: se buscan huecos para los mismos
+     * servicios y el mismo profesional que ya tenía.
+     */
+    it('busca los mismos servicios y el mismo profesional', async () => {
+      const { service, getAvailableSlots } = build({
+        one: appointment({
+          startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          services: [segment({ serviceId: 'svc-1', staffId: 'staff-1' })],
+        }),
+      });
+
+      await service.reschedulableSlots({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+        date: '2026-10-08',
+      });
+
+      expect(getAvailableSlots).toHaveBeenCalledWith(
+        expect.objectContaining({
+          items: [{ serviceId: 'svc-1', staffId: 'staff-1' }],
+        }),
+      );
+    });
+
+    /*
+     * Es la misma cita y no una nueva: conserva su id, y por lo tanto el enlace
+     * que el cliente tenga guardado y su lugar en el historial.
+     */
+    it('edita el turno que ya existe en lugar de crear otro', async () => {
+      const { service, editBookingByTenant } = build({
+        one: appointment({
+          startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+          services: [segment({ serviceId: 'svc-1', staffId: 'staff-1' })],
+        }),
+      });
+
+      await service.reschedule({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+        startTime: '2026-10-08T13:00:00.000Z',
+      });
+
+      expect(editBookingByTenant).toHaveBeenCalledWith('appt-1', TENANT_ID, {
+        startTime: '2026-10-08T13:00:00.000Z',
+        items: [{ serviceId: 'svc-1', staffId: 'staff-1' }],
+      });
+    });
+
+    /*
+     * La misma pregunta en los tres caminos: ofrecer horarios para un turno que
+     * ya empezó y rechazarlo recién al confirmar sería dejar elegir algo que
+     * nunca se iba a poder aplicar.
+     */
+    it('un turno que ya empezó no ofrece horarios', async () => {
+      const { service, getAvailableSlots } = build({ one: started() });
+
+      await expect(
+        service.reschedulableSlots({
+          accountId: ACCOUNT_ID,
+          appointmentId: 'appt-1',
+          date: '2026-10-08',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+
+      expect(getAvailableSlots).not.toHaveBeenCalled();
+    });
+
+    it('un turno cancelado tampoco se mueve', async () => {
+      const { service } = build({
+        one: appointment({
+          status: AppointmentStatus.CANCELLED,
+          startTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
+        }),
+      });
+
+      await expect(
+        service.reschedule({
+          accountId: ACCOUNT_ID,
+          appointmentId: 'appt-1',
+          startTime: '2026-10-08T13:00:00.000Z',
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('un turno ajeno es 404 también para mover', async () => {
+      const { service } = build({ one: null });
+
+      await expect(
+        service.reschedulableDays({
+          accountId: ACCOUNT_ID,
+          appointmentId: 'appt-9',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 

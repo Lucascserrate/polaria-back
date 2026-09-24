@@ -9,7 +9,10 @@ import {
 import { AppointmentsService } from '../appointments/appointments.service';
 import { SlotAlreadyTakenError } from '../appointments/slot-already-taken.error';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
-import { currentDateInTimeZone } from '../availability/utils/availability.helpers';
+import {
+  currentDateInTimeZone,
+  nextDates,
+} from '../availability/utils/availability.helpers';
 import { resolveBusinessStatus } from '../business_hours/business-status';
 import { BusinessHoursService } from '../business_hours/business_hours.service';
 import { ClientsService } from '../clients/clients.service';
@@ -520,19 +523,3 @@ export class PublicBookingService {
  * índice único—, porque para el cliente son el mismo hecho.
  */
 const SLOT_TAKEN_MESSAGE = 'Ese horario se acaba de ocupar. Elegí otro.';
-
-/**
- * `count` fechas consecutivas en formato `YYYY-MM-DD`, empezando por `from`.
- *
- * La aritmética va en UTC a propósito: son fechas de calendario, no instantes.
- * Sumarle un día a un `Date` local se rompe el domingo del cambio de hora, que
- * dura 23 o 25 horas.
- */
-function nextDates(from: string, count: number): string[] {
-  const [year, month, day] = from.split('-').map(Number);
-  const start = Date.UTC(year, month - 1, day);
-
-  return Array.from({ length: count }, (_, index) =>
-    new Date(start + index * 86_400_000).toISOString().slice(0, 10),
-  );
-}

@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Get,
   HttpCode,
@@ -13,7 +14,11 @@ import { ApiTags } from '@nestjs/swagger';
 
 import { CustomerAccountId, CustomerGuard } from './customer-session';
 import { CustomerAppointmentsService } from './customer-appointments.service';
-import { CustomerAppointmentsQueryDto } from './dto/customer-appointments-query.dto';
+import {
+  CustomerAppointmentsQueryDto,
+  CustomerSlotsQueryDto,
+} from './dto/customer-appointments-query.dto';
+import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 
 /**
  * Los turnos de quien reserva.
@@ -107,5 +112,58 @@ export class CustomerAppointmentsController {
     @Param('id', ParseUUIDPipe) appointmentId: string,
   ) {
     return this.appointments.cancel({ accountId, appointmentId });
+  }
+
+  /**
+   * Los días a los que se podría mover este turno.
+   *
+   * Cuelga del turno y no del negocio, y ahí está la diferencia con `/slots` de
+   * la página pública: **qué se busca y qué no cuenta como ocupado salen del id
+   * de la URL**, que la sesión ya demostró que es de esta cuenta. Nada de eso
+   * viaja desde el navegador, así que no hay forma de pedir horarios excluyendo
+   * la cita de otro.
+   */
+  @Get(':id/days')
+  days(
+    @CustomerAccountId() accountId: string,
+    @Param('id', ParseUUIDPipe) appointmentId: string,
+  ) {
+    return this.appointments.reschedulableDays({ accountId, appointmentId });
+  }
+
+  /** Los horarios de un día para mover este turno. Ver `reschedulableSlots`. */
+  @Get(':id/slots')
+  slots(
+    @CustomerAccountId() accountId: string,
+    @Param('id', ParseUUIDPipe) appointmentId: string,
+    @Query() query: CustomerSlotsQueryDto,
+  ) {
+    return this.appointments.reschedulableSlots({
+      accountId,
+      appointmentId,
+      date: query.date,
+    });
+  }
+
+  /**
+   * Mueve el turno a otro horario.
+   *
+   * `POST` sobre el turno que ya existe y no un `POST /bookings`: es la **misma**
+   * cita con otra hora, conserva su id y por lo tanto el enlace que el cliente
+   * tenga guardado. Devuelve el turno actualizado, que es lo que la pantalla
+   * redibuja.
+   */
+  @Post(':id/reschedule')
+  @HttpCode(HttpStatus.OK)
+  reschedule(
+    @CustomerAccountId() accountId: string,
+    @Param('id', ParseUUIDPipe) appointmentId: string,
+    @Body() body: RescheduleAppointmentDto,
+  ) {
+    return this.appointments.reschedule({
+      accountId,
+      appointmentId,
+      startTime: body.startTime,
+    });
   }
 }

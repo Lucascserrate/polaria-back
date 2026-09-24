@@ -26,3 +26,11 @@ export class CustomerAppointmentsQueryDto {
   })
   business?: string;
 }
+
+/** El día del que se piden horarios al mover un turno. */
+export class CustomerSlotsQueryDto {
+  @ApiPropertyOptional({ example: '2026-10-08' })
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, { message: 'date tiene que ser YYYY-MM-DD' })
+  date!: string;
+}

@@ -117,3 +117,22 @@ const getTimeZoneOffset = (date: Date, timeZone: string): number => {
 
   return (asUTC - date.getTime()) / 60_000;
 };
+
+/**
+ * `count` fechas consecutivas en formato `YYYY-MM-DD`, empezando por `from`.
+ *
+ * La aritmética va en UTC a propósito: son fechas de calendario, no instantes.
+ * Sumarle un día a un `Date` local se rompe el domingo del cambio de hora, que
+ * dura 23 o 25 horas.
+ *
+ * Vive acá y no en la página pública desde que hay dos pantallas que preguntan
+ * lo mismo —qué días atiende el negocio—: la de reservar y la de mover un turno.
+ */
+export const nextDates = (from: string, count: number): string[] => {
+  const [year, month, day] = from.split('-').map(Number);
+  const start = Date.UTC(year, month - 1, day);
+
+  return Array.from({ length: count }, (_, index) =>
+    new Date(start + index * 86_400_000).toISOString().slice(0, 10),
+  );
+};

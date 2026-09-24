@@ -9,6 +9,12 @@ import {
   describeStaff,
 } from '../appointments/appointment-naming';
 import { AppointmentsService } from '../appointments/appointments.service';
+import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
+import {
+  currentDateInTimeZone,
+  nextDates,
+} from '../availability/utils/availability.helpers';
+import { blocksAgenda } from '../appointments/entities/appointment.entity';
 import { BusinessPhotosService } from '../business-photos/business-photos.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { toPrice } from '../services/quoted-price';
@@ -140,6 +146,7 @@ export class CustomerAppointmentsService {
     private readonly appointmentsService: AppointmentsService,
     private readonly tenantsService: TenantsService,
     private readonly businessPhotos: BusinessPhotosService,
+    private readonly bookingAvailability: BookingAvailabilityService,
   ) {}
 
   /**
@@ -295,6 +302,140 @@ export class CustomerAppointmentsService {
   }
 
   /**
+   * Qué días se le pueden ofrecer a un turno que se está moviendo.
+   *
+   * Es el filtro grueso del calendario —qué días abre el negocio y tiene gente
+   * que pueda con esos servicios—, el mismo que usa la página de reservas. No
+   * mira ocupación, así que la cita que se está moviendo no lo altera.
+   */
+  async reschedulableDays(params: {
+    accountId: string;
+    appointmentId: string;
+    days?: number;
+  }): Promise<string[]> {
+    const appointment = await this.movable(params);
+    const timezone = appointment.tenant.timezone;
+
+    return this.bookingAvailability.getServiceableDates({
+      tenantId: appointment.tenantId,
+      dates: nextDates(
+        currentDateInTimeZone(timezone, new Date()),
+        params.days ?? DEFAULT_RESCHEDULE_DAYS,
+      ),
+      items: itemsOf(appointment),
+    });
+  }
+
+  /**
+   * Los horarios de un día para mover el turno.
+   *
+   * **La cita que se mueve no cuenta como ocupada**: sin eso, el horario que ya
+   * tiene sería el único que no se le ofrece, y "cambiar de las 9:00 a las 9:00
+   * del martes" dejaría de existir por bloquearse a sí misma. Eso es
+   * `excludeAppointmentId`, y no viaja desde el navegador: sale del id de la URL,
+   * que es el mismo que ya demostró ser de esta cuenta.
+   *
+   * Los servicios y el profesional también salen del turno. **Se conserva quien
+   * atiende**, y es una decisión: mover la hora no es cambiar de manos, y
+   * ofrecer en silencio horarios de otra persona sorprendería a quien reservó
+   * con alguien. Quien quiera cambiar de profesional cancela y reserva de nuevo.
+   */
+  async reschedulableSlots(params: {
+    accountId: string;
+    appointmentId: string;
+    date: string;
+  }): Promise<Array<{ startTime: string; endTime: string }>> {
+    const appointment = await this.movable(params);
+
+    const slots = await this.bookingAvailability.getAvailableSlots({
+      tenantId: appointment.tenantId,
+      date: params.date,
+      items: itemsOf(appointment),
+      excludeAppointmentId: appointment.id,
+      scope: 'client',
+    });
+
+    return slots.map((slot) => ({
+      startTime: slot.startTime.toISOString(),
+      endTime: slot.endTime.toISOString(),
+    }));
+  }
+
+  /**
+   * Mueve el turno a otro horario y devuelve cómo quedó.
+   *
+   * **Es la misma cita, no una nueva**: conserva el id, el historial y el enlace
+   * que el cliente pueda tener guardado. Pasa por `editBookingByTenant`, que es
+   * el mismo mecanismo del drawer del panel y el que ya usa WhatsApp, así que
+   * "cambiar un turno" tiene una sola implementación: valida, replanifica los
+   * tramos y los reescribe en una transacción.
+   *
+   * Acá no se decide ninguna regla de agenda: se traduce lo que eligió el
+   * cliente al estado deseado que ese método espera. La pertenencia ya la
+   * comprobó `movable`, porque `editBookingByTenant` es la edición del negocio y
+   * no filtra por cuenta.
+   */
+  async reschedule(params: {
+    accountId: string;
+    appointmentId: string;
+    startTime: string;
+  }): Promise<CustomerAppointmentDetail> {
+    const appointment = await this.movable(params);
+
+    await this.appointmentsService.editBookingByTenant(
+      appointment.id,
+      appointment.tenantId,
+      {
+        startTime: new Date(params.startTime).toISOString(),
+        items: inOrderOfCare(appointment).map((segment) => ({
+          serviceId: segment.serviceId,
+          staffId: segment.staffId,
+        })),
+      },
+    );
+
+    return this.findOne(params);
+  }
+
+  /**
+   * El turno de esta cuenta que todavía se puede mover, o el error que explica
+   * por qué no.
+   *
+   * Los tres caminos de reagendar —los días, los horarios y el cambio— arrancan
+   * con la misma pregunta, y tiene que contestarse igual en los tres: ofrecer
+   * horarios para un turno que ya empezó y recién rechazarlo al confirmar sería
+   * dejar que alguien elija algo que nunca se iba a poder aplicar.
+   */
+  private async movable(params: {
+    accountId: string;
+    appointmentId: string;
+  }): Promise<Appointment> {
+    const appointment =
+      await this.appointmentsService.findByCustomerAccountAndId({
+        customerAccountId: params.accountId,
+        appointmentId: params.appointmentId,
+      });
+
+    if (!appointment) {
+      throw new NotFoundException('Turno no encontrado');
+    }
+
+    if (!blocksAgenda(appointment.status)) {
+      throw new ConflictException(
+        'Ese turno ya no está activo, así que no se puede mover.',
+      );
+    }
+
+    if (appointment.startTime < new Date()) {
+      throw new ConflictException(
+        'Ese turno ya empezó, así que no se puede mover desde acá. Escribile al negocio.',
+      );
+    }
+
+    return appointment;
+  }
+
+  /**
    * Las vistas de una lista de turnos, con la foto de cada negocio.
    *
    * Las fotos se piden todas juntas y no turno por turno: el historial de quien
@@ -345,6 +486,21 @@ export class CustomerAppointmentsService {
     return tenant.id;
   }
 }
+
+/** Un mes de calendario: lo mismo que ofrece la página de reservas. */
+const DEFAULT_RESCHEDULE_DAYS = 30;
+
+/**
+ * El turno leído como lo que el motor de disponibilidad espera.
+ *
+ * Servicio y profesional de cada tramo, en orden: es lo que hace que mover el
+ * turno busque hueco para **lo mismo** que ya estaba reservado.
+ */
+const itemsOf = (appointment: Appointment) =>
+  inOrderOfCare(appointment).map((segment) => ({
+    serviceId: segment.serviceId,
+    staffId: segment.staffId,
+  }));
 
 /**
  * Los tramos del turno en orden de atención.
