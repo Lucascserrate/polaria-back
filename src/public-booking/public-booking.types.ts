@@ -174,4 +174,5 @@ export type PublicBookingConfirmation = {
   durationMinutes: number;
   /** En orden de atención. Nunca vacío. */
   services: PublicBookedService[];
+  note: string | null;
 };

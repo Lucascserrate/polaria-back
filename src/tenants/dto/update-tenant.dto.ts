@@ -45,5 +45,9 @@ export class UpdateTenantDto extends PartialType(CreateTenantDto) {
 
   @IsOptional()
   @IsString()
+  appointmentNote?: string | null;
+
+  @IsOptional()
+  @IsString()
   logoUrl?: string | null;
 }

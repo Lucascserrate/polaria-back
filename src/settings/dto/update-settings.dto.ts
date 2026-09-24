@@ -12,6 +12,7 @@ import {
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
+import { APPOINTMENT_NOTE_MAX_LENGTH } from '../../tenants/appointment-note';
 import { BUSINESS_TYPES } from '../../tenants/business-type';
 import { CURRENCIES } from '../../tenants/currency';
 import { WELCOME_MESSAGE_MAX_LENGTH } from '../../conversations/welcome-menu';
@@ -156,6 +157,18 @@ export class UpdateSettingsDto {
   @IsString()
   @MaxLength(WELCOME_MESSAGE_MAX_LENGTH)
   welcomeMessage?: string | null;
+
+  /**
+   * La indicación que el cliente lee junto a su turno.
+   *
+   * `null` —y la cadena vacía, que se guarda como `null`— la borran y apagan la
+   * sección. Ausente la deja como está. No hay texto de fábrica al que volver:
+   * una condición del negocio no la puede escribir Polaria.
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(APPOINTMENT_NOTE_MAX_LENGTH)
+  appointmentNote?: string | null;
 
   @IsOptional()
   @ValidateNested()

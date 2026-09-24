@@ -443,6 +443,7 @@ export class PublicBookingService {
         startTime: confirmation.startTime.toISOString(),
         endTime: confirmation.endTime.toISOString(),
         currency: tenant.currency,
+        note: tenant.appointmentNote ?? null,
         durationMinutes: chosen.reduce(
           (total, service) => total + service.durationMinutes,
           0,

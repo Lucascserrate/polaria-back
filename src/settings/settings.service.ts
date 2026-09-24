@@ -32,6 +32,10 @@ import {
 import { buildReminderPreview } from '../reminders/reminder-message';
 import { REMINDER_TEMPLATE_BUTTONS } from '../whatsapp/reminder-template';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
+import {
+  APPOINTMENT_NOTE_MAX_LENGTH,
+  normalizeAppointmentNote,
+} from '../tenants/appointment-note';
 import { buildPublicBookingUrl } from '../tenants/public-booking-url';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { tenantAssetPath } from '../cloudinary/asset-path';
@@ -100,6 +104,17 @@ type SettingsResponse = {
   publicBookingUrl: string | null;
   /** Dirección del local en texto. Ver la columna `address` del tenant. */
   address: string | null;
+  /**
+   * La indicación que el negocio le muestra al cliente junto a su turno.
+   *
+   * Va como objeto por lo mismo que `welcomeMessage`: el panel necesita el
+   * límite para dibujar el contador sin copiarlo, y una segunda copia del número
+   * se desincroniza sola. `text` en `null` es "no hay nada que decir".
+   */
+  appointmentNote: {
+    text: string | null;
+    maxLength: number;
+  };
   /** Ver `BUSINESS_TYPES`. `null` mientras la configuración inicial no lo cargó. */
   businessType: string | null;
   timezone: string;
@@ -335,6 +350,10 @@ export class SettingsService {
         this.configService.get<string>('PUBLIC_SITE_BASE_URL'),
       ),
       address: tenant.address,
+      appointmentNote: {
+        text: tenant.appointmentNote,
+        maxLength: APPOINTMENT_NOTE_MAX_LENGTH,
+      },
       businessType: tenant.businessType ?? null,
       timezone: tenant.timezone,
       dialCode: dialCodeForTimeZone(tenant.timezone),
@@ -529,6 +548,16 @@ export class SettingsService {
     if (dto.welcomeMessage !== undefined) {
       await this.tenantsService.update(tenantId, {
         welcomeMessage: dto.welcomeMessage?.trim() || null,
+      });
+    }
+
+    /*
+     * Vaciar el campo apaga la sección: acá `null` no cae a ningún texto de
+     * fábrica, porque nadie puede escribir por el negocio una condición suya.
+     */
+    if (dto.appointmentNote !== undefined) {
+      await this.tenantsService.update(tenantId, {
+        appointmentNote: normalizeAppointmentNote(dto.appointmentNote),
       });
     }
 

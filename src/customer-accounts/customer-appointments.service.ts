@@ -106,6 +106,15 @@ export interface CustomerAppointmentDetail extends CustomerAppointmentView {
   currency: string;
   address: string | null;
   location: { latitude: number; longitude: number } | null;
+  /**
+   * Lo que el negocio quiere que se lea junto a este turno, o `null`.
+   *
+   * Una seña que hay que transferir, un timbre que no anda. Viaja en el detalle
+   * y no en la lista porque es un párrafo: en una tarjeta no entraría, y en la
+   * pantalla del turno es donde alguien vuelve a leerlo antes de ir. Ver
+   * `appointment-note.ts`.
+   */
+  note: string | null;
 }
 
 /**
@@ -230,6 +239,7 @@ export class CustomerAppointmentsService {
       currency: appointment.tenant.currency,
       address: appointment.tenant.address ?? null,
       location: toLocation(appointment.tenant),
+      note: appointment.tenant.appointmentNote ?? null,
     };
   }
 

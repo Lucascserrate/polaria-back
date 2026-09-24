@@ -1,4 +1,4 @@
-import type { Request, Response } from 'express';
+import type { Response } from 'express';
 
 import { CustomerAuthController } from './customer-auth.controller';
 import { CUSTOMER_RETURN_TO_COOKIE } from './customer-google-auth.guard';
@@ -40,11 +40,12 @@ const build = (
     appointments as never,
   );
 
+  /* El request tal como llega del callback: con lo que dejó passport. */
   const req = {
     cookies: { [CUSTOMER_RETURN_TO_COOKIE]: '/historial/appt-1' },
     user:
       'profile' in options ? options.profile : { email: 'alguien@gmail.com' },
-  } as unknown as Request;
+  } as unknown as Parameters<CustomerAuthController['googleCallback']>[0];
 
   const redirected: string[] = [];
   const res = {

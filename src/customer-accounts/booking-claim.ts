@@ -112,7 +112,10 @@ export class BookingClaimService {
 
   /** Borra la cookie con el mismo dominio con el que se puso. */
   clear(res: Response): void {
-    res.clearCookie(BOOKING_CLAIM_COOKIE, withCookieDomain(AUTH_COOKIE_OPTIONS));
+    res.clearCookie(
+      BOOKING_CLAIM_COOKIE,
+      withCookieDomain(AUTH_COOKIE_OPTIONS),
+    );
   }
 
   private read(req: Request): string[] {

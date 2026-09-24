@@ -45,6 +45,10 @@ import { CustomerGuard, CustomerSessionService } from './customer-session';
     CustomerGuard,
     CustomerGoogleStrategy,
   ],
-  exports: [BookingClaimService, CustomerAccountsService, CustomerSessionService],
+  exports: [
+    BookingClaimService,
+    CustomerAccountsService,
+    CustomerSessionService,
+  ],
 })
 export class CustomerAccountsModule {}

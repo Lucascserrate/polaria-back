@@ -343,6 +343,22 @@ export class Tenant {
   @Column({ type: 'varchar', length: 1024, nullable: true })
   welcomeMessage!: string | null;
 
+  /**
+   * Lo que el negocio quiere que el cliente lea junto a su turno.
+   *
+   * Una seña que hay que transferir, un timbre que no anda, "vení con las uñas
+   * sin esmalte": indicaciones que no son un servicio ni un horario y que
+   * deciden si la persona aparece. Es la misma para todos los turnos, y por eso
+   * vive en el negocio y no en la cita. Ver `appointment-note.ts`.
+   *
+   * `NULL` es el estado normal y quiere decir que no hay nada que agregar: la
+   * sección no se dibuja. A diferencia de `welcomeMessage`, acá `NULL` no
+   * significa "el de fábrica" —no hay uno de fábrica— porque nadie puede
+   * escribir por el negocio una condición que es suya.
+   */
+  @Column({ type: 'varchar', length: 1000, nullable: true })
+  appointmentNote!: string | null;
+
   @Column({ nullable: true })
   googleRefreshToken?: string;
 
