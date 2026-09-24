@@ -6,7 +6,14 @@
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, In, LessThan, MoreThanOrEqual, Repository } from 'typeorm';
+import {
+  Between,
+  In,
+  IsNull,
+  LessThan,
+  MoreThanOrEqual,
+  Repository,
+} from 'typeorm';
 
 import {
   Appointment,
@@ -950,6 +957,46 @@ export class AppointmentsService {
       // su turno sin profesional asignado.
       withDeleted: true,
     });
+  }
+
+  /**
+   * Pasa a una cuenta los turnos que se reservaron sin ella.
+   *
+   * Es lo que hace que quien reservó como invitado y después inició sesión
+   * encuentre su turno en el historial, en lugar de una lista vacía. Qué turnos
+   * son lo decide la cookie del navegador que los creó, no esta consulta; ver
+   * `BookingClaimService`.
+   *
+   * **La condición que importa es `customerAccountId IS NULL`**, y va en el
+   * `UPDATE` y no en una lectura previa: un turno que ya tiene dueño no cambia
+   * de manos ni aunque alguien llegue con el id, y resolverlo en una sola
+   * sentencia deja fuera la carrera entre comprobar y escribir.
+   *
+   * Devuelve cuántos se vincularon, que es cero en el caso normal —alguien que
+   * ya tenía sesión— y no es un error.
+   */
+  async linkToCustomerAccount(params: {
+    appointmentIds: string[];
+    customerAccountId: string;
+  }): Promise<number> {
+    if (params.appointmentIds.length === 0) return 0;
+
+    const result = await this.appointmentRepository.update(
+      {
+        id: In(params.appointmentIds),
+        customerAccountId: IsNull(),
+      },
+      { customerAccountId: params.customerAccountId },
+    );
+
+    const linked = result.affected ?? 0;
+    if (linked > 0) {
+      this.logger.log(
+        `Turnos vinculados a una cuenta al iniciar sesión (accountId=${params.customerAccountId}, n=${linked}).`,
+      );
+    }
+
+    return linked;
   }
 
   findUpcomingByClientAndId(params: {

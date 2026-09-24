@@ -5,6 +5,7 @@ import { AppointmentsModule } from '../appointments/appointments.module';
 import { BusinessPhotosModule } from '../business-photos/business-photos.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { CustomerAccount } from './entities/customer-account.entity';
+import { BookingClaimService } from './booking-claim';
 import { CustomerAccountsService } from './customer-accounts.service';
 import { CustomerAppointmentsController } from './customer-appointments.controller';
 import { CustomerAppointmentsService } from './customer-appointments.service';
@@ -37,12 +38,13 @@ import { CustomerGuard, CustomerSessionService } from './customer-session';
   ],
   controllers: [CustomerAuthController, CustomerAppointmentsController],
   providers: [
+    BookingClaimService,
     CustomerAccountsService,
     CustomerAppointmentsService,
     CustomerSessionService,
     CustomerGuard,
     CustomerGoogleStrategy,
   ],
-  exports: [CustomerAccountsService, CustomerSessionService],
+  exports: [BookingClaimService, CustomerAccountsService, CustomerSessionService],
 })
 export class CustomerAccountsModule {}

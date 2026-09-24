@@ -1,7 +1,17 @@
-import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  Query,
+  Req,
+  Res,
+} from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 
+import { BookingClaimService } from '../customer-accounts/booking-claim';
 import { CustomerSessionService } from '../customer-accounts/customer-session';
 
 import { CreatePublicBookingDto } from './dto/create-public-booking.dto';
@@ -35,6 +45,7 @@ export class PublicBookingController {
   constructor(
     private readonly publicBookingService: PublicBookingService,
     private readonly customerSession: CustomerSessionService,
+    private readonly bookingClaim: BookingClaimService,
   ) {}
 
   @Get()
@@ -74,15 +85,29 @@ export class PublicBookingController {
    * atender a las dos versiones mientras el despliegue nuevo sale.
    */
   @Post('bookings')
-  createBooking(
+  async createBooking(
     @Param('slug') slug: string,
     @Body() dto: CreatePublicBookingDto,
     @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.publicBookingService.createBooking(
+    const accountId = this.customerSession.read(req);
+    const confirmation = await this.publicBookingService.createBooking(
       slug,
       dto,
-      this.customerSession.read(req),
+      accountId,
     );
+
+    /*
+     * Sin cuenta, el turno nace sin dueño y no aparecería en el historial de
+     * nadie. La cookie guarda que lo creó **este** navegador, que es lo que
+     * permite pasárselo a la cuenta si la persona inicia sesión a continuación.
+     * Con sesión no hace falta: ya quedó vinculado al escribirlo.
+     */
+    if (!accountId) {
+      this.bookingClaim.remember(req, res, confirmation.id);
+    }
+
+    return confirmation;
   }
 }

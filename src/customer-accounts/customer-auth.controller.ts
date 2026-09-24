@@ -12,7 +12,9 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { ApiTags } from '@nestjs/swagger';
 import type { Request, Response } from 'express';
+import { AppointmentsService } from '../appointments/appointments.service';
 import { AUTH_COOKIE_OPTIONS } from '../auth/utils/auth-cookies.util';
+import { BookingClaimService } from './booking-claim';
 import { dialCodeForTimeZone } from '../tenants/dial-code';
 import { CustomerAccountsService } from './customer-accounts.service';
 import {
@@ -49,6 +51,8 @@ export class CustomerAuthController {
   constructor(
     private readonly accounts: CustomerAccountsService,
     private readonly session: CustomerSessionService,
+    private readonly bookingClaim: BookingClaimService,
+    private readonly appointments: AppointmentsService,
   ) {}
 
   /** Manda a Google. El `?returnTo=` vuelve a la página donde estaba reservando. */
@@ -91,8 +95,42 @@ export class CustomerAuthController {
 
     const account = await this.accounts.findOrCreateByGoogle(profile);
     this.session.setCookie(res, account.id);
+    await this.claimPendingBookings(req, res, account.id);
 
     return res.redirect(returnTo);
+  }
+
+  /**
+   * Adopta los turnos que este navegador reservó sin cuenta.
+   *
+   * Va acá y no en un endpoint aparte porque es el único momento en que se sabe
+   * lo que hace falta: que **este** navegador creó esos turnos —lo dice la
+   * cookie— y de quién es la sesión que se acaba de abrir. Un endpoint que
+   * recibiera el id del turno tendría que confiar en quien lo manda.
+   *
+   * **No puede tumbar el login.** Alguien que inicia sesión para reservar no
+   * tiene por qué quedarse afuera porque una vinculación falló: el turno sigue
+   * existiendo y el negocio lo tiene en su agenda, que es lo que importa.
+   */
+  private async claimPendingBookings(
+    req: Request,
+    res: Response,
+    accountId: string,
+  ): Promise<void> {
+    const appointmentIds = this.bookingClaim.take(req, res);
+    if (appointmentIds.length === 0) return;
+
+    try {
+      await this.appointments.linkToCustomerAccount({
+        appointmentIds,
+        customerAccountId: accountId,
+      });
+    } catch (error) {
+      this.logger.error(
+        `No se pudieron vincular los turnos a la cuenta (accountId=${accountId}).`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
   }
 
   /**
