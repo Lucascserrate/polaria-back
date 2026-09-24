@@ -153,8 +153,16 @@ function toButton(option: {
  * El orden de las secciones es el de aparición de las opciones, así que quien
  * arma el paso decide qué va primero sin saber nada de secciones. Las filas sin
  * encabezado —"Ver otros días", "Cancelar"— quedan en una sección propia al
- * final, sin título.
+ * final.
+ *
+ * **Con más de una sección, WhatsApp exige título en todas**: una sin título
+ * hace que rechace el mensaje entero con "Title is required for multiple
+ * sections", y el cliente se queda sin respuesta. Por eso la de las filas
+ * fijas recibe uno cuando no está sola.
  */
+/** Encabezado de las filas que no son parte de la elección: salidas del paso. */
+const OTHER_OPTIONS_GROUP = 'Otras opciones';
+
 export function toListSections(
   options: Array<{
     selectionId: string;
@@ -177,6 +185,17 @@ export function toListSections(
       ...(option.group ? { title: option.group } : {}),
       rows: [toListRow(option)],
     });
+  }
+
+  /*
+   * WhatsApp acepta una sección sin título —es la lista común de todos los
+   * demás pasos— pero no una mezcla: en cuanto hay dos, las quiere todas
+   * tituladas.
+   */
+  if (sections.length > 1) {
+    for (const section of sections) {
+      if (!section.title) section.title = OTHER_OPTIONS_GROUP;
+    }
   }
 
   return sections;

@@ -363,7 +363,7 @@ describe('toListSections', () => {
     expect(sections.map((s) => s.title)).toEqual([
       'Próximos horarios',
       'Elegí un rato del día',
-      undefined,
+      'Otras opciones',
     ]);
     expect(sections[0].rows).toHaveLength(2);
     expect(sections[2].rows.map((r) => r.title)).toEqual([
@@ -398,5 +398,29 @@ describe('toListSections', () => {
         WHATSAPP_LIMITS.LIST_SECTION_TITLE_MAX,
       );
     }
+  });
+
+  /**
+   * WhatsApp acepta una sección sin título, pero no una mezcla: con dos o más
+   * las quiere todas tituladas. Sin esto rechaza el mensaje entero con "Title is
+   * required for multiple sections" y el cliente se queda esperando una
+   * respuesta que nunca llega.
+   */
+  it('con más de una sección, ninguna queda sin título', () => {
+    const sections = toListSections([
+      row('09:00', 'Próximos horarios'),
+      row('Cancelar'),
+    ]);
+
+    expect(sections).toHaveLength(2);
+    for (const section of sections) {
+      expect(section.title).toBeTruthy();
+    }
+  });
+
+  it('con una sola sección el título sigue siendo opcional', () => {
+    const [section] = toListSections([row('09:00'), row('Cancelar')]);
+
+    expect(section.title).toBeUndefined();
   });
 });

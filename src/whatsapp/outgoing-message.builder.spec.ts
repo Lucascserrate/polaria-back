@@ -378,3 +378,45 @@ describe('buildTemplatePayload', () => {
     ).toThrow(WhatsAppMessageBuildError);
   });
 });
+
+/**
+ * Lo que Meta rechaza y hay que atajar antes de enviar.
+ *
+ * Este caso llegó a producción: el paso de horarios armó una sección con título
+ * y otra sin él, WhatsApp devolvió 400 y el flujo quedó mudo. El error aparecía
+ * lejos del error, así que ahora falla acá, donde se arma el mensaje.
+ */
+describe('secciones de una lista', () => {
+  const row = (id: string) => ({ id, title: id });
+  const base = { to: '5490000000', body: 'Elegí', buttonText: 'Ver' };
+
+  it('rechaza una lista con secciones donde falta un título', () => {
+    expect(() =>
+      buildListPayload({
+        ...base,
+        sections: [
+          { title: 'Próximos horarios', rows: [row('a')] },
+          { rows: [row('b')] },
+        ],
+      }),
+    ).toThrow(/título en cada una/);
+  });
+
+  it('acepta una sola sección sin título, que es la lista de siempre', () => {
+    expect(() =>
+      buildListPayload({ ...base, sections: [{ rows: [row('a')] }] }),
+    ).not.toThrow();
+  });
+
+  it('acepta varias secciones si todas tienen título', () => {
+    expect(() =>
+      buildListPayload({
+        ...base,
+        sections: [
+          { title: 'Próximos horarios', rows: [row('a')] },
+          { title: 'Otras opciones', rows: [row('b')] },
+        ],
+      }),
+    ).not.toThrow();
+  });
+});

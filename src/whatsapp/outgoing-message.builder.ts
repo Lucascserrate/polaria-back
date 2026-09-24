@@ -292,6 +292,18 @@ export function buildListPayload(input: SendListInput): BuiltMessage {
     );
   }
 
+  /*
+   * Con una sola sección el título es opcional —es la lista común—, pero en
+   * cuanto hay dos WhatsApp las quiere todas tituladas. Se comprueba acá porque
+   * si no el mensaje sale, Meta lo rechaza con un 400 y el cliente se queda sin
+   * respuesta: el error aparece lejos del error.
+   */
+  if (sections.length > 1 && sections.some((section) => !section.title)) {
+    throw new WhatsAppMessageBuildError(
+      'Con más de una sección, WhatsApp exige un título en cada una.',
+    );
+  }
+
   const totalRows = sections.reduce(
     (total, section) => total + section.rows.length,
     0,
