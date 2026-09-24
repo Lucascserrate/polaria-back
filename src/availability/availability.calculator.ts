@@ -27,26 +27,33 @@ export class AvailabilityCalculator {
    * `resolveWorkingRanges`, así que acá no se conoce la zona horaria ni de quién
    * es el horario: puede ser el del negocio o la cobertura combinada del equipo.
    *
-   * **Además del paso regular, cada franja aporta el horario que termina justo
-   * al cierre.** Es el único candidato que puede no estar alineado con el paso, y
-   * existe porque la grilla arranca en la apertura: un local que abre 09:00 y
-   * cierra 18:15, con paso de media hora y un servicio de 30 minutos, llega hasta
-   * las 17:30 y deja fuera las 17:45, que entran enteras. Esos minutos del final
-   * no son un detalle: son el rato que el negocio agregó **a propósito** al
-   * correr su cierre a las 18:15 para poder atender a alguien más, y el sistema
-   * los estaba tirando.
+   * La grilla regular se completa con dos clases de horarios que el paso no
+   * puede producir y que son capacidad real del negocio:
    *
-   * Se nota sobre todo tarde, porque ahí es lo único que queda: a las 17:30, con
-   * el piso de anticipación en 17:45, el último horario de la grilla ya pasó y el
-   * siguiente no entra antes de cerrar. La respuesta era "no quedan horarios" con
-   * el local abierto y el equipo libre.
+   * 1. **El que termina justo al cierre de cada franja.** La grilla arranca en
+   *    la apertura, así que un local que abre 09:00 y cierra 18:15, con paso de
+   *    media hora y un servicio de 30 minutos, llega hasta las 17:30 y deja
+   *    fuera las 17:45, que entran enteras. Esos minutos son el rato que el
+   *    negocio agregó a propósito al correr su cierre, y se estaban tirando.
+   *
+   * 2. **Los `anchors`**, que es donde termina cada cita ya agendada. Sin ellos
+   *    el hueco que deja un servicio que no dura un múltiplo del paso no se
+   *    puede llenar: con citas de 20 minutos, la primera termina 09:20 y el
+   *    siguiente horario de la grilla es 09:30, así que se pierden 10 minutos
+   *    por cita. En una jornada de diez horas eso son diez citas que no entran
+   *    de un día que sí las aguantaba.
    */
-  generateCandidateSlots(
-    workingRanges: SlotRange[],
-    durationMinutes: number,
-    // El flujo guiado usa un paso más grueso; el conversacional necesitaba 5
-    // para poder buscar el horario más cercano al que pedía el usuario.
-    stepMinutes = 5,
+  generateCandidateSlots(input: {
+    workingRanges: SlotRange[];
+    durationMinutes: number;
+    /**
+     * Cada cuánto ofrecer un horario. Lo decide el canal, no el motor: ver
+     * `DEFAULT_SLOT_STEP_MINUTES`.
+     *
+     * El flujo conversacional usa 5 porque busca "el más cercano a lo que pidió
+     * el usuario" en vez de llenar una lista.
+     */
+    stepMinutes?: number;
     /**
      * Genera también los que **empiezan** dentro de la franja aunque terminen
      * después.
@@ -56,9 +63,36 @@ export class AvailabilityCalculator {
      * y no ofrecerlo era obligar a mover el horario de atención para agendarlo.
      * A un cliente se le sigue ofreciendo únicamente lo que entra entero.
      */
-    allowOverflow = false,
-  ): SlotRange[] {
+    allowOverflow?: boolean;
+    /**
+     * Instantes en los que además se quiere un horario, si entran.
+     *
+     * Son los finales de las citas ya agendadas. Se pasan como instantes
+     * sueltos y no como "las citas" porque acá no importa de quién son ni qué
+     * servicio eran: si alguien está libre a esa hora lo decide después
+     * `buildBookingSlots`, que es quien mira agenda por agenda.
+     */
+    anchors?: Date[];
+  }): SlotRange[] {
+    const {
+      workingRanges,
+      durationMinutes,
+      stepMinutes = 5,
+      allowOverflow = false,
+      anchors = [],
+    } = input;
+
     const slots: SlotRange[] = [];
+    const taken = new Set<number>();
+
+    const add = (startTime: Date) => {
+      if (taken.has(startTime.getTime())) return;
+      taken.add(startTime.getTime());
+      slots.push({
+        startTime,
+        endTime: addMinutes(startTime, durationMinutes),
+      });
+    };
 
     for (const range of workingRanges) {
       let slotStart = range.startTime;
@@ -68,33 +102,35 @@ export class AvailabilityCalculator {
           : addMinutes(slotStart, durationMinutes) <= range.endTime;
 
       while (fits()) {
-        const slotEnd = addMinutes(slotStart, durationMinutes);
-        slots.push({ startTime: slotStart, endTime: slotEnd });
+        add(slotStart);
         slotStart = addMinutes(slotStart, stepMinutes);
       }
 
-      /*
-       * El que termina exactamente al cierre.
-       *
-       * Se omite si no entra en la franja —una franja más corta que el servicio
-       * no da para nada— y si el paso ya lo generó, que es lo que pasa cuando la
-       * franja cierra en una hora redonda.
-       */
+      // El que termina exactamente al cierre. Se omite si no entra en la franja.
       const lastStart = addMinutes(range.endTime, -durationMinutes);
+      if (lastStart >= range.startTime) add(lastStart);
 
-      if (
-        lastStart >= range.startTime &&
-        !slots.some((slot) => slot.startTime.getTime() === lastStart.getTime())
-      ) {
-        slots.push({ startTime: lastStart, endTime: range.endTime });
+      /*
+       * Los anclajes de esta franja. Se les exige lo mismo que a la grilla: que
+       * empiecen dentro y que terminen antes de cerrar, salvo con desborde.
+       */
+      for (const anchor of anchors) {
+        if (anchor < range.startTime || anchor >= range.endTime) continue;
+        if (
+          !allowOverflow &&
+          addMinutes(anchor, durationMinutes) > range.endTime
+        ) {
+          continue;
+        }
+        add(anchor);
       }
     }
 
     /*
-     * Por instante y no por orden de armado: el horario de cierre de una franja
-     * puede caer antes que el último que generó el paso —pasa cuando la franja
-     * dura menos que dos servicios— y una grilla desordenada deja la lista de
-     * horarios desordenada, que es lo primero que se ve.
+     * Por instante y no por orden de armado: el horario de cierre y los
+     * anclajes se agregan al final de cada franja pero pueden caer en cualquier
+     * lado, y una grilla desordenada deja la lista de horarios desordenada, que
+     * es lo primero que se ve.
      */
     return slots.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
   }

@@ -112,11 +112,13 @@ export class AvailabilityService {
       }
 
       const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
-        unionWorkingRanges(
-          workingRangesByStaff,
-          workingStaff.map((staff) => staff.id),
-        ),
-        totalDuration,
+        {
+          workingRanges: unionWorkingRanges(
+            workingRangesByStaff,
+            workingStaff.map((staff) => staff.id),
+          ),
+          durationMinutes: totalDuration,
+        },
       );
 
       // Una sola consulta para todo el equipo: antes las citas se pedían dentro
@@ -188,11 +190,13 @@ export class AvailabilityService {
       }
 
       const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
-        unionWorkingRanges(
-          workingRangesByStaff,
-          staffCandidates.map((s) => s.id),
-        ),
-        totalDuration,
+        {
+          workingRanges: unionWorkingRanges(
+            workingRangesByStaff,
+            staffCandidates.map((s) => s.id),
+          ),
+          durationMinutes: totalDuration,
+        },
       );
 
       const appointmentsByStaff =

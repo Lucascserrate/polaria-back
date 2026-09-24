@@ -22,7 +22,7 @@ const ANA = 'staff-ana';
 const at = (hour: number, minute = 0) =>
   new Date(Date.UTC(2026, 8, 24, hour + 4, minute));
 
-function buildService() {
+function buildService(busy: Array<{ startTime: Date; endTime: Date }> = []) {
   const repository = {
     getTenant: jest.fn().mockResolvedValue({ timezone: TIMEZONE }),
     getServices: jest.fn().mockResolvedValue([
@@ -45,7 +45,7 @@ function buildService() {
     ),
     getStaffSchedules: jest.fn().mockResolvedValue({}),
     getScheduleBlocksByStaff: jest.fn().mockResolvedValue({ [ANA]: [] }),
-    getAppointmentsByStaff: jest.fn().mockResolvedValue({ [ANA]: [] }),
+    getAppointmentsByStaff: jest.fn().mockResolvedValue({ [ANA]: busy }),
   };
 
   const schedulingRules = {
@@ -177,6 +177,53 @@ describe('el paso entre horarios lo elige el canal', () => {
 
       expect(grueso.available).toBe(true);
       expect(fino.available).toBe(true);
+    });
+  });
+
+  /**
+   * El horario que arranca justo cuando alguien se libera.
+   *
+   * Es lo que hace que el paso deje de decidir cuánta agenda se aprovecha: con
+   * servicios que no duran un múltiplo del paso, el hueco que queda detrás de
+   * cada cita no se podía llenar.
+   */
+  describe('el final de una cita es un horario ofrecible', () => {
+    // Una cita de 09:00 a 09:20 deja libre desde las 09:20, que no cae en
+    // ninguna grilla: ni la de 30 ni la de 15.
+    const cita = [{ startTime: at(9), endTime: at(9, 20) }];
+
+    it('lo ofrece aunque no caiga en el paso', async () => {
+      const slots = await buildService(cita).getAvailableSlots(query);
+
+      expect(startsOf(slots)).toContain('09:20');
+    });
+
+    it('no ofrece los que se pisan con la cita', async () => {
+      const slots = await buildService(cita).getAvailableSlots(query);
+
+      expect(startsOf(slots)).not.toContain('09:00');
+    });
+
+    it('se puede confirmar, no sólo ver', async () => {
+      const confirmation = await buildService(cita).confirmSlot({
+        ...query,
+        startTime: at(9, 20),
+      });
+
+      expect(confirmation.available).toBe(true);
+    });
+
+    it('sin citas no aparece ningún horario suelto', async () => {
+      const slots = await buildService().getAvailableSlots(query);
+
+      expect(startsOf(slots)).toEqual([
+        '09:00',
+        '09:30',
+        '10:00',
+        '10:30',
+        '11:00',
+        '11:30',
+      ]);
     });
   });
 });

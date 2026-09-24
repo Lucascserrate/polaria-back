@@ -299,9 +299,12 @@ export class BookingAvailabilityService {
       if (staffIds.length === 0) return false;
 
       const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
-        unionWorkingRanges(workingRangesByStaff, staffIds),
-        service.durationMinutes,
-        DEFAULT_SLOT_STEP_MINUTES,
+        {
+          workingRanges: unionWorkingRanges(workingRangesByStaff, staffIds),
+          durationMinutes: service.durationMinutes,
+          stepMinutes: DEFAULT_SLOT_STEP_MINUTES,
+          anchors: endsOfBookedAppointments(appointmentsByStaff),
+        },
       );
 
       return (
@@ -944,17 +947,23 @@ export class BookingAvailabilityService {
      */
     const shortestPlanDuration = executionPlans[0].totalDurationMinutes;
 
-    const candidateSlots = this.availabilityCalculator.generateCandidateSlots(
-      unionWorkingRanges(workingRangesByStaff, staffIds),
-      shortestPlanDuration,
-      query.stepMinutes ?? DEFAULT_SLOT_STEP_MINUTES,
+    const candidateSlots = this.availabilityCalculator.generateCandidateSlots({
+      workingRanges: unionWorkingRanges(workingRangesByStaff, staffIds),
+      durationMinutes: shortestPlanDuration,
+      stepMinutes: query.stepMinutes ?? DEFAULT_SLOT_STEP_MINUTES,
       /*
        * El panel genera además los que se pasan del cierre. Que terminen
        * ofreciéndose o no lo decide `buildBookingSlots`, que es quien sabe si
        * alguien los empieza dentro de su jornada: acá sólo se los hace existir.
        */
-      scope === 'panel',
-    );
+      allowOverflow: scope === 'panel',
+      /*
+       * Dónde termina cada cita ya agendada. Es lo que permite ofrecer el
+       * horario que arranca justo cuando alguien se libera, en vez de esperar al
+       * siguiente escalón de la grilla y perder los minutos del medio.
+       */
+      anchors: endsOfBookedAppointments(appointmentsByStaff),
+    });
 
     return {
       candidateSlots,
@@ -1023,4 +1032,25 @@ function staffIdsForService(staffList: Staff[], serviceId: string): string[] {
       (staff.services ?? []).some((service) => service.id === serviceId),
     )
     .map((staff) => staff.id);
+}
+
+/**
+ * Dónde termina cada cita ya agendada, sin repetir instantes.
+ *
+ * Es el arranque de cada hueco de la jornada, y por eso sirve de candidato: el
+ * servicio que entra ahí es el que compacta la agenda en lugar de dejar
+ * minutos sueltos. Se juntan los de todo el equipo en una sola lista porque la
+ * grilla es una sola; de quién está libre a esa hora se ocupa después
+ * `buildBookingSlots`, agenda por agenda.
+ */
+function endsOfBookedAppointments(appointmentsByStaff: StaffBusyMap): Date[] {
+  const ends = new Map<number, Date>();
+
+  for (const appointments of Object.values(appointmentsByStaff)) {
+    for (const appointment of appointments) {
+      ends.set(appointment.endTime.getTime(), appointment.endTime);
+    }
+  }
+
+  return [...ends.values()];
 }
