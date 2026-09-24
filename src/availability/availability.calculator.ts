@@ -58,10 +58,10 @@ export class AvailabilityCalculator {
      * Genera también los que **empiezan** dentro de la franja aunque terminen
      * después.
      *
-     * Sólo lo pide el panel: un servicio de una hora a las 16:30 con cierre a
-     * las 17:00 es una decisión legítima del negocio —se queda media hora más—,
-     * y no ofrecerlo era obligar a mover el horario de atención para agendarlo.
-     * A un cliente se le sigue ofreciendo únicamente lo que entra entero.
+     * Un servicio de una hora a las 21:30 con cierre a las 22:00 es una reserva
+     * legítima: el negocio recibe gente hasta las 22:00 y termina lo que
+     * empezó. No generarlo obligaba a cargar un horario de cierre falso para
+     * poder agendar la última hora del día.
      */
     allowOverflow?: boolean;
     /**

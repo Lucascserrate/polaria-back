@@ -61,9 +61,10 @@ export type BookingSlot = SlotRange & {
   /**
    * Empieza dentro del horario de atención pero termina después.
    *
-   * Ausente en todo lo que se le ofrece a un cliente: ahí sólo entra lo que
-   * termina dentro. Lo produce el panel, para poder ofrecerlo **marcado** en
-   * lugar de esconderlo, y que quien agenda sepa lo que está decidiendo.
+   * Se ofrece en todos los canales: alcanza con empezar dentro, porque quien
+   * atiende termina lo que empezó. La marca existe para poder **decirlo** en
+   * lugar de esconder el horario — el panel la usa para avisar a quien agenda
+   * que esa cita se pasa del cierre.
    */
   endsAfterHours?: boolean;
 };

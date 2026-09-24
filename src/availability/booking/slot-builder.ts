@@ -74,9 +74,14 @@ export type BuildBookingSlotsInput = {
    * Acepta además los que empiezan dentro de la jornada y terminan después,
    * marcándolos con `endsAfterHours`.
    *
-   * Sólo lo pide el panel. La lista que ve un cliente no puede incluirlos: que
-   * el negocio decida quedarse media hora más es suyo; que lo decida un cliente
-   * sin que el negocio se entere, no.
+   * Lo piden todos los canales: un horario de atención dice hasta qué hora se
+   * recibe gente, no a qué hora se apaga la luz. Un local abierto hasta las
+   * 22:00 acepta un corte de una hora a las 21:30 y quien atiende se queda
+   * hasta terminarlo; exigir que la reserva cerrara antes borraba la última
+   * hora del día de todos los negocios cuyo servicio no entra justo.
+   *
+   * La marca se conserva igual, porque el dato sigue importando: es lo que deja
+   * avisar en el panel que esa cita termina fuera del horario.
    */
   allowEndAfterHours?: boolean;
   /**

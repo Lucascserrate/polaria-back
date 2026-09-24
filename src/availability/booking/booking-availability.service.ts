@@ -209,12 +209,21 @@ export class BookingAvailabilityService {
       appointmentsByStaff: context.appointmentsByStaff,
       minStartTime: context.minStartTime,
       /*
-       * `confirmSlot` no lo pasa, y es a propósito: esa es la revalidación del
-       * flujo del cliente, donde un horario que se pasa del cierre no existe.
-       * El panel no pasa por ahí —crea con advertencias, ver
-       * `collectBookingWarnings`—, así que no hay nada que aflojarle.
+       * Alcanza con que la reserva **empiece** dentro del horario de atención.
+       *
+       * Antes se le exigía al cliente que además terminara antes de cerrar, con
+       * el argumento de que quedarse de más lo decide el negocio y no él. En la
+       * práctica esa regla borraba la última hora del día: un local abierto
+       * hasta las 22:00 no podía ofrecer un corte de una hora a las 21:30,
+       * aunque el equipo estuviera libre y aunque esa misma reserva se pudiera
+       * cargar a mano desde el panel.
+       *
+       * Un horario de atención dice hasta qué hora se recibe gente, no a qué
+       * hora se apaga la luz: quien atiende termina lo que empezó. Con la regla
+       * vieja, el negocio que quería aceptar hasta las 22:00 tenía que mentirle
+       * al sistema y poner 23:00.
        */
-      allowEndAfterHours: query.scope === 'panel',
+      allowEndAfterHours: true,
     });
   }
 
@@ -320,6 +329,8 @@ export class BookingAvailabilityService {
           workingRangesByStaff,
           appointmentsByStaff,
           minStartTime,
+          // El mismo criterio que el paso de horarios: basta con empezar dentro.
+          allowEndAfterHours: true,
         }).length > 0
       );
     });
@@ -707,6 +718,13 @@ export class BookingAvailabilityService {
       workingRangesByStaff: context.workingRangesByStaff,
       appointmentsByStaff: context.appointmentsByStaff,
       minStartTime: context.minStartTime,
+      /*
+       * Lo mismo que al listar, y no puede ser de otra manera: esto revalida el
+       * horario que el cliente acaba de elegir de esa lista. Con un criterio más
+       * estricto acá, el último horario del día se ofrecería y después se caería
+       * al confirmarlo con "ese horario acaba de ocuparse".
+       */
+      allowEndAfterHours: true,
     });
 
     const slot = findBookingSlotAt(slots, query.startTime);
@@ -952,11 +970,11 @@ export class BookingAvailabilityService {
       durationMinutes: shortestPlanDuration,
       stepMinutes: query.stepMinutes ?? DEFAULT_SLOT_STEP_MINUTES,
       /*
-       * El panel genera además los que se pasan del cierre. Que terminen
+       * Se generan también los que se pasan del cierre. Que terminen
        * ofreciéndose o no lo decide `buildBookingSlots`, que es quien sabe si
        * alguien los empieza dentro de su jornada: acá sólo se los hace existir.
        */
-      allowOverflow: scope === 'panel',
+      allowOverflow: true,
       /*
        * Dónde termina cada cita ya agendada. Es lo que permite ofrecer el
        * horario que arranca justo cuando alguien se libera, en vez de esperar al
