@@ -147,20 +147,6 @@ export type BookingOption = {
   selectionId: string;
   title: string;
   description?: string;
-  /**
-   * Bajo qué encabezado va esta opción, cuando la pantalla mezcla cosas de
-   * distinta naturaleza.
-   *
-   * Existe por el paso de horarios: ahí conviven horarios concretos y ratos del
-   * día, y sin separarlos el cliente ve tres horas sueltas seguidas de unas
-   * filas raras y no entiende qué son. El encabezado lo explica pegado a las
-   * filas que describe, que es donde se lee — mejor que un párrafo arriba de
-   * todo.
-   *
-   * Ausente es lo normal: una lista de cosas del mismo tipo no necesita
-   * títulos. Ver `toListSections`.
-   */
-  group?: string;
 };
 
 export type BookingSummary = {
@@ -205,6 +191,17 @@ export type BookingPrompt =
        * conoce la zona horaria del negocio, y no tiene por qué.
        */
       range?: { from: string; to: string };
+      /**
+       * Las filas no son horarios sino **ratos del día**, porque no entraban
+       * todos en la pantalla.
+       *
+       * Cambia el texto del mensaje, y ahí está todo el peso: probado con gente,
+       * los títulos de las secciones de una lista no se leen —viven dentro del
+       * desplegable— y lo que se lee es esto, que aparece en el chat. Si el
+       * cuerpo dice "estos son los horarios" y las filas dicen "09:00 a 10:30",
+       * el cliente cierra la lista sin entender qué le ofrecieron.
+       */
+      grouped?: boolean;
       options: BookingOption[];
     }
   | { kind: 'CONFIRM'; summary: BookingSummary; options: BookingOption[] }

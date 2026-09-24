@@ -191,10 +191,28 @@ describe('el texto del paso de horarios', () => {
     expect(body).not.toContain('septiembre');
   });
 
-  /*
-   * Son el mismo paso: si dicen lo mismo, elegir un rato se siente como no haber
-   * avanzado.
+  /**
+   * Cuando las filas son ratos del día y no horarios, el cuerpo tiene que
+   * decirlo: probado con gente, los títulos de las secciones no se leen —hay que
+   * abrir la lista para verlos— y este texto sí, porque está en el chat.
    */
+  it('con la lista agrupada pregunta por el rato, no anuncia horarios', () => {
+    const body = bodyOf({ ...base, grouped: true });
+
+    expect(body).toContain('a qué hora te queda mejor');
+    expect(body).not.toContain('Estos son los horarios disponibles');
+  });
+
+  it('las tres pantallas dicen cosas distintas', () => {
+    const textos = new Set([
+      bodyOf(base),
+      bodyOf({ ...base, grouped: true }),
+      bodyOf({ ...base, range: { from: '09:45', to: '11:15' } }),
+    ]);
+
+    expect(textos.size).toBe(3);
+  });
+
   it('las dos pantallas dicen cosas distintas', () => {
     expect(bodyOf(base)).not.toBe(
       bodyOf({ ...base, range: { from: '09:45', to: '11:15' } }),

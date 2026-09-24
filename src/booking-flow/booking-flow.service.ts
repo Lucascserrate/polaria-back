@@ -81,14 +81,23 @@ const UNCATEGORIZED_LABEL = 'Otros servicios';
 const BACK_LABEL = 'Volver a las categorías';
 
 /**
- * Los encabezados del paso de horarios cuando hay ratos del día.
+ * La pantalla de horarios agrupada no mezcla horarios sueltos con ratos del día.
  *
- * Se dice "rato" y no "franja" ni "rango" porque es como lo diría un cliente al
- * pedir un turno. El subtítulo de cada fila —"7 horarios"— ya aclara que adentro
- * hay opciones concretas.
+ * Se probó al revés —tres horarios concretos arriba y los ratos abajo, cada
+ * bloque con su encabezado— y se lo probó con gente. Falló de tres maneras, y
+ * las tres valen más que el toque que ahorraba:
+ *
+ * 1. Nadie leyó los encabezados. Los títulos de sección viven **dentro** del
+ *    desplegable; lo que se lee es el texto del mensaje, en el chat.
+ * 2. La separación se entendió como otro día: "ah, esto ya es de mañana,
+ *    entonces no hay más horarios hoy" — y cerraban la lista.
+ * 3. Varios leyeron "Próximos horarios" como "los siguientes", que es lo
+ *    contrario de lo que decía.
+ *
+ * Con una sola clase de fila no hay nada que interpretar, y la explicación va
+ * donde efectivamente se lee: el cuerpo del mensaje.
  */
-const NEXT_TIMES_GROUP = 'Próximos horarios';
-const RANGES_GROUP = 'Elegí un rato del día';
+const NO_LOOSE_TIMES = 0;
 
 /** "3 servicios", cuando la categoría no trae una descripción propia. */
 const countLabel = (count: number): string =>
@@ -1252,6 +1261,7 @@ export class BookingFlowService {
     const rows = limits?.maxOptionsPerPrompt;
     const screen = planSlotScreen({
       slots: all,
+      maxNext: NO_LOOSE_TIMES,
       // Acá van "Ver otros días" y "Cancelar".
       screenRows: (rows ?? all.length + 2) - RESERVED_OPTION_COUNT - 1,
       // En la pantalla de un tramo van "Ver otros horarios" y "Cancelar".
@@ -1274,15 +1284,11 @@ export class BookingFlowService {
     return {
       ...empty,
       hasSlots: true,
+      grouped: true,
       options: [
-        ...this.slotOptions(session, screen.next, timezone).map((option) => ({
-          ...option,
-          group: NEXT_TIMES_GROUP,
-        })),
-        ...screen.ranges.map((range) => ({
-          ...this.rangeOption(session, range, timezone),
-          group: RANGES_GROUP,
-        })),
+        ...screen.ranges.map((range) =>
+          this.rangeOption(session, range, timezone),
+        ),
         this.otherDaysOption(session),
         this.cancelOption(session),
       ],

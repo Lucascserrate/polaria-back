@@ -13,7 +13,6 @@ import { WHATSAPP_LIMITS } from './types/outgoing-message.type';
 import type {
   OutgoingButton,
   OutgoingListRow,
-  OutgoingListSection,
   WhatsAppCredentials,
 } from './types/outgoing-message.type';
 import { WhatsAppSenderService } from './whatsapp-sender.service';
@@ -124,7 +123,7 @@ export class BookingPromptRenderer {
           to,
           body: plan.body,
           buttonText: plan.buttonText,
-          sections: toListSections(plan.options),
+          sections: [{ rows: plan.options.map(toListRow) }],
         });
         return result.ok ? result.metaMessageId : null;
       }
@@ -160,47 +159,6 @@ function toButton(option: {
  * sections", y el cliente se queda sin respuesta. Por eso la de las filas
  * fijas recibe uno cuando no está sola.
  */
-/** Encabezado de las filas que no son parte de la elección: salidas del paso. */
-const OTHER_OPTIONS_GROUP = 'Otras opciones';
-
-export function toListSections(
-  options: Array<{
-    selectionId: string;
-    title: string;
-    description?: string;
-    group?: string;
-  }>,
-): OutgoingListSection[] {
-  const sections: OutgoingListSection[] = [];
-
-  for (const option of options) {
-    const last = sections[sections.length - 1];
-
-    if (last && last.title === option.group) {
-      last.rows.push(toListRow(option));
-      continue;
-    }
-
-    sections.push({
-      ...(option.group ? { title: option.group } : {}),
-      rows: [toListRow(option)],
-    });
-  }
-
-  /*
-   * WhatsApp acepta una sección sin título —es la lista común de todos los
-   * demás pasos— pero no una mezcla: en cuanto hay dos, las quiere todas
-   * tituladas.
-   */
-  if (sections.length > 1) {
-    for (const section of sections) {
-      if (!section.title) section.title = OTHER_OPTIONS_GROUP;
-    }
-  }
-
-  return sections;
-}
-
 function toListRow(option: {
   selectionId: string;
   title: string;

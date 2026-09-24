@@ -173,10 +173,10 @@ export function planBookingPrompt(prompt: BookingPrompt): BookingMessagePlan[] {
  * Dentro de un rato no se repite la fecha: ya la eligió dos pantallas atrás, y
  * lo único que cambió —y lo único que hace falta para decidir— es el rato.
  *
- * Que el día venga agrupado **no** cambia este texto: lo que hay que hacer en esa
- * pantalla lo dicen los encabezados de cada bloque, pegados a las filas que
- * describen. Un párrafo largo acá se lee menos que un título ahí. Ver
- * `toListSections`.
+ * Cuando el día viene agrupado, las filas son ratos y no horarios, y eso hay que
+ * decirlo acá: se probó ponerlo en los encabezados de las secciones y no se
+ * leen. Lo que se lee es este texto, porque aparece en el chat; la lista hay que
+ * abrirla.
  */
 function slotStepBody(
   prompt: Extract<BookingPrompt, { kind: 'ASK_SLOT' }>,
@@ -187,6 +187,15 @@ function slotStepBody(
 
   if (prompt.range) {
     return `Elegí un horario entre las ${prompt.range.from} y las ${prompt.range.to}.`;
+  }
+
+  /*
+   * Con la lista agrupada, las filas son ratos del día y no horarios. Decirlo
+   * acá es lo único que funciona: el texto del mensaje se lee en el chat, y los
+   * títulos de las secciones —que viven dentro del desplegable— no.
+   */
+  if (prompt.grouped) {
+    return `Hay varios horarios para el ${formatDate(prompt.date)}. ¿Más o menos a qué hora te queda mejor?`;
   }
 
   return `Estos son los horarios disponibles para el ${formatDate(prompt.date)}.`;
