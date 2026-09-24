@@ -1377,15 +1377,20 @@ export class AppointmentsService {
     tenantId: string,
     dto: UpdateAppointmentStatusDto,
   ) {
-    const { affected } = await this.appointmentRepository.update(
+    // Por el negocio: sin esto, pedir el estado de una cita ajena devolvería sus datos.
+    const previous = await this.appointmentRepository.findOne({
+      where: { id, tenantId },
+      select: { id: true, status: true },
+    });
+
+    if (!previous) {
+      throw new NotFoundException('La cita no existe');
+    }
+
+    await this.appointmentRepository.update(
       { id, tenantId },
       { status: dto.status },
     );
-
-    // Sin esto, pedir el estado de una cita ajena devolvería sus datos.
-    if (!affected) {
-      throw new NotFoundException('La cita no existe');
-    }
 
     // Un cambio de estado libera o reclama el horario en el índice único.
     await this.syncActiveSlot(id, dto.status);
@@ -1397,8 +1402,11 @@ export class AppointmentsService {
      * una cita como atendida no es novedad para quien la atendió. Lo decide
      * `appointmentStatusChanged`, para que la regla esté en un lugar y no en cada
      * llamador.
+     *
+     * Tampoco se avisa lo que sale de finalizada: es corregir algo que ya pasó
+     * —casi siempre una cita cargada a posteriori, que tampoco avisó al nacer—.
      */
-    if (dto.status) {
+    if (dto.status && previous.status !== AppointmentStatus.COMPLETED) {
       const segments = await this.appointmentServiceRepository.find({
         where: { appointmentId: id },
       });
