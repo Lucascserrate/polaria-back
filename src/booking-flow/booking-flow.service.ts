@@ -7,7 +7,10 @@ import {
 } from '../appointments/entities/appointment.entity';
 import { SlotAlreadyTakenError } from '../appointments/slot-already-taken.error';
 import { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
-import type { BookingSlot } from '../availability/booking/booking-slot.type';
+import {
+  FINE_SLOT_STEP_MINUTES,
+  type BookingSlot,
+} from '../availability/booking/booking-slot.type';
 import { ServiceCategoriesService } from '../service-categories/service-categories.service';
 import type { Service } from '../services/entities/service.entity';
 import { ServicesService } from '../services/services.service';
@@ -31,6 +34,8 @@ import {
   type BookingOption,
   type BookingPrompt,
   type BookingSummary,
+  encodeSlotRange,
+  decodeSlotRange,
 } from './booking-flow.types';
 import { encodeSelection } from './booking-payload.codec';
 import { BookingSessionService } from './booking-session.service';
@@ -47,11 +52,28 @@ import {
   formatTimeLabel,
   todayIsoDateIn,
 } from './utils/booking-date.util';
+import { planSlotScreen } from './slot-ranges';
 
 const DEFAULT_TIMEZONE = 'America/La_Paz';
 
 /** `Cancelar` está siempre presente y por lo tanto siempre ocupa una opción. */
 const RESERVED_OPTION_COUNT = 1;
+
+/**
+ * Cada cuánto se ofrece un horario por WhatsApp.
+ *
+ * Fino, como en los demás canales. Acá estuvo en media hora mucho tiempo y no
+ * por gusto: con horarios cada cuarto, una jornada de nueve a siete son cuarenta
+ * opciones, y en una lista de diez filas eso eran seis páginas —llegar a las
+ * 17:00 costaba cinco toques de "Ver más"—. Media hora era el precio que pagaba
+ * el negocio por el tamaño del componente: los huecos que no caen en la grilla
+ * no se podían ofrecer.
+ *
+ * Lo que lo destraba es agrupar en tramos (`planSlotScreen`): con eso llegar a
+ * cualquier hora del día cuesta un toque, haya veinte horarios o cincuenta. Sin
+ * los tramos, bajar el paso acá sería cambiarle un problema por otro.
+ */
+const SLOT_STEP_MINUTES = FINE_SLOT_STEP_MINUTES;
 
 /** Cómo se llama, para el cliente, el grupo de los que no tienen categoría. */
 const UNCATEGORIZED_LABEL = 'Otros servicios';
@@ -324,11 +346,32 @@ export class BookingFlowService {
       return this.nextPage({ session, metaMessageId, limits, now });
     }
 
+    /*
+     * "Ver otros horarios" suelta el tramo y vuelve a mostrarlos todos. Tampoco
+     * avanza de paso: es la misma pantalla de horarios, sin el recorte.
+     */
+    if (value === RESERVED_VALUES.ALL_TIMES) {
+      const reissued = await this.bookingSessionService.reissue({
+        session,
+        selection: {
+          selectedRangeStart: null,
+          selectedRangeEnd: null,
+          pageOffset: 0,
+        },
+        metaMessageId,
+        now,
+      });
+
+      return this.askSlotPrompt(reissued, limits);
+    }
+
     // "Ver otros días" tampoco avanza: abre el selector de fecha.
     if (value === RESERVED_VALUES.OTHER_DAYS) {
       const advanced = await this.bookingSessionService.advance({
         session,
         state: BookingSessionState.ASK_DATE,
+        // El tramo elegido era de otro día: sus instantes ya no dicen nada.
+        selection: { selectedRangeStart: null, selectedRangeEnd: null },
         metaMessageId,
         now,
       });
@@ -373,7 +416,7 @@ export class BookingFlowService {
         return this.afterStaff({ session, value, metaMessageId, limits, now });
 
       case BookingSessionState.ASK_SLOT:
-        return this.afterSlot({ session, value, metaMessageId, now });
+        return this.afterSlot({ session, value, metaMessageId, limits, now });
 
       case BookingSessionState.CONFIRM:
         return this.afterConfirm({ session, metaMessageId, limits, now });
@@ -568,9 +611,32 @@ export class BookingFlowService {
     session: BookingSession;
     value: string;
     metaMessageId?: string | null;
+    limits?: BookingChannelLimits;
     now: Date;
   }): Promise<BookingPrompt> {
     const { session, value, metaMessageId, now } = params;
+
+    /*
+     * Elegir un tramo no avanza de paso: sigue en los horarios, mirando un rato
+     * más chico. Es la misma pantalla con menos opciones, no una etapa nueva —y
+     * por eso no hay un estado propio, que habría que sostener en la máquina y
+     * en la vuelta atrás de todos los pasos siguientes—.
+     */
+    const range = decodeSlotRange(value);
+    if (range) {
+      const inRange = await this.bookingSessionService.reissue({
+        session,
+        selection: {
+          selectedRangeStart: range.from,
+          selectedRangeEnd: range.to,
+          pageOffset: 0,
+        },
+        metaMessageId,
+        now,
+      });
+
+      return this.askSlotPrompt(inRange, params.limits);
+    }
 
     const advanced = await this.bookingSessionService.advance({
       session,
@@ -632,6 +698,9 @@ export class BookingFlowService {
         },
       ],
       startTime: selectedSlotStart,
+      // El mismo paso que al listar, o el horario elegido no existiría en la
+      // grilla de la revalidación y saldría "ese horario acaba de ocuparse".
+      stepMinutes: SLOT_STEP_MINUTES,
       // La misma exclusión que al listar: lo que se ofreció tiene que poder
       // confirmarse.
       excludeAppointmentId: editing?.id,
@@ -1111,10 +1180,10 @@ export class BookingFlowService {
     session: BookingSession,
     limits?: BookingChannelLimits,
   ): Promise<BookingPrompt> {
-    const slots = await this.loadSlots(session);
+    const all = await this.loadSlots(session);
     const timezone = await this.resolveTimezone(session.tenantId);
 
-    if (slots.length === 0) {
+    if (all.length === 0) {
       return {
         kind: 'ASK_SLOT',
         date: session.selectedDate ?? '',
@@ -1123,17 +1192,106 @@ export class BookingFlowService {
       };
     }
 
-    return {
-      kind: 'ASK_SLOT',
+    const empty = {
+      kind: 'ASK_SLOT' as const,
       date: session.selectedDate ?? '',
-      hasSlots: true,
-      options: this.paginate(
-        session,
-        this.slotOptions(session, slots, timezone),
-        limits,
-        [this.otherDaysOption(session)],
-      ),
     };
+
+    /*
+     * Ya eligió un tramo: se le muestran sus horarios, con la vuelta a la lista
+     * de tramos en lugar de "ver otros días" —a otro día se llega volviendo—.
+     *
+     * Los horarios se recalculan contra disponibilidad fresca y se recortan al
+     * tramo: lo que el cliente eligió fue mirar ese rato, no congelar lo que
+     * había. Si mientras tanto se ocupó todo, se lo devuelve a los tramos en vez
+     * de dejarlo mirando una lista vacía.
+     */
+    const chosen = this.slotsInChosenRange(session, all);
+    if (chosen) {
+      if (chosen.length === 0) {
+        const back = await this.bookingSessionService.reissue({
+          session,
+          selection: { selectedRangeStart: null, selectedRangeEnd: null },
+          now: new Date(),
+        });
+        return this.askSlotPrompt(back, limits);
+      }
+
+      return {
+        ...empty,
+        hasSlots: true,
+        options: this.paginate(
+          session,
+          this.slotOptions(session, chosen, timezone),
+          limits,
+          [this.allTimesOption(session)],
+        ),
+      };
+    }
+
+    /*
+     * Cuántos horarios entran, según lo que el canal deja. Los dos límites salen
+     * de las filas fijas de cada pantalla y no de un número escrito a mano: el
+     * día que el paso sume una opción, esto se reajusta solo en lugar de empezar
+     * a producir listas que WhatsApp rechaza.
+     */
+    const rows = limits?.maxOptionsPerPrompt;
+    const screen = planSlotScreen({
+      slots: all,
+      // Acá van "Ver otros días" y "Cancelar".
+      screenRows: (rows ?? all.length + 2) - RESERVED_OPTION_COUNT - 1,
+      // En la pantalla de un tramo van "Ver otros horarios" y "Cancelar".
+      rangeCapacity: (rows ?? all.length + 2) - RESERVED_OPTION_COUNT - 1,
+    });
+
+    if (screen.kind === 'all') {
+      return {
+        ...empty,
+        hasSlots: true,
+        options: this.paginate(
+          session,
+          this.slotOptions(session, all, timezone),
+          limits,
+          [this.otherDaysOption(session)],
+        ),
+      };
+    }
+
+    return {
+      ...empty,
+      hasSlots: true,
+      options: [
+        ...this.slotOptions(session, screen.next, timezone),
+        ...screen.ranges.map((range) =>
+          this.rangeOption(session, range, timezone),
+        ),
+        this.otherDaysOption(session),
+        this.cancelOption(session),
+      ],
+    };
+  }
+
+  /**
+   * Los horarios del tramo elegido, o `null` si no eligió ninguno.
+   *
+   * El recorte es por instante y no por posición, que es la razón de guardar el
+   * tramo y no cuál era: entre que se dibujó la lista y el cliente eligió, los
+   * tramos pueden haberse recalculado.
+   */
+  private slotsInChosenRange(
+    session: BookingSession,
+    slots: BookingSlot[],
+  ): BookingSlot[] | null {
+    const { selectedRangeStart, selectedRangeEnd } = session;
+    if (!selectedRangeStart || !selectedRangeEnd) return null;
+
+    const from = selectedRangeStart.getTime();
+    const to = selectedRangeEnd.getTime();
+
+    return slots.filter((slot) => {
+      const at = slot.startTime.getTime();
+      return at >= from && at <= to;
+    });
   }
 
   private async confirmPrompt(session: BookingSession): Promise<BookingPrompt> {
@@ -1328,6 +1486,7 @@ export class BookingFlowService {
           staffId: session.selectedStaffId ?? undefined,
         },
       ],
+      stepMinutes: SLOT_STEP_MINUTES,
       /*
        * Reagendando, la propia cita no cuenta como ocupada. Sin esto, mover un
        * turno de 18:00 a 18:15 no aparece siquiera como opción: sus propios
@@ -1409,6 +1568,44 @@ export class BookingFlowService {
   /** Desvío al selector de fecha, disponible en el paso de horarios. */
   private otherDaysOption(session: BookingSession): BookingOption {
     return this.option(session, RESERVED_VALUES.OTHER_DAYS, 'Ver otros días');
+  }
+
+  /** Vuelve de los horarios de un tramo a la lista de tramos. */
+  private allTimesOption(session: BookingSession): BookingOption {
+    return this.option(
+      session,
+      RESERVED_VALUES.ALL_TIMES,
+      'Ver otros horarios',
+    );
+  }
+
+  /**
+   * Un tramo del día: "13:00 a 15:30 · 6 horarios".
+   *
+   * La etiqueta es **literal** —del primero al último horario que hay adentro— y
+   * no un rango redondeado. Así no promete un rato que no existe, y el subtítulo
+   * con el conteo evita que elegir un tramo sea elegir a ciegas: sin él, entrar y
+   * encontrar un solo horario se siente a engaño.
+   */
+  private rangeOption(
+    session: BookingSession,
+    range: BookingSlot[],
+    timezone: string,
+  ): BookingOption {
+    const from = range[0].startTime;
+    const to = range[range.length - 1].startTime;
+
+    return {
+      selectionId: encodeSelection({
+        token: session.token,
+        stepVersion: session.stepVersion,
+        state: session.state,
+        value: encodeSlotRange(from, to),
+      }),
+      title: `${formatTimeLabel(from, timezone)} a ${formatTimeLabel(to, timezone)}`,
+      description:
+        range.length === 1 ? '1 horario' : `${range.length} horarios`,
+    };
   }
 
   private async resolveTimezone(tenantId: string): Promise<string> {

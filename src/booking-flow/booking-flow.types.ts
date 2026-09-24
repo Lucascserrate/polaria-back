@@ -84,7 +84,43 @@ export const RESERVED_VALUES = {
   UNCATEGORIZED: 'nocategory',
   /** Vuelve del paso de servicios al de categorías. */
   BACK: 'back',
+  /** Vuelve de los horarios de un tramo a la lista de tramos. */
+  ALL_TIMES: 'alltimes',
 } as const;
+
+/**
+ * Prefijo del valor que identifica a un **tramo del día** en lugar de a un
+ * horario concreto.
+ *
+ * Los dos viajan por el mismo paso y hay que poder distinguirlos: un horario es
+ * un instante ISO, y un tramo son dos separados por `~`. El separador es `~` y
+ * no `|` porque ése ya parte el payload; ver `encodeSelection`.
+ */
+export const SLOT_RANGE_PREFIX = 'range:';
+
+/** El valor con el que viaja un tramo, listo para `encodeSelection`. */
+export function encodeSlotRange(from: Date, to: Date): string {
+  return `${SLOT_RANGE_PREFIX}${from.toISOString()}~${to.toISOString()}`;
+}
+
+/**
+ * El tramo que viene en un valor, o `null` si ese valor no es un tramo.
+ *
+ * Devolver `null` en lugar de lanzar es lo que deja preguntarlo primero y tratar
+ * al resto como un horario, que es el caso de siempre.
+ */
+export function decodeSlotRange(
+  value: string,
+): { from: Date; to: Date } | null {
+  if (!value.startsWith(SLOT_RANGE_PREFIX)) return null;
+
+  const [from, to] = value.slice(SLOT_RANGE_PREFIX.length).split('~');
+  const range = { from: new Date(from), to: new Date(to) };
+
+  return Number.isNaN(range.from.getTime()) || Number.isNaN(range.to.getTime())
+    ? null
+    : range;
+}
 
 /**
  * Capacidades del canal por el que se renderiza el flujo.

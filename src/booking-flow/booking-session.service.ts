@@ -20,6 +20,9 @@ export type BookingSelectionPatch = {
   staffPreference?: StaffPreference | null;
   selectedStaffId?: string | null;
   selectedSlotStart?: Date | null;
+  /** El tramo del día que se está mirando. `null` vuelve a la lista de tramos. */
+  selectedRangeStart?: Date | null;
+  selectedRangeEnd?: Date | null;
   pageOffset?: number;
 };
 

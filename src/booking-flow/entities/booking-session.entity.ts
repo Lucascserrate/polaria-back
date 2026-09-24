@@ -131,6 +131,26 @@ export class BookingSession {
   selectedSlotStart?: Date | null;
 
   /**
+   * El tramo del día que el cliente eligió mirar, cuando los horarios no entran
+   * en una pantalla y se le ofrecieron agrupados. `NULL` es "todavía no eligió
+   * ninguno", que es como se ve la pantalla de rangos.
+   *
+   * Se guarda **el rango y no cuál de ellos era**. Los rangos se calculan de la
+   * disponibilidad del momento, así que si entra una reserva mientras el cliente
+   * elige, "el segundo" pasa a ser otro tramo; `16:00–19:30` no puede cambiar de
+   * significado. Es el mismo criterio por el que el `selectionId` lleva el dato y
+   * no una posición.
+   *
+   * Los horarios del tramo se recalculan siempre contra la disponibilidad fresca:
+   * esto acota qué se muestra, no qué está libre.
+   */
+  @Column({ type: 'datetime', nullable: true })
+  selectedRangeStart?: Date | null;
+
+  @Column({ type: 'datetime', nullable: true })
+  selectedRangeEnd?: Date | null;
+
+  /**
    * Página actual de la lista del paso en curso, para canales que no pueden
    * mostrar todas las opciones de una vez.
    *

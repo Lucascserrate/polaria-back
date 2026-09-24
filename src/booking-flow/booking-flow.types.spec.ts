@@ -1,4 +1,10 @@
-import { hasOptions, type BookingPrompt } from './booking-flow.types';
+import {
+  decodeSlotRange,
+  encodeSlotRange,
+  hasOptions,
+  SLOT_RANGE_PREFIX,
+  type BookingPrompt,
+} from './booking-flow.types';
 
 const option = { selectionId: 'b1|tok|1|ASK_SERVICE|uuid', title: 'Corte' };
 
@@ -43,5 +49,42 @@ describe('hasOptions', () => {
 
   it('una lista vacía no cuenta como salida', () => {
     expect(hasOptions({ kind: 'ASK_STAFF', options: [] })).toBe(false);
+  });
+});
+
+/**
+ * Cómo viaja un tramo del día en el mismo paso que los horarios sueltos.
+ *
+ * Los dos van por `ASK_SLOT` y hay que poder distinguirlos sin ambigüedad: un
+ * horario es un instante, un tramo son dos.
+ */
+describe('tramos del día', () => {
+  const from = new Date('2026-09-24T17:00:00.000Z');
+  const to = new Date('2026-09-24T19:30:00.000Z');
+
+  it('va y vuelve sin perder nada', () => {
+    expect(decodeSlotRange(encodeSlotRange(from, to))).toEqual({ from, to });
+  });
+
+  it('no usa el separador del payload', () => {
+    // `|` parte el `selectionId`; un tramo que lo llevara rompería el decodificado.
+    expect(encodeSlotRange(from, to)).not.toContain('|');
+  });
+
+  it('un horario suelto no se confunde con un tramo', () => {
+    expect(decodeSlotRange(from.toISOString())).toBeNull();
+  });
+
+  it('un valor reservado tampoco', () => {
+    expect(decodeSlotRange('otherdays')).toBeNull();
+  });
+
+  /*
+   * Devolver `null` en lugar de lanzar es lo que permite preguntarlo primero y
+   * tratar al resto como un horario, que es el caso de siempre.
+   */
+  it('con un tramo ilegible devuelve null en vez de romper', () => {
+    expect(decodeSlotRange(`${SLOT_RANGE_PREFIX}no~es~fecha`)).toBeNull();
+    expect(decodeSlotRange(SLOT_RANGE_PREFIX)).toBeNull();
   });
 });
