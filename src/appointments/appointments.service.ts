@@ -882,6 +882,76 @@ export class AppointmentsService {
     });
   }
 
+  /**
+   * Lo que la cuenta ya no tiene por delante, lo más reciente primero.
+   *
+   * "Pasado" acá significa **no vigente**, que es más que "ya ocurrió": entran
+   * los turnos cuya hora quedó atrás y también los cancelados, aunque el día
+   * todavía no haya llegado. Con el corte sólo por hora, cancelar un turno de
+   * mañana lo hacía desaparecer de las dos listas —no es vigente y no es
+   * pasado— y quien recordaba haber reservado no encontraba rastro de la
+   * reserva. Las dos listas juntas son todo lo que hizo la cuenta, sin agujeros.
+   *
+   * El orden invertido es deliberado: en las dos listas lo primero es lo más
+   * cerca de hoy. Un cancelado de mañana encabeza el historial por la misma
+   * regla, y es además lo último que pasó.
+   */
+  findPastByCustomerAccount(params: {
+    customerAccountId: string;
+    tenantId?: string;
+    now?: Date;
+    limit?: number;
+  }): Promise<Appointment[]> {
+    const owner = {
+      customerAccountId: params.customerAccountId,
+      ...(params.tenantId ? { tenantId: params.tenantId } : {}),
+    };
+
+    return this.appointmentRepository.find({
+      // Dos condiciones en `OR`, no una: ver arriba por qué la hora no alcanza.
+      where: [
+        { ...owner, startTime: LessThan(params.now ?? new Date()) },
+        {
+          ...owner,
+          status: In([
+            AppointmentStatus.CANCELLED,
+            AppointmentStatus.COMPLETED,
+          ]),
+        },
+      ],
+      relations: { tenant: true, services: { service: true, staff: true } },
+      // Sin esto, el profesional dado de baja entra como `NULL` y el cliente ve
+      // su turno sin profesional asignado.
+      withDeleted: true,
+      order: { startTime: 'DESC' },
+      take: params.limit,
+    });
+  }
+
+  /**
+   * Un turno de la cuenta, por su id.
+   *
+   * La pertenencia va en el `where` y no en un `if` posterior, y ésa es toda la
+   * autorización de la pantalla de detalle: un id ajeno no devuelve el turno de
+   * otro, devuelve nada. Para quien pregunta, "no existe" y "no es tuyo" se ven
+   * iguales, que es lo que impide usar esto para averiguar si un id es real.
+   */
+  findByCustomerAccountAndId(params: {
+    customerAccountId: string;
+    appointmentId: string;
+  }): Promise<Appointment | null> {
+    return this.appointmentRepository.findOne({
+      where: {
+        id: params.appointmentId,
+        customerAccountId: params.customerAccountId,
+      },
+      relations: { tenant: true, services: { service: true, staff: true } },
+      // Sin esto, el profesional dado de baja entra como `NULL` y el cliente ve
+      // su turno sin profesional asignado.
+      withDeleted: true,
+    });
+  }
+
   findUpcomingByClientAndId(params: {
     tenantId: string;
     clientId: string;

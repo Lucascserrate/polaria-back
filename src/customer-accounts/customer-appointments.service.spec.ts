@@ -1,7 +1,9 @@
 import { NotFoundException } from '@nestjs/common';
 
 import { CustomerAppointmentsService } from './customer-appointments.service';
+import { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import type { AppointmentsService } from '../appointments/appointments.service';
+import type { BusinessPhotosService } from '../business-photos/business-photos.service';
 import type { TenantsService } from '../tenants/tenants.service';
 import type { Appointment } from '../appointments/entities/appointment.entity';
 import type { Tenant } from '../tenants/entities/tenant.entity';
@@ -25,27 +27,56 @@ const tenant = (overrides: Partial<Tenant> = {}): Tenant =>
     name: 'Royal Barber',
     slug: 'royal-barber',
     timezone: 'America/La_Paz',
+    currency: 'BOB',
+    address: 'Av. Cristo Redentor 100',
+    latitude: -17.75,
+    longitude: -63.18,
     ...overrides,
   }) as unknown as Tenant;
+
+/** Un tramo tal como sale de la base, con lo pactado al reservar. */
+const segment = (overrides: Record<string, unknown> = {}) =>
+  ({
+    service: { name: 'Corte' },
+    staff: { name: 'Fernando' },
+    startTime: new Date('2026-09-24T20:30:00.000Z'),
+    endTime: new Date('2026-09-24T21:00:00.000Z'),
+    priceAtBooking: '150.00',
+    durationAtBooking: 30,
+    ...overrides,
+  }) as never;
 
 const appointment = (overrides: Partial<Appointment> = {}): Appointment =>
   ({
     id: 'appt-1',
     tenantId: TENANT_ID,
+    status: AppointmentStatus.CONFIRMED,
     startTime: new Date('2026-09-24T20:30:00.000Z'),
     endTime: new Date('2026-09-24T21:00:00.000Z'),
     tenant: tenant(),
-    services: [{ service: { name: 'Corte' }, staff: { name: 'Fernando' } }],
+    services: [segment()],
     ...overrides,
   }) as unknown as Appointment;
 
 const build = (options: {
   appointments?: Appointment[];
+  past?: Appointment[];
+  one?: Appointment | null;
   tenant?: Tenant | null;
+  /** La portada del negocio, si tiene alguna foto subida. */
+  cover?: string | null;
 }) => {
   const findUpcomingByCustomerAccount = jest
     .fn()
     .mockResolvedValue(options.appointments ?? []);
+
+  const findPastByCustomerAccount = jest
+    .fn()
+    .mockResolvedValue(options.past ?? []);
+
+  const findByCustomerAccountAndId = jest
+    .fn()
+    .mockResolvedValue(options.one === undefined ? appointment() : options.one);
 
   const findBySlug = jest
     .fn()
@@ -53,12 +84,32 @@ const build = (options: {
       options.tenant === undefined ? tenant() : options.tenant,
     );
 
+  const covers = jest
+    .fn()
+    .mockResolvedValue(
+      options.cover
+        ? new Map([[TENANT_ID, { url: options.cover }]])
+        : new Map(),
+    );
+
   const service = new CustomerAppointmentsService(
-    { findUpcomingByCustomerAccount } as unknown as AppointmentsService,
+    {
+      findUpcomingByCustomerAccount,
+      findPastByCustomerAccount,
+      findByCustomerAccountAndId,
+    } as unknown as AppointmentsService,
     { findBySlug } as unknown as TenantsService,
+    { covers } as unknown as BusinessPhotosService,
   );
 
-  return { service, findUpcomingByCustomerAccount, findBySlug };
+  return {
+    service,
+    findUpcomingByCustomerAccount,
+    findPastByCustomerAccount,
+    findByCustomerAccountAndId,
+    findBySlug,
+    covers,
+  };
 };
 
 describe('CustomerAppointmentsService', () => {
@@ -77,9 +128,8 @@ describe('CustomerAppointmentsService', () => {
   });
 
   /*
-   * Sin slug la respuesta es la de toda Polaria. Hoy no hay pantalla que lo
-   * pida; la prueba está para que el día que exista no haga falta un segundo
-   * endpoint, que es justamente lo que se quiso evitar.
+   * Sin slug la respuesta es la de toda Polaria: es la que lee el historial de
+   * la cuenta, que mezcla negocios.
    */
   it('sin negocio no filtra por tenant', async () => {
     const { service, findUpcomingByCustomerAccount, findBySlug } = build({});
@@ -102,7 +152,10 @@ describe('CustomerAppointmentsService', () => {
   });
 
   it('recorta el turno a lo que se muestra', async () => {
-    const { service } = build({ appointments: [appointment()] });
+    const { service } = build({
+      appointments: [appointment()],
+      cover: 'https://cdn/portada.jpg',
+    });
 
     const [view] = await service.findUpcoming({
       accountId: ACCOUNT_ID,
@@ -113,12 +166,14 @@ describe('CustomerAppointmentsService', () => {
       id: 'appt-1',
       startTime: '2026-09-24T20:30:00.000Z',
       endTime: '2026-09-24T21:00:00.000Z',
+      status: AppointmentStatus.CONFIRMED,
       serviceName: 'Corte',
       staffName: 'Fernando',
       business: {
         slug: 'royal-barber',
         name: 'Royal Barber',
         timezone: 'America/La_Paz',
+        photoUrl: 'https://cdn/portada.jpg',
       },
     });
   });
@@ -140,5 +195,226 @@ describe('CustomerAppointmentsService', () => {
 
     expect(view.staffName).toBeNull();
     expect(view.serviceName).toBe('Turno');
+  });
+
+  /*
+   * La relación llega sin orden desde la base. Sin ordenarla, el título de la
+   * tarjeta y el desglose del detalle nombraban los mismos servicios al revés.
+   */
+  it('nombra los servicios en orden de atención', async () => {
+    const { service } = build({
+      appointments: [
+        appointment({
+          services: [
+            segment({
+              service: { name: 'Corte' },
+              startTime: new Date('2026-09-24T21:00:00.000Z'),
+            }),
+            segment({ service: { name: 'Barba' } }),
+          ],
+        }),
+      ],
+    });
+
+    const [view] = await service.findUpcoming({ accountId: ACCOUNT_ID });
+
+    expect(view.serviceName).toBe('Barba y Corte');
+  });
+
+  /* Un negocio sin fotos tiene que dar una tarjeta igual, sin portada. */
+  it('sin foto el negocio viaja con `photoUrl` en null', async () => {
+    const { service } = build({ appointments: [appointment()] });
+
+    const [view] = await service.findUpcoming({ accountId: ACCOUNT_ID });
+
+    expect(view.business.photoUrl).toBeNull();
+  });
+
+  /*
+   * Diez turnos del mismo local son una sola consulta de fotos. Es la razón por
+   * la que las portadas se piden en lote y no dentro del `map`.
+   */
+  it('pide las portadas una sola vez para toda la lista', async () => {
+    const { service, covers } = build({
+      appointments: [appointment(), appointment({ id: 'appt-2' })],
+    });
+
+    await service.findUpcoming({ accountId: ACCOUNT_ID });
+
+    expect(covers).toHaveBeenCalledTimes(1);
+    expect(covers).toHaveBeenCalledWith([TENANT_ID]);
+  });
+
+  /* Sin turnos no hay negocios que resolver: ni una consulta de fotos. */
+  it('con la lista vacía no pregunta por fotos', async () => {
+    const { service, covers } = build({ appointments: [] });
+
+    await expect(
+      service.findUpcoming({ accountId: ACCOUNT_ID }),
+    ).resolves.toEqual([]);
+    expect(covers).not.toHaveBeenCalled();
+  });
+
+  describe('el historial', () => {
+    it('pregunta por la cuenta, igual que lo vigente', async () => {
+      const { service, findPastByCustomerAccount } = build({});
+
+      await service.findPast({ accountId: ACCOUNT_ID });
+
+      expect(findPastByCustomerAccount).toHaveBeenCalledWith({
+        customerAccountId: ACCOUNT_ID,
+        tenantId: undefined,
+      });
+    });
+
+    /*
+     * El estado es lo único que distingue en la lista al que se atendió del que
+     * se canceló. Sin él las dos tarjetas se leen iguales.
+     */
+    it('lleva el estado de cada turno', async () => {
+      const { service } = build({
+        past: [appointment({ status: AppointmentStatus.CANCELLED })],
+      });
+
+      const [view] = await service.findPast({ accountId: ACCOUNT_ID });
+
+      expect(view.status).toBe(AppointmentStatus.CANCELLED);
+    });
+  });
+
+  describe('el detalle de un turno', () => {
+    it('trae el desglose con lo pactado al reservar', async () => {
+      const { service } = build({});
+
+      const detail = await service.findOne({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+
+      expect(detail.services).toEqual([
+        {
+          name: 'Corte',
+          staffName: 'Fernando',
+          startTime: '2026-09-24T20:30:00.000Z',
+          durationMinutes: 30,
+          price: 150,
+        },
+      ]);
+      expect(detail.total).toBe(150);
+      expect(detail.currency).toBe('BOB');
+      expect(detail.durationMinutes).toBe(30);
+      expect(detail.address).toBe('Av. Cristo Redentor 100');
+      expect(detail.location).toEqual({ latitude: -17.75, longitude: -63.18 });
+    });
+
+    /* La pertenencia la impone la consulta; acá se verifica que se la pida. */
+    it('pregunta por el turno acotado a la cuenta', async () => {
+      const { service, findByCustomerAccountAndId } = build({});
+
+      await service.findOne({ accountId: ACCOUNT_ID, appointmentId: 'appt-1' });
+
+      expect(findByCustomerAccountAndId).toHaveBeenCalledWith({
+        customerAccountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+    });
+
+    it('un turno ajeno o inexistente es 404', async () => {
+      const { service } = build({ one: null });
+
+      await expect(
+        service.findOne({ accountId: ACCOUNT_ID, appointmentId: 'appt-9' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    /*
+     * La misma regla que el resumen de la reserva: con un servicio que se
+     * cotiza, el total es `null` y no la suma de los otros. Un número que deja
+     * afuera un servicio se lee como lo que se paga, y no lo es.
+     */
+    it('con un servicio que se cotiza el total es null', async () => {
+      const { service } = build({
+        one: appointment({
+          services: [
+            segment(),
+            segment({
+              service: { name: 'Color' },
+              priceAtBooking: null,
+              startTime: new Date('2026-09-24T21:00:00.000Z'),
+            }),
+          ],
+        }),
+      });
+
+      const detail = await service.findOne({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+
+      expect(detail.total).toBeNull();
+      expect(detail.services[1].price).toBeNull();
+    });
+
+    /*
+     * Con servicios en paralelo el bloque dura menos que la suma de los
+     * servicios, y lo que ocupa la tarde de alguien es el bloque.
+     */
+    it('la duración es la del bloque, no la suma de los servicios', async () => {
+      const { service } = build({
+        one: appointment({
+          endTime: new Date('2026-09-24T21:00:00.000Z'),
+          services: [
+            segment({ durationAtBooking: 30 }),
+            segment({ service: { name: 'Manicura' }, durationAtBooking: 30 }),
+          ],
+        }),
+      });
+
+      const detail = await service.findOne({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+
+      expect(detail.durationMinutes).toBe(30);
+    });
+
+    /* Los servicios salen en orden de atención, no en el que los trajo la base. */
+    it('ordena los servicios por su hora de inicio', async () => {
+      const { service } = build({
+        one: appointment({
+          services: [
+            segment({
+              service: { name: 'Barba' },
+              startTime: new Date('2026-09-24T21:00:00.000Z'),
+            }),
+            segment(),
+          ],
+        }),
+      });
+
+      const detail = await service.findOne({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+
+      expect(detail.services.map((item) => item.name)).toEqual([
+        'Corte',
+        'Barba',
+      ]);
+    });
+
+    /* Media coordenada no ubica nada: dibujaría un marcador en el ecuador. */
+    it('sin las dos coordenadas no manda ubicación', async () => {
+      const { service } = build({
+        one: appointment({ tenant: tenant({ longitude: null }) }),
+      });
+
+      const detail = await service.findOne({
+        accountId: ACCOUNT_ID,
+        appointmentId: 'appt-1',
+      });
+
+      expect(detail.location).toBeNull();
+    });
   });
 });

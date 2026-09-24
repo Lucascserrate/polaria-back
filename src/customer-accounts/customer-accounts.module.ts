@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppointmentsModule } from '../appointments/appointments.module';
+import { BusinessPhotosModule } from '../business-photos/business-photos.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { CustomerAccount } from './entities/customer-account.entity';
 import { CustomerAccountsService } from './customer-accounts.service';
@@ -31,6 +32,7 @@ import { CustomerGuard, CustomerSessionService } from './customer-session';
     TypeOrmModule.forFeature([CustomerAccount]),
     JwtModule.register({}),
     AppointmentsModule,
+    BusinessPhotosModule,
     TenantsModule,
   ],
   controllers: [CustomerAuthController, CustomerAppointmentsController],
