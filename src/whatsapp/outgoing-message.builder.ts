@@ -2,6 +2,7 @@ import {
   WHATSAPP_LIMITS,
   WhatsAppMessageBuildError,
   type SendButtonsInput,
+  type SendCtaUrlInput,
   type SendFlowInput,
   type SendListInput,
   type SendTemplateInput,
@@ -124,6 +125,76 @@ export function buildButtonsPayload(input: SendButtonsInput): BuiltMessage {
  * valida es la forma —cantidad de botones, variables no vacías— y no la
  * longitud de un body que no controlamos.
  */
+/**
+ * Un mensaje con un botón que abre una dirección.
+ *
+ * El `cta_url` de Meta. Se valida la URL antes de armar el mensaje y no se
+ * confía en que Meta lo haga: una dirección mal formada vuelve como un 400
+ * genérico en un log, y el cliente se queda mirando un chat que no contestó.
+ * Acá revienta en el servidor, con el motivo y el valor.
+ *
+ * Sólo `https`, **salvo en local**. Un enlace `http` en un chat lo marca
+ * WhatsApp como inseguro y el de un negocio siempre es `https`, así que otra
+ * cosa es un error de configuración. La excepción de `localhost` no es una
+ * grieta: en desarrollo el sitio corre en `http` y sin ella todo el modo enlace
+ * sería imposible de probar sin desplegarlo, que es como se terminan
+ * descubriendo estas cosas en producción.
+ */
+export function buildCtaUrlPayload(input: SendCtaUrlInput): BuiltMessage {
+  const warnings: string[] = [];
+  const body = requireNonEmpty(input.body, 'el cuerpo del mensaje');
+  const url = requireNonEmpty(input.url, 'la dirección del botón');
+
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new WhatsAppMessageBuildError(
+      `"${url}" no es una dirección válida para el botón.`,
+    );
+  }
+
+  const local =
+    parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+  if (parsed.protocol !== 'https:' && !local) {
+    throw new WhatsAppMessageBuildError(
+      `El botón de enlace sólo admite https y se recibió "${parsed.protocol}".`,
+    );
+  }
+
+  return {
+    payload: {
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        ...buildHeader(input.header, warnings),
+        body: {
+          text: clamp(
+            body,
+            WHATSAPP_LIMITS.BUTTONS_BODY_MAX,
+            'el cuerpo del mensaje',
+            warnings,
+          ),
+        },
+        ...buildFooter(input.footer, warnings),
+        action: {
+          name: 'cta_url',
+          parameters: {
+            display_text: clamp(
+              requireNonEmpty(input.displayText, 'el texto del botón'),
+              WHATSAPP_LIMITS.CTA_URL_TEXT_MAX,
+              'el texto del botón',
+              warnings,
+            ),
+            url,
+          },
+        },
+      },
+    },
+    warnings,
+  };
+}
+
 export function buildTemplatePayload(input: SendTemplateInput): BuiltMessage {
   const warnings: string[] = [];
 

@@ -20,3 +20,32 @@ export function buildPublicBookingUrl(
   const base = (baseUrl || DEFAULT_PUBLIC_SITE_BASE_URL).replace(/\/+$/, '');
   return `${base}/${slug}`;
 }
+
+/**
+ * El enlace que lleva directo a elegir servicio, no a la ficha del negocio.
+ *
+ * Es a donde manda "Agendar cita" cuando el negocio eligió el enlace: quien
+ * tocó ese botón ya decidió, y dejarlo en la portada le cobra un toque más para
+ * volver a decir lo mismo. La ficha sigue siendo el enlace que el negocio
+ * comparte, porque ahí sí se viene a mirar antes de elegir.
+ */
+export function buildBookingFlowUrl(
+  slug: string | null | undefined,
+  baseUrl?: string | null,
+): string | null {
+  const page = buildPublicBookingUrl(slug, baseUrl);
+  return page && `${page}/reservar`;
+}
+
+/**
+ * El enlace que adopta los turnos de un cliente y lo lleva a verlos.
+ *
+ * No depende del negocio: los turnos son de una persona y la pantalla es la de
+ * su cuenta, así que esta dirección es del sitio y no de un local. El token va
+ * en la URL porque es lo único que puede viajar en un mensaje de WhatsApp, y no
+ * da acceso a nada por su cuenta. Ver `signForLink`.
+ */
+export function buildClaimUrl(token: string, baseUrl?: string | null): string {
+  const base = (baseUrl || DEFAULT_PUBLIC_SITE_BASE_URL).replace(/\/+$/, '');
+  return `${base}/historial/abrir?t=${encodeURIComponent(token)}`;
+}

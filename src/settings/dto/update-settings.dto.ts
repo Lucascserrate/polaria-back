@@ -13,6 +13,7 @@ import {
 import { Type } from 'class-transformer';
 import { WeeklyRangeDto } from '../../schedule/weekly-range.dto';
 import { APPOINTMENT_NOTE_MAX_LENGTH } from '../../tenants/appointment-note';
+import { BOOKING_MODES, BookingMode } from '../../tenants/booking-mode';
 import { BUSINESS_TYPES } from '../../tenants/business-type';
 import { CURRENCIES } from '../../tenants/currency';
 import { WELCOME_MESSAGE_MAX_LENGTH } from '../../conversations/welcome-menu';
@@ -169,6 +170,16 @@ export class UpdateSettingsDto {
   @IsString()
   @MaxLength(APPOINTMENT_NOTE_MAX_LENGTH)
   appointmentNote?: string | null;
+
+  /**
+   * Qué hace WhatsApp cuando alguien quiere agendar. Ver `booking-mode.ts`.
+   *
+   * Elegir el enlace sin tener página es un 400 con el motivo: la condición no
+   * se puede expresar en el tipo, así que la comprueba el servicio.
+   */
+  @IsOptional()
+  @IsIn(BOOKING_MODES)
+  bookingMode?: BookingMode;
 
   @IsOptional()
   @ValidateNested()

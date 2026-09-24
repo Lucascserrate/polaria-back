@@ -4,6 +4,7 @@ import { CustomerAppointmentsService } from './customer-appointments.service';
 import { AppointmentStatus } from '../appointments/entities/appointment.entity';
 import type { AppointmentsService } from '../appointments/appointments.service';
 import type { BookingAvailabilityService } from '../availability/booking/booking-availability.service';
+import type { BookingClaimService } from './booking-claim';
 import type { BusinessPhotosService } from '../business-photos/business-photos.service';
 import type { TenantsService } from '../tenants/tenants.service';
 import type { Appointment } from '../appointments/entities/appointment.entity';
@@ -84,6 +85,9 @@ const build = (options: {
   const cancelByCustomerAccount = jest.fn().mockResolvedValue(null);
   const editBookingByTenant = jest.fn().mockResolvedValue({ warnings: [] });
 
+  const linkToCustomerAccount = jest.fn().mockResolvedValue(1);
+  const idsFromLinkToken = jest.fn().mockReturnValue([]);
+
   const getAvailableSlots = jest.fn().mockResolvedValue([]);
   const getServiceableDates = jest.fn().mockResolvedValue([]);
 
@@ -108,6 +112,7 @@ const build = (options: {
       findByCustomerAccountAndId,
       cancelByCustomerAccount,
       editBookingByTenant,
+      linkToCustomerAccount,
     } as unknown as AppointmentsService,
     { findBySlug } as unknown as TenantsService,
     { covers } as unknown as BusinessPhotosService,
@@ -115,6 +120,7 @@ const build = (options: {
       getAvailableSlots,
       getServiceableDates,
     } as unknown as BookingAvailabilityService,
+    { idsFromLinkToken } as unknown as BookingClaimService,
   );
 
   return {
@@ -124,6 +130,8 @@ const build = (options: {
     findByCustomerAccountAndId,
     cancelByCustomerAccount,
     editBookingByTenant,
+    linkToCustomerAccount,
+    idsFromLinkToken,
     getAvailableSlots,
     getServiceableDates,
     findBySlug,

@@ -15,6 +15,7 @@ import {
   nextDates,
 } from '../availability/utils/availability.helpers';
 import { blocksAgenda } from '../appointments/entities/appointment.entity';
+import { BookingClaimService } from './booking-claim';
 import { BusinessPhotosService } from '../business-photos/business-photos.service';
 import { TenantsService } from '../tenants/tenants.service';
 import { toPrice } from '../services/quoted-price';
@@ -147,6 +148,7 @@ export class CustomerAppointmentsService {
     private readonly tenantsService: TenantsService,
     private readonly businessPhotos: BusinessPhotosService,
     private readonly bookingAvailability: BookingAvailabilityService,
+    private readonly bookingClaim: BookingClaimService,
   ) {}
 
   /**
@@ -299,6 +301,52 @@ export class CustomerAppointmentsService {
     });
 
     return this.findOne(params);
+  }
+
+  /**
+   * Adopta los turnos que nombra el token de un enlace de WhatsApp.
+   *
+   * Es el mismo mecanismo que usa el invitado de la web, con el token del
+   * enlace en lugar de la cookie del navegador: el turno lo creó WhatsApp, así
+   * que nació sin cuenta y el historial lo daría por inexistente. La
+   * comprobación de que siga sin dueño la hace la consulta, no este método.
+   *
+   * Devuelve los turnos de la cuenta que el token nombra, hayan pasado a ella
+   * recién o ya fueran suyos: lo segundo es lo que pasa al abrir el mismo
+   * enlace dos veces, y tiene que llevar al turno igual en lugar de a una
+   * pantalla de error.
+   */
+  async claimFromLink(params: {
+    accountId: string;
+    token: string;
+  }): Promise<{ appointmentIds: string[] }> {
+    const candidates = this.bookingClaim.idsFromLinkToken(params.token);
+    if (candidates.length === 0) return { appointmentIds: [] };
+
+    await this.appointmentsService.linkToCustomerAccount({
+      appointmentIds: candidates,
+      customerAccountId: params.accountId,
+    });
+
+    /*
+     * Se relee en lugar de confiar en cuántos se vincularon: lo que hace falta
+     * devolver es a cuáles puede entrar esta cuenta, y eso incluye los que ya
+     * eran suyos y excluye los que mientras tanto tomó otra.
+     */
+    const owned = await Promise.all(
+      candidates.map((appointmentId) =>
+        this.appointmentsService.findByCustomerAccountAndId({
+          customerAccountId: params.accountId,
+          appointmentId,
+        }),
+      ),
+    );
+
+    return {
+      appointmentIds: owned
+        .filter((appointment) => appointment !== null)
+        .map((appointment) => appointment.id),
+    };
   }
 
   /**

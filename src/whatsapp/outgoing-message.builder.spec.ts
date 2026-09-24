@@ -1,4 +1,5 @@
 import {
+  buildCtaUrlPayload,
   buildButtonsPayload,
   buildListPayload,
   buildTemplatePayload,
@@ -139,6 +140,89 @@ describe('buildButtonsPayload', () => {
         ],
       }),
     ).toThrow(/deben volver intactos/);
+  });
+});
+
+/**
+ * El botón que abre la página de reservas.
+ *
+ * Lo que se prueba es sobre todo lo que **no** sale: una dirección inválida o
+ * sin `https` tiene que reventar acá y no volver como un 400 genérico de Meta,
+ * porque ese error se lee en un log y el cliente mientras tanto ve un chat que
+ * no contestó.
+ */
+describe('buildCtaUrlPayload', () => {
+  const base = {
+    to: '59171000000',
+    body: 'Reservá tu turno desde acá.',
+    displayText: 'Reservar turno',
+    url: 'https://polariahq.com/royal-barber',
+  };
+
+  it('arma el mensaje con el botón y la dirección', () => {
+    const { payload } = buildCtaUrlPayload(base);
+
+    expect(payload).toMatchObject({
+      type: 'interactive',
+      interactive: {
+        type: 'cta_url',
+        body: { text: 'Reservá tu turno desde acá.' },
+        action: {
+          name: 'cta_url',
+          parameters: {
+            display_text: 'Reservar turno',
+            url: 'https://polariahq.com/royal-barber',
+          },
+        },
+      },
+    });
+  });
+
+  it('una dirección que no es una dirección no sale', () => {
+    expect(() => buildCtaUrlPayload({ ...base, url: 'royal-barber' })).toThrow(
+      WhatsAppMessageBuildError,
+    );
+  });
+
+  /* WhatsApp marca los `http` como inseguros, y el de un negocio nunca lo es. */
+  it('sólo https', () => {
+    expect(() =>
+      buildCtaUrlPayload({ ...base, url: 'http://polariahq.com/x' }),
+    ).toThrow(WhatsAppMessageBuildError);
+  });
+
+  /*
+   * En local el sitio corre en `http`. Sin esta excepción, el modo enlace no se
+   * podría probar sin desplegarlo, que es como se descubren los errores en
+   * producción.
+   */
+  it('en local admite http', () => {
+    expect(() =>
+      buildCtaUrlPayload({ ...base, url: 'http://localhost:3000/barbership' }),
+    ).not.toThrow();
+  });
+
+  it('sin dirección tampoco', () => {
+    expect(() => buildCtaUrlPayload({ ...base, url: '' })).toThrow(
+      WhatsAppMessageBuildError,
+    );
+  });
+
+  /* Veinte caracteres es el tope de Meta: se recorta con aviso, no se rechaza. */
+  it('recorta el texto del botón y lo avisa', () => {
+    const { payload, warnings } = buildCtaUrlPayload({
+      ...base,
+      displayText: 'Reservar un turno en la página del negocio',
+    });
+
+    expect(
+      (
+        payload as {
+          interactive: { action: { parameters: { display_text: string } } };
+        }
+      ).interactive.action.parameters.display_text,
+    ).toHaveLength(20);
+    expect(warnings).not.toHaveLength(0);
   });
 });
 

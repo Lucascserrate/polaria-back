@@ -43,6 +43,13 @@ export const WHATSAPP_LIMITS = {
   LIST_BODY_MAX: 4096,
   HEADER_TEXT_MAX: 60,
   FOOTER_TEXT_MAX: 60,
+  /**
+   * El texto del botón que abre un enlace.
+   *
+   * Veinte caracteres es el tope de Meta y es poco: "Reservar mi turno" entra,
+   * "Reservar un turno en la página" no. Se recorta con aviso, como el resto.
+   */
+  CTA_URL_TEXT_MAX: 20,
 } as const;
 
 export type WhatsAppCredentials = {
@@ -78,6 +85,26 @@ export type SendButtonsInput = {
   to: string;
   body: string;
   buttons: OutgoingButton[];
+  header?: string;
+  footer?: string;
+};
+
+/**
+ * Un mensaje con un botón que abre una dirección.
+ *
+ * Es el `cta_url` de Meta, y no un botón de respuesta: no vuelve nada al
+ * webhook porque no hay nada que contestar —la conversación sigue en el
+ * navegador—. Existe para no pegar una URL suelta en un párrafo, que es lo que
+ * mucha gente no reconoce como algo que se toca.
+ *
+ * Un solo botón, que es lo que admite este tipo de mensaje.
+ */
+export type SendCtaUrlInput = {
+  to: string;
+  body: string;
+  /** Lo que dice el botón. Hasta `CTA_URL_TEXT_MAX`. */
+  displayText: string;
+  url: string;
   header?: string;
   footer?: string;
 };

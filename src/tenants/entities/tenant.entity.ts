@@ -14,6 +14,7 @@ import { Conversation } from '../../conversations/entities/conversation.entity';
 import { Message } from '../../messages/entities/message.entity';
 import { BusinessHour } from '../../business_hours/entities/business_hour.entity';
 import { SubscriptionStatus } from '../../subscriptions/subscription.rules';
+import { DEFAULT_BOOKING_MODE } from '../booking-mode';
 
 /**
  * Una cuenta de Google es un negocio. El índice único es lo que sostiene esa
@@ -358,6 +359,17 @@ export class Tenant {
    */
   @Column({ type: 'varchar', length: 1000, nullable: true })
   appointmentNote!: string | null;
+
+  /**
+   * Qué hace WhatsApp cuando alguien quiere agendar: el flujo guiado o el
+   * enlace a la página. Ver `booking-mode.ts`.
+   *
+   * Se lee siempre con `bookingModeOf`, que además de traducir el texto se
+   * ocupa de una condición que la columna no puede expresar: el enlace necesita
+   * que el negocio tenga `slug`.
+   */
+  @Column({ type: 'varchar', length: 20, default: DEFAULT_BOOKING_MODE })
+  bookingMode!: string;
 
   @Column({ nullable: true })
   googleRefreshToken?: string;

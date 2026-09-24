@@ -1,6 +1,7 @@
 import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
-import { IsDateString, IsOptional, IsString } from 'class-validator';
+import { IsDateString, IsIn, IsOptional, IsString } from 'class-validator';
 import { CreateTenantDto } from './create-tenant.dto';
+import { BOOKING_MODES, BookingMode } from '../booking-mode';
 
 export class UpdateTenantDto extends PartialType(CreateTenantDto) {
   @IsOptional()
@@ -46,6 +47,11 @@ export class UpdateTenantDto extends PartialType(CreateTenantDto) {
   @IsOptional()
   @IsString()
   appointmentNote?: string | null;
+
+  /** Qué hace WhatsApp al querer agendar. Ver `booking-mode.ts`. */
+  @IsOptional()
+  @IsIn(BOOKING_MODES)
+  bookingMode?: BookingMode;
 
   @IsOptional()
   @IsString()

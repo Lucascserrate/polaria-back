@@ -51,6 +51,16 @@ import {
 } from '../whatsapp/types/outgoing-message.type';
 import { readStoredCredential } from '../whatsapp/utils/stored-credential.util';
 import { WhatsAppSenderService } from '../whatsapp/whatsapp-sender.service';
+import { BookingMode, bookingModeOf } from '../tenants/booking-mode';
+import { buildBookingFlowUrl } from '../tenants/public-booking-url';
+import {
+  APPOINTMENT_LINK_BODY,
+  APPOINTMENT_LINK_BUTTON,
+  BOOKING_LINK_BODY,
+  BOOKING_LINK_BUTTON,
+} from '../conversations/booking-link-message';
+import { BookingClaimService } from '../customer-accounts/booking-claim';
+import { buildClaimUrl } from '../tenants/public-booking-url';
 import { ConversationRecorderService } from './conversation-recorder.service';
 
 const UNSUPPORTED_MESSAGE_REPLY =
@@ -142,6 +152,7 @@ export class InboundMessageService {
     private readonly tenantsService: TenantsService,
     private readonly bookingSessionService: BookingSessionService,
     private readonly appointmentsService: AppointmentsService,
+    private readonly bookingClaim: BookingClaimService,
   ) {}
 
   async handle(params: {
@@ -916,6 +927,22 @@ export class InboundMessageService {
     const upcoming = await this.findUpcoming(tenantId, clientId);
     if (upcoming.length === 0) return false;
 
+    /*
+     * Con el negocio en modo enlace, gestionar el turno también pasa por la
+     * página: se manda el enlace en lugar de abrir el menú de reagendar y
+     * cancelar. Es la decisión de tener **un** lugar donde se gestiona, en vez
+     * de que reagendar viva en el chat y ver el detalle en la web.
+     */
+    const tenant = await this.tenantsService.findOne(tenantId);
+    if (tenant && bookingModeOf(tenant) === BookingMode.BOOKING_LINK) {
+      await this.sendAppointmentLink({
+        ...params,
+        slug: tenant.slug,
+        appointmentIds: upcoming.map((appointment) => appointment.id),
+      });
+      return true;
+    }
+
     const timezone = await this.resolveTimezone(tenantId);
     const summaries = upcoming.map(toAppointmentSummary);
 
@@ -999,6 +1026,124 @@ export class InboundMessageService {
     });
   }
 
+  /**
+   * Manda el enlace de reservas con un botón que lo abre.
+   *
+   * Un `cta_url` y no una URL suelta en el texto: mucha gente no reconoce un
+   * enlace pegado en un párrafo como algo que se toca, y este mensaje existe
+   * justamente para que lo toquen.
+   *
+   * **Si no se puede armar el enlace, no se deja al cliente sin respuesta.**
+   * `bookingModeOf` ya descarta el modo enlace sin slug, así que llegar acá sin
+   * dirección es un caso que no debería ocurrir; si ocurre, se registra y la
+   * conversación sigue en lugar de quedar muda en el paso más importante.
+   */
+  private async sendBookingLink(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversation: Conversation;
+    clientId: string;
+    to: string;
+    slug: string | null;
+  }): Promise<void> {
+    /*
+     * De `process.env` y no de `ConfigService`, igual que el guard que valida el
+     * `returnTo` del login: son los dos lugares que arman direcciones del sitio
+     * público, y conviene que lean la variable de la misma forma.
+     */
+    const url = buildBookingFlowUrl(
+      params.slug,
+      process.env.PUBLIC_SITE_BASE_URL,
+    );
+
+    if (!url) {
+      this.logger.error(
+        `Modo enlace sin dirección que mandar (tenantId=${params.tenantId}).`,
+      );
+      return;
+    }
+
+    const sent = await this.whatsAppSenderService.sendCtaUrl(
+      params.credentials,
+      {
+        to: params.to,
+        body: BOOKING_LINK_BODY,
+        displayText: BOOKING_LINK_BUTTON,
+        url,
+      },
+    );
+
+    if (!sent.ok) return;
+
+    /*
+     * Se registra el cuerpo con el enlace al final: la conversación guardada es
+     * lo que el negocio lee para entender qué pasó, y un mensaje que dice "desde
+     * acá 👇" sin el "acá" no cuenta nada.
+     */
+    await this.conversationRecorder.recordOutgoingText({
+      tenantId: params.tenantId,
+      conversationId: params.conversation.id,
+      clientId: params.clientId,
+      text: `${BOOKING_LINK_BODY}
+
+${url}`,
+      source: 'booking-link',
+    });
+  }
+
+  /**
+   * Manda el enlace para ver y gestionar los turnos que el cliente ya tiene.
+   *
+   * El enlace lleva un token que **no abre nada por sí solo**: lo único que
+   * puede hacer es que, si la persona inicia sesión, esos turnos pasen a su
+   * cuenta. Hace falta porque un turno sacado por WhatsApp nace sin cuenta, y
+   * sin esto el historial se lo daría por inexistente justo a quien vino a
+   * verlo. Ver `signForLink`.
+   *
+   * Lleva todos los turnos vigentes y no sólo el primero: adoptar uno dejaría
+   * los otros invisibles sin que nada lo explique.
+   */
+  private async sendAppointmentLink(params: {
+    tenantId: string;
+    credentials: WhatsAppCredentials;
+    conversation: Conversation;
+    clientId: string;
+    to: string;
+    slug: string | null;
+    appointmentIds: string[];
+  }): Promise<void> {
+    const url = buildClaimUrl(
+      this.bookingClaim.signForLink(params.appointmentIds),
+      process.env.PUBLIC_SITE_BASE_URL,
+    );
+
+    const sent = await this.whatsAppSenderService.sendCtaUrl(
+      params.credentials,
+      {
+        to: params.to,
+        body: APPOINTMENT_LINK_BODY,
+        displayText: APPOINTMENT_LINK_BUTTON,
+        url,
+      },
+    );
+
+    if (!sent.ok) return;
+
+    /*
+     * El enlace **no** se guarda en la conversación, a diferencia del de
+     * reservar: ese es el mismo para todos y sirve para entender qué se le
+     * mandó al cliente; éste lleva un token de una persona, y el historial de
+     * conversaciones lo lee el negocio.
+     */
+    await this.conversationRecorder.recordOutgoingText({
+      tenantId: params.tenantId,
+      conversationId: params.conversation.id,
+      clientId: params.clientId,
+      text: APPOINTMENT_LINK_BODY,
+      source: 'appointment-link',
+    });
+  }
+
   private async resolveTimezone(tenantId: string): Promise<string> {
     const tenant = await this.tenantsService.findOne(tenantId);
     return tenant?.timezone ?? 'America/La_Paz';
@@ -1038,6 +1183,29 @@ export class InboundMessageService {
     }
 
     const tenant = await this.tenantsService.findOne(tenantId);
+
+    /*
+     * El negocio que eligió el enlace no abre el flujo guiado: manda a su
+     * página y la conversación queda ahí.
+     *
+     * Va **después** de detectar turnos existentes y antes de todo lo demás, y
+     * en esta función y no en cada entrada: las cuatro formas de empezar a
+     * reservar —el botón del menú, escribir "quiero un turno", "sacar otro
+     * turno" y reagendar— pasan por acá, y consultarlo en cada una sería tener
+     * cuatro lugares donde el modo puede quedar sin mirar.
+     */
+    if (tenant && bookingModeOf(tenant) === BookingMode.BOOKING_LINK) {
+      await this.sendBookingLink({
+        tenantId,
+        credentials,
+        conversation,
+        clientId,
+        to,
+        slug: tenant.slug,
+      });
+      return;
+    }
+
     const flowId = readStoredCredential(tenant?.whatsappFlowId);
 
     const prompt = await this.bookingFlowService.start({

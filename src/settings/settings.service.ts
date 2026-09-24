@@ -36,6 +36,7 @@ import {
   APPOINTMENT_NOTE_MAX_LENGTH,
   normalizeAppointmentNote,
 } from '../tenants/appointment-note';
+import { BookingMode, bookingModeOf } from '../tenants/booking-mode';
 import { buildPublicBookingUrl } from '../tenants/public-booking-url';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { tenantAssetPath } from '../cloudinary/asset-path';
@@ -115,6 +116,15 @@ type SettingsResponse = {
     text: string | null;
     maxLength: number;
   };
+  /**
+   * Qué hace WhatsApp cuando alguien quiere agendar. Ver `booking-mode.ts`.
+   *
+   * Lo que viaja es el modo **vigente** y no la columna: sin `slug` no hay
+   * enlace, así que un negocio sin página lee `GUIDED_CHAT` aunque la columna
+   * diga otra cosa. El panel dibuja lo que de verdad está pasando, no lo que
+   * alguna vez se guardó.
+   */
+  bookingMode: BookingMode;
   /** Ver `BUSINESS_TYPES`. `null` mientras la configuración inicial no lo cargó. */
   businessType: string | null;
   timezone: string;
@@ -354,6 +364,7 @@ export class SettingsService {
         text: tenant.appointmentNote,
         maxLength: APPOINTMENT_NOTE_MAX_LENGTH,
       },
+      bookingMode: bookingModeOf(tenant),
       businessType: tenant.businessType ?? null,
       timezone: tenant.timezone,
       dialCode: dialCodeForTimeZone(tenant.timezone),
@@ -558,6 +569,30 @@ export class SettingsService {
     if (dto.appointmentNote !== undefined) {
       await this.tenantsService.update(tenantId, {
         appointmentNote: normalizeAppointmentNote(dto.appointmentNote),
+      });
+    }
+
+    /*
+     * El enlace necesita que el negocio tenga página, y el slug no se edita: se
+     * asigna al guardar el nombre real. Por eso el rechazo dice qué falta y
+     * dónde se resuelve, en lugar de un "valor inválido" que dejaría al negocio
+     * buscando un campo que no existe.
+     *
+     * Se comprueba acá y no sólo al enviar: dejar guardar un modo que no se
+     * puede aplicar haría que el panel dijera una cosa y WhatsApp hiciera otra.
+     */
+    if (
+      dto.bookingMode !== undefined &&
+      dto.bookingMode !== tenant.bookingMode
+    ) {
+      if (dto.bookingMode === BookingMode.BOOKING_LINK && !tenant.slug) {
+        throw new BadRequestException(
+          'Para que tus clientes agenden desde el enlace, tu negocio necesita tener página. Guardá el nombre del negocio y el enlace se crea solo.',
+        );
+      }
+
+      await this.tenantsService.update(tenantId, {
+        bookingMode: dto.bookingMode,
       });
     }
 

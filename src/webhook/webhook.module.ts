@@ -13,6 +13,7 @@ import { TemplateStatusService } from './template-status.service';
 import { InboundMessageService } from './inbound-message.service';
 import { WebhookController } from './webhook.controller';
 import { WebhookService } from './webhook.service';
+import { CustomerAccountsModule } from '../customer-accounts/customer-accounts.module';
 
 /**
  * Borde de entrada de WhatsApp: verificación, parseo y reparto de los mensajes
@@ -27,6 +28,7 @@ import { WebhookService } from './webhook.service';
     MessagesModule,
     ConversationsModule,
     AppointmentsModule,
+    CustomerAccountsModule,
   ],
   controllers: [WebhookController],
   providers: [

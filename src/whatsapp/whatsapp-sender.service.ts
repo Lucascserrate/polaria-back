@@ -5,6 +5,7 @@ import { currentImpersonation } from '../auth/impersonation';
 
 import {
   buildButtonsPayload,
+  buildCtaUrlPayload,
   buildFlowPayload,
   buildListPayload,
   buildTemplatePayload,
@@ -13,6 +14,7 @@ import {
 } from './outgoing-message.builder';
 import {
   type SendButtonsInput,
+  type SendCtaUrlInput,
   type SendFlowInput,
   type SendListInput,
   type SendTemplateInput,
@@ -61,6 +63,24 @@ export class WhatsAppSenderService {
       input.to,
       'buttons',
       buildButtonsPayload(input),
+    );
+  }
+
+  /**
+   * Un mensaje con un botón que abre una dirección.
+   *
+   * No vuelve nada al webhook: el botón sale de WhatsApp, así que la
+   * conversación queda esperando lo que la persona escriba después.
+   */
+  sendCtaUrl(
+    credentials: WhatsAppCredentials,
+    input: SendCtaUrlInput,
+  ): Promise<SendResult> {
+    return this.send(
+      credentials,
+      input.to,
+      'cta_url',
+      buildCtaUrlPayload(input),
     );
   }
 

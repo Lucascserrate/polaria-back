@@ -37,6 +37,20 @@ export const BOOKING_CLAIM_COOKIE = 'polariaBooking';
 const CLAIM_TTL_SECONDS = 60 * 60;
 
 /**
+ * Una semana para el token que viaja en un enlace de WhatsApp.
+ *
+ * Es otra medida porque es otra situación: la cookie acompaña a alguien que
+ * está mirando la pantalla, y el enlace queda en un chat que se abre cuando la
+ * persona se acuerda. Una hora ahí sería un enlace roto la mayoría de las veces.
+ *
+ * Que dure más no lo hace más peligroso, y esa es la diferencia con un enlace
+ * que da acceso: **este token no muestra ni cancela nada**. Lo único que puede
+ * hacer es ofrecer que un turno sin dueño pase a la cuenta de quien inicie
+ * sesión, y sólo mientras siga sin dueño.
+ */
+const LINK_CLAIM_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
  * Cuántos turnos sin dueño recuerda el navegador.
  *
  * Más de uno porque reservar dos veces seguidas sin cuenta es normal —dos
@@ -55,6 +69,19 @@ const MAX_CLAIMS = 5;
 const claimSecret = (): string =>
   createHmac('sha256', process.env.SECRET_JWT ?? '')
     .update('polaria:booking-claim:v1')
+    .digest('hex');
+
+/**
+ * Dominio de firma **distinto** para el token que viaja en una URL.
+ *
+ * Son dos cosas con vidas distintas —una hora en una cookie, una semana en un
+ * chat— y separar los secretos hace que no puedan intercambiarse: una cookie
+ * copiada a un enlace no vale, y al revés tampoco. Es la misma razón por la que
+ * la sesión del cliente no vale en el guard del panel.
+ */
+const linkClaimSecret = (): string =>
+  createHmac('sha256', process.env.SECRET_JWT ?? '')
+    .update('polaria:booking-claim-link:v1')
     .digest('hex');
 
 /** Lo único que lleva: qué turnos creó este navegador. */
@@ -108,6 +135,47 @@ export class BookingClaimService {
     const ids = this.read(req);
     this.clear(res);
     return ids;
+  }
+
+  /**
+   * El token que viaja en el enlace que manda WhatsApp.
+   *
+   * **No da acceso a nada.** No muestra el turno, no lo cancela y no abre
+   * sesión: lo único que permite es que, si quien lo abre inicia sesión con
+   * Google, esos turnos pasen a su cuenta. Sin iniciar sesión no hace nada, que
+   * es exactamente lo que se decidió cuando se descartó el enlace con acceso.
+   *
+   * Lleva **todos** los turnos vigentes y no sólo el que se va a abrir: quien
+   * escribe por WhatsApp suele tener más de uno, y adoptar uno solo dejaría los
+   * otros invisibles en su historial sin que nada lo explique.
+   */
+  signForLink(appointmentIds: string[]): string {
+    return this.jwtService.sign(
+      { ids: appointmentIds.slice(0, MAX_CLAIMS) } satisfies ClaimPayload,
+      { secret: linkClaimSecret(), expiresIn: LINK_CLAIM_TTL_SECONDS },
+    );
+  }
+
+  /**
+   * Los turnos que nombra un token de enlace, o vacío.
+   *
+   * Vencido, manipulado o firmado con otro secreto valen todos lo mismo: nada
+   * que reclamar. No se distingue el motivo porque quien lo abre no puede hacer
+   * nada distinto con la respuesta.
+   */
+  idsFromLinkToken(token: string): string[] {
+    try {
+      const payload = this.jwtService.verify<ClaimPayload>(token, {
+        secret: linkClaimSecret(),
+      });
+
+      return Array.isArray(payload.ids)
+        ? payload.ids.filter((id): id is string => typeof id === 'string')
+        : [];
+    } catch {
+      this.logger.debug('Token de enlace ilegible: no reclama nada.');
+      return [];
+    }
   }
 
   /** Borra la cookie con el mismo dominio con el que se puso. */

@@ -18,6 +18,7 @@ import {
   CustomerAppointmentsQueryDto,
   CustomerSlotsQueryDto,
 } from './dto/customer-appointments-query.dto';
+import { ClaimAppointmentsDto } from './dto/claim-appointments.dto';
 import { RescheduleAppointmentDto } from './dto/reschedule-appointment.dto';
 
 /**
@@ -55,6 +56,25 @@ export class CustomerAppointmentsController {
       accountId,
       businessSlug: query.business,
     });
+  }
+
+  /**
+   * Adopta los turnos que nombra el token de un enlace.
+   *
+   * Va **antes** que `:id` por lo mismo que `past`: Nest resuelve por orden de
+   * declaración, y al revés `claim` entraría como si fuera el id de un turno.
+   *
+   * Pide sesión como todo lo de acá, y ahí está la diferencia con un enlace que
+   * da acceso: el token no abre nada por su cuenta, sólo dice qué turnos puede
+   * adoptar quien ya demostró quién es. Ver `signForLink`.
+   */
+  @Post('claim')
+  @HttpCode(HttpStatus.OK)
+  claim(
+    @CustomerAccountId() accountId: string,
+    @Body() body: ClaimAppointmentsDto,
+  ) {
+    return this.appointments.claimFromLink({ accountId, token: body.token });
   }
 
   /**
